@@ -2,6 +2,9 @@ name: ci
 
 # Sanity-check builds and tests on every push / PR. Intentionally cheap
 # (no docker, no example rendering) so it runs fast and gates merges.
+#
+# `libghostty-vt` and `libghostty-vt-sys` are pulled from crates.io – no
+# sibling git checkout needed.
 
 on:
   push:
@@ -22,22 +25,13 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ZIG_VERSION: 0.15.2
-      LIBGHOSTTY_RS_REPO: https://github.com/Uzaaft/libghostty-rs.git
-      LIBGHOSTTY_RS_REF: 5ac47e9eb166add2c00c432bc65c279133629712
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          path: evp
-
-      - name: Checkout libghostty-rs (sibling)
-        # Cargo.toml has a path dep on `../libghostty-rs/...`; clone it
-        # next to the evp checkout so the relative path resolves.
-        run: |
-          git clone "$LIBGHOSTTY_RS_REPO" libghostty-rs
-          git -C libghostty-rs checkout "$LIBGHOSTTY_RS_REF"
 
       - name: Install Zig ${{ env.ZIG_VERSION }}
+        # libghostty-vt-sys's build.rs invokes `zig build` to compile the
+        # vendored Ghostty source; Zig 0.15.x must be on PATH.
         run: |
           set -eux
           tarball="zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
@@ -51,15 +45,11 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: evp
 
       - name: cargo build
-        working-directory: evp
         run: cargo build --workspace
 
       - name: cargo test
-        working-directory: evp
         # Tests fork /bin/sh in a PTY; serialise to keep PTY allocation
         # under control on small CI runners.
         run: cargo test --workspace -- --test-threads=1

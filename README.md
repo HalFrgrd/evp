@@ -14,34 +14,34 @@ the resulting `Recording` to an animated artifact.
 | --- | --- |
 | **Architecture deep-dive** | [architecture.md](architecture.md) |
 | **Examples** | [examples/](examples/) |
-| **Docker image** | `ghcr.io/uzaaft/evp:latest` |
+| **Docker image** | `ghcr.io/halfrgrd/evp:latest` |
 | **Pre-rendered example GIFs** | `assets` release (linked below) |
 
 ## Examples
 
 These GIFs are produced by the [`examples`](.github/workflows/examples.yml)
 workflow on every push to `main` and uploaded as assets on the rolling
-[`assets` release](https://github.com/Uzaaft/evp/releases/tag/assets).
+[`assets` release](https://github.com/HalFrgrd/evp/releases/tag/assets).
 
 ### `hello` — bare-minimum recording
 
-[![hello.gif](https://github.com/Uzaaft/evp/releases/download/assets/hello.gif)](examples/hello.tape)
+[![hello.gif](https://github.com/HalFrgrd/evp/releases/download/assets/hello.gif)](examples/hello.tape)
 
 ### `shell-tour` — multi-command session paced with `Wait`
 
-[![shell-tour.gif](https://github.com/Uzaaft/evp/releases/download/assets/shell-tour.gif)](examples/shell-tour.tape)
+[![shell-tour.gif](https://github.com/HalFrgrd/evp/releases/download/assets/shell-tour.gif)](examples/shell-tour.tape)
 
 ### `keys` — modifiers + line editing
 
-[![keys.gif](https://github.com/Uzaaft/evp/releases/download/assets/keys.gif)](examples/keys.tape)
+[![keys.gif](https://github.com/HalFrgrd/evp/releases/download/assets/keys.gif)](examples/keys.tape)
 
 ### `colors` — ANSI SGR colour table
 
-[![colors.gif](https://github.com/Uzaaft/evp/releases/download/assets/colors.gif)](examples/colors.tape)
+[![colors.gif](https://github.com/HalFrgrd/evp/releases/download/assets/colors.gif)](examples/colors.tape)
 
 ### `progress` — in-place line rewrites
 
-[![progress.gif](https://github.com/Uzaaft/evp/releases/download/assets/progress.gif)](examples/progress.tape)
+[![progress.gif](https://github.com/HalFrgrd/evp/releases/download/assets/progress.gif)](examples/progress.tape)
 
 ## Quick start
 
@@ -53,7 +53,7 @@ your host.
 
 ```bash
 docker run --rm -v "$PWD:/work" \
-    ghcr.io/uzaaft/evp:latest \
+    ghcr.io/halfrgrd/evp:latest \
     examples/hello.tape -o hello.gif
 ```
 
@@ -63,9 +63,10 @@ You will need:
 
 - a Rust toolchain,
 - [Zig 0.15.x](https://ziglang.org/download/) on `$PATH` (libghostty's
-  build system),
-- the sibling `libghostty-rs` checkout next to your `evp` clone (the
-  Cargo manifest declares `path = "../libghostty-rs/..."`).
+  build system).
+
+Both `libghostty-vt` and `libghostty-vt-sys` are pulled directly from
+the upstream git repo by Cargo — there's no sibling repo to clone.
 
 ```bash
 cargo build --release
@@ -119,7 +120,7 @@ The Docker image is the easiest path:
 - name: Render terminal demo
   run: |
     docker run --rm -v "$PWD:/work" \
-      ghcr.io/uzaaft/evp:latest \
+      ghcr.io/halfrgrd/evp:latest \
       docs/demo.tape --output docs/demo.gif
 - name: Commit the gif
   uses: stefanzweifel/git-auto-commit-action@v5
