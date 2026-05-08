@@ -1,0 +1,172 @@
+//! AST types for VHS-format `.tape` scripts.
+//!
+//! A script is parsed into two collections:
+//!   - [`Settings`] : configuration applied before the recording starts
+//!     (window geometry, font, theme, default typing speed, framerate, …).
+//!   - A list of [`Event`]s : the timeline of actions executed by the runner
+//!     (typing, key presses, sleeps, waits, screenshots, …).
+//!
+//! Time on events is left RELATIVE here (per-event duration / typing-speed
+//! deltas). The runner converts the timeline to absolute timestamps once
+//! settings such as `TypingSpeed` and `PlaybackSpeed` are known.
+
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+
+/// Top-level parsed script.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Script {
+    /// Output destination (`Output foo.gif`). Multiple outputs are not yet
+    /// supported – the last one wins, mirroring vhs's behaviour.
+    pub outputs: Vec<String>,
+    /// Aggregated `Set` directives.
+    pub settings: Settings,
+    /// Environment variables for the spawned shell.
+    pub env: Vec<(String, String)>,
+    /// Programs that must exist on `$PATH`. We don't enforce them yet but
+    /// keep them around for later.
+    pub require: Vec<String>,
+    /// Ordered list of timeline events.
+    pub events: Vec<Event>,
+}
+
+/// All `Set` directives. Defaults match vhs where possible.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Settings {
+    pub shell: Option<String>,
+    pub font_family: Option<String>,
+    pub font_size: f32,
+    pub width: u32,        // pixels
+    pub height: u32,       // pixels
+    pub cols: Option<u16>, // explicit override
+    pub rows: Option<u16>, // explicit override
+    pub padding: u32,
+    pub line_height: f32,
+    pub letter_spacing: f32,
+    pub framerate: u32,
+    pub playback_speed: f32,
+    pub typing_speed: Duration,
+    pub theme: Option<String>,
+    pub cursor_blink: bool,
+    pub wait_timeout: Duration,
+    pub wait_pattern: String,
+    pub loop_offset_pct: f32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        // Defaults mirror vhs's defaults from `vhs.go` / `style.go`.
+        Self {
+            shell: None,
+            font_family: None,
+            font_size: 22.0,
+            width: 1200,
+            height: 600,
+            cols: None,
+            rows: None,
+            padding: 60,
+            line_height: 1.0,
+            letter_spacing: 1.0,
+            framerate: 50,
+            playback_speed: 1.0,
+            typing_speed: Duration::from_millis(50),
+            theme: None,
+            cursor_blink: true,
+            wait_timeout: Duration::from_secs(15),
+            wait_pattern: ">$".to_string(),
+            loop_offset_pct: 0.0,
+        }
+    }
+}
+
+/// A single timeline event.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Event {
+    /// Type a literal string. `delay` is the per-character delay (vhs
+    /// semantics: `Type@100ms "hi"` => 100ms between each `h` and `i`).
+    Type { text: String, delay: Duration },
+    /// Sleep for `duration` without sending input.
+    Sleep(Duration),
+    /// Send a single key press, optionally repeated. `delay` is the gap
+    /// between successive presses when `count > 1`.
+    Key {
+        key: KeySpec,
+        count: u32,
+        delay: Duration,
+    },
+    /// Wait for a regex to appear on the last line / full screen, with a
+    /// per-event timeout.
+    Wait {
+        scope: WaitScope,
+        timeout: Duration,
+        pattern: String,
+    },
+    /// Capture a still snapshot to `path`. (Captured by the runner via the
+    /// recording pipeline, then exported separately.)
+    Screenshot(String),
+    /// Hide subsequent commands from the recording until [`Event::Show`].
+    Hide,
+    /// Resume recording after a [`Event::Hide`].
+    Show,
+}
+
+/// Scope for `Wait`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum WaitScope {
+    /// Last visible line.
+    Line,
+    /// Full visible screen.
+    Screen,
+}
+
+/// A logical key press (key + modifier set).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeySpec {
+    pub key: NamedKey,
+    pub mods: ModSet,
+}
+
+/// All named keys vhs understands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum NamedKey {
+    Enter,
+    Escape,
+    Tab,
+    Backspace,
+    Delete,
+    Insert,
+    Space,
+    Up,
+    Down,
+    Left,
+    Right,
+    PageUp,
+    PageDown,
+    Home,
+    End,
+    /// `ScrollUp` / `ScrollDown` – we model them as keys for simplicity even
+    /// though vhs implements them as multi-frame scrolls. The runner can
+    /// remap these to mouse wheel events later.
+    ScrollUp,
+    ScrollDown,
+    /// A single literal character (e.g. the `c` in `Ctrl+C`).
+    Char(char),
+}
+
+/// Modifier set for a key press.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModSet {
+    pub ctrl: bool,
+    pub alt: bool,
+    pub shift: bool,
+}
+
+impl ModSet {
+    pub const NONE: Self = Self { ctrl: false, alt: false, shift: false };
+
+    pub fn any(&self) -> bool {
+        self.ctrl || self.alt || self.shift
+    }
+}

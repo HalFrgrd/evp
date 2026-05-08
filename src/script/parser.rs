@@ -1,0 +1,411 @@
+//! VHS `.tape` script tokenizer + parser.
+//!
+//! The grammar is line-oriented and small enough that a hand-rolled parser
+//! is much simpler than dragging in `nom`/`pest`. We split each non-blank
+//! line into tokens (whitespace separated, with `"…"` / `'…'` / `` `…` ``
+//! quoted strings preserved verbatim) then dispatch on the first token.
+
+use std::time::Duration;
+
+use anyhow::{Context, Result, anyhow, bail};
+
+use super::ast::{Event, KeySpec, ModSet, NamedKey, Script, Settings, WaitScope};
+
+/// Parse a complete script source.
+pub fn parse(src: &str) -> Result<Script> {
+    let mut script = Script::default();
+    for (lineno, raw) in src.lines().enumerate() {
+        let line = strip_comment(raw).trim();
+        if line.is_empty() {
+            continue;
+        }
+        parse_line(line, &mut script)
+            .with_context(|| format!("line {}: `{}`", lineno + 1, raw))?;
+    }
+    Ok(script)
+}
+
+fn strip_comment(s: &str) -> &str {
+    // Comments are `#` to end-of-line, but only outside of quoted strings.
+    let bytes = s.as_bytes();
+    let mut quote: Option<u8> = None;
+    for (i, &b) in bytes.iter().enumerate() {
+        match quote {
+            Some(q) if b == q => quote = None,
+            Some(_) => {}
+            None => match b {
+                b'"' | b'\'' | b'`' => quote = Some(b),
+                b'#' => return &s[..i],
+                _ => {}
+            },
+        }
+    }
+    s
+}
+
+/// Tokenize a single line. Quoted strings keep their delimiters so the
+/// caller can tell `"foo"` apart from the bare identifier `foo`.
+fn tokenize(line: &str) -> Result<Vec<String>> {
+    let mut out = Vec::new();
+    let mut chars = line.chars().peekable();
+    while let Some(&c) = chars.peek() {
+        if c.is_whitespace() {
+            chars.next();
+            continue;
+        }
+        if matches!(c, '"' | '\'' | '`') {
+            let quote = c;
+            chars.next();
+            let mut s = String::from(quote);
+            let mut closed = false;
+            while let Some(c) = chars.next() {
+                s.push(c);
+                if c == quote {
+                    closed = true;
+                    break;
+                }
+                if c == '\\' && let Some(&next) = chars.peek() {
+                    s.push(next);
+                    chars.next();
+                }
+            }
+            if !closed {
+                bail!("unterminated string literal");
+            }
+            out.push(s);
+        } else {
+            let mut s = String::new();
+            while let Some(&c) = chars.peek() {
+                if c.is_whitespace() {
+                    break;
+                }
+                s.push(c);
+                chars.next();
+            }
+            out.push(s);
+        }
+    }
+    Ok(out)
+}
+
+fn parse_line(line: &str, script: &mut Script) -> Result<()> {
+    let tokens = tokenize(line)?;
+    if tokens.is_empty() {
+        return Ok(());
+    }
+    let head = tokens[0].as_str();
+    let rest = &tokens[1..];
+
+    match head {
+        "Output" => {
+            let path = rest
+                .first()
+                .map(|t| unquote(t).to_string())
+                .ok_or_else(|| anyhow!("Output requires a path"))?;
+            script.outputs.push(path);
+        }
+        "Set" => apply_set(rest, &mut script.settings)?,
+        "Env" => {
+            let (k, v) = (
+                rest.first().ok_or_else(|| anyhow!("Env KEY missing"))?,
+                rest.get(1).ok_or_else(|| anyhow!("Env value missing"))?,
+            );
+            script
+                .env
+                .push((unquote(k).to_string(), unquote(v).to_string()));
+        }
+        "Require" => {
+            for t in rest {
+                script.require.push(unquote(t).to_string());
+            }
+        }
+        "Sleep" => {
+            let d = rest
+                .first()
+                .ok_or_else(|| anyhow!("Sleep needs a duration"))?;
+            script.events.push(Event::Sleep(parse_duration(d)?));
+        }
+        "Hide" => script.events.push(Event::Hide),
+        "Show" => script.events.push(Event::Show),
+        "Screenshot" => {
+            let path = rest
+                .first()
+                .map(|t| unquote(t).to_string())
+                .ok_or_else(|| anyhow!("Screenshot needs a path"))?;
+            script.events.push(Event::Screenshot(path));
+        }
+        "Wait" => script.events.push(parse_wait(rest, &script.settings)?),
+        "Source" => bail!("`Source` is not supported yet"),
+        "Copy" | "Paste" => bail!("clipboard commands are not supported yet"),
+        // `Type[@duration] "text" ["text" ...]`
+        h if h == "Type" || h.starts_with("Type@") => {
+            let delay = parse_at_duration(h, "Type", script.settings.typing_speed)?;
+            if rest.is_empty() {
+                bail!("Type requires at least one quoted string");
+            }
+            for t in rest {
+                let text = unquote_required(t)?;
+                script.events.push(Event::Type {
+                    text: text.to_string(),
+                    delay,
+                });
+            }
+        }
+        // Anything else is treated as a key press, possibly with `@delay`
+        // and a trailing repeat count.
+        _ => script.events.push(parse_key_event(head, rest)?),
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Set
+// ---------------------------------------------------------------------------
+
+fn apply_set(rest: &[String], s: &mut Settings) -> Result<()> {
+    let key = rest
+        .first()
+        .ok_or_else(|| anyhow!("Set requires a key"))?
+        .as_str();
+    let val = rest
+        .get(1)
+        .map(|t| unquote(t).to_string())
+        .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+    match key {
+        "Shell" => s.shell = Some(val),
+        "FontFamily" => s.font_family = Some(val),
+        "FontSize" => s.font_size = val.parse()?,
+        "Width" => s.width = val.parse()?,
+        "Height" => s.height = val.parse()?,
+        // vhs has no native cell-grid setting; we expose them for convenience.
+        "Cols" | "Columns" => s.cols = Some(val.parse()?),
+        "Rows" => s.rows = Some(val.parse()?),
+        "Padding" => s.padding = val.parse()?,
+        "LineHeight" => s.line_height = val.parse()?,
+        "LetterSpacing" => s.letter_spacing = val.parse()?,
+        "Framerate" | "FrameRate" | "FPS" => s.framerate = val.parse()?,
+        "PlaybackSpeed" => s.playback_speed = val.parse()?,
+        "TypingSpeed" => s.typing_speed = parse_duration(&val)?,
+        "Theme" => s.theme = Some(val),
+        "CursorBlink" => s.cursor_blink = parse_bool(&val)?,
+        "WaitTimeout" => s.wait_timeout = parse_duration(&val)?,
+        "WaitPattern" => s.wait_pattern = val,
+        "LoopOffset" => {
+            let trimmed = val.trim_end_matches('%');
+            s.loop_offset_pct = trimmed.parse()?;
+        }
+        // Cosmetic settings we accept but don't act on yet.
+        "MarginFill" | "Margin" | "WindowBar" | "WindowBarSize" | "BorderRadius" => {}
+        other => bail!("unknown Set key: {other}"),
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Wait
+// ---------------------------------------------------------------------------
+
+fn parse_wait(tokens: &[String], settings: &Settings) -> Result<Event> {
+    let mut scope = WaitScope::Line;
+    let mut timeout = settings.wait_timeout;
+    let mut pattern = settings.wait_pattern.clone();
+    for tok in tokens {
+        match tok.as_str() {
+            "Line" => scope = WaitScope::Line,
+            "Screen" => scope = WaitScope::Screen,
+            t if let Some(d) = t.strip_prefix('@') => timeout = parse_duration(d)?,
+            t if t.starts_with('/') && t.ends_with('/') && t.len() >= 2 => {
+                pattern = t[1..t.len() - 1].to_string();
+            }
+            other => bail!("unexpected token in Wait: `{other}`"),
+        }
+    }
+    Ok(Event::Wait {
+        scope,
+        timeout,
+        pattern,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Key event parsing (`Enter`, `Ctrl+C`, `Down@50ms 5`, …)
+// ---------------------------------------------------------------------------
+
+fn parse_key_event(head: &str, rest: &[String]) -> Result<Event> {
+    // Split optional `@duration` off the head.
+    let (name_part, delay) = match head.split_once('@') {
+        Some((name, dur)) => (name, parse_duration(dur)?),
+        None => (head, Duration::ZERO),
+    };
+    let key = parse_key_spec(name_part)?;
+
+    // Trailing token (if any) is the repeat count.
+    let count = match rest.first() {
+        Some(t) => t
+            .parse::<u32>()
+            .with_context(|| format!("invalid repeat count `{t}`"))?,
+        None => 1,
+    };
+    Ok(Event::Key { key, count, delay })
+}
+
+/// Parse `Ctrl+Shift+Tab` / `Alt+x` / `Enter` into a [`KeySpec`].
+fn parse_key_spec(s: &str) -> Result<KeySpec> {
+    let mut mods = ModSet::default();
+    let mut last = "";
+    for part in s.split('+') {
+        match part {
+            "Ctrl" | "Control" => mods.ctrl = true,
+            "Alt" | "Option" => mods.alt = true,
+            "Shift" => mods.shift = true,
+            _ => last = part,
+        }
+    }
+    if last.is_empty() {
+        bail!("missing key name in `{s}`");
+    }
+    let key = match last {
+        "Enter" | "Return" => NamedKey::Enter,
+        "Escape" | "Esc" => NamedKey::Escape,
+        "Tab" => NamedKey::Tab,
+        "Backspace" => NamedKey::Backspace,
+        "Delete" => NamedKey::Delete,
+        "Insert" => NamedKey::Insert,
+        "Space" => NamedKey::Space,
+        "Up" => NamedKey::Up,
+        "Down" => NamedKey::Down,
+        "Left" => NamedKey::Left,
+        "Right" => NamedKey::Right,
+        "PageUp" => NamedKey::PageUp,
+        "PageDown" => NamedKey::PageDown,
+        "Home" => NamedKey::Home,
+        "End" => NamedKey::End,
+        "ScrollUp" => NamedKey::ScrollUp,
+        "ScrollDown" => NamedKey::ScrollDown,
+        // Single character (e.g. `C` in `Ctrl+C`). We keep the character
+        // verbatim – translation to the right libghostty `Key` happens in
+        // the `keys` module.
+        other => {
+            let mut chars = other.chars();
+            let c = chars
+                .next()
+                .ok_or_else(|| anyhow!("empty key in `{s}`"))?;
+            if chars.next().is_some() {
+                bail!("unknown key name `{other}`");
+            }
+            NamedKey::Char(c)
+        }
+    };
+    Ok(KeySpec { key, mods })
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn parse_at_duration(head: &str, prefix: &str, default: Duration) -> Result<Duration> {
+    match head.strip_prefix(prefix).and_then(|s| s.strip_prefix('@')) {
+        Some(d) => parse_duration(d),
+        None => Ok(default),
+    }
+}
+
+/// Parse vhs durations: `1s`, `500ms`, `2m`, `0.5s`. Bare numbers are seconds.
+pub fn parse_duration(s: &str) -> Result<Duration> {
+    let s = s.trim();
+    let (num_str, unit) = if let Some(rest) = s.strip_suffix("ms") {
+        (rest, "ms")
+    } else if let Some(rest) = s.strip_suffix('s') {
+        (rest, "s")
+    } else if let Some(rest) = s.strip_suffix('m') {
+        (rest, "m")
+    } else {
+        (s, "s")
+    };
+    let n: f64 = num_str
+        .parse()
+        .with_context(|| format!("invalid duration `{s}`"))?;
+    let secs = match unit {
+        "ms" => n / 1000.0,
+        "s" => n,
+        "m" => n * 60.0,
+        _ => unreachable!(),
+    };
+    Ok(Duration::from_secs_f64(secs))
+}
+
+fn parse_bool(s: &str) -> Result<bool> {
+    match s.to_ascii_lowercase().as_str() {
+        "true" | "yes" | "1" | "on" => Ok(true),
+        "false" | "no" | "0" | "off" => Ok(false),
+        _ => bail!("invalid boolean `{s}`"),
+    }
+}
+
+/// Strip surrounding quotes if present (no escape processing).
+fn unquote(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    if bytes.len() >= 2 {
+        let first = bytes[0];
+        let last = *bytes.last().unwrap();
+        if first == last && matches!(first, b'"' | b'\'' | b'`') {
+            return &s[1..s.len() - 1];
+        }
+    }
+    s
+}
+
+fn unquote_required(s: &str) -> Result<&str> {
+    let bytes = s.as_bytes();
+    if bytes.len() < 2 || bytes[0] != *bytes.last().unwrap() || !matches!(bytes[0], b'"' | b'\'' | b'`')
+    {
+        bail!("expected quoted string, got `{s}`");
+    }
+    Ok(&s[1..s.len() - 1])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_basic_script() {
+        let src = r#"
+            # leading comment
+            Output out.gif
+            Set FontSize 18
+            Set TypingSpeed 30ms
+            Type "hello"
+            Sleep 500ms
+            Enter
+            Ctrl+C
+            Down@20ms 5
+        "#;
+        let s = parse(src).unwrap();
+        assert_eq!(s.outputs, vec!["out.gif"]);
+        assert_eq!(s.settings.font_size, 18.0);
+        assert_eq!(s.events.len(), 5);
+        match &s.events[0] {
+            Event::Type { text, delay } => {
+                assert_eq!(text, "hello");
+                assert_eq!(*delay, Duration::from_millis(30));
+            }
+            _ => panic!(),
+        }
+        match &s.events[3] {
+            Event::Key { key, .. } => {
+                assert!(key.mods.ctrl);
+                assert_eq!(key.key, NamedKey::Char('C'));
+            }
+            _ => panic!(),
+        }
+        match &s.events[4] {
+            Event::Key { key, count, delay } => {
+                assert_eq!(key.key, NamedKey::Down);
+                assert_eq!(*count, 5);
+                assert_eq!(*delay, Duration::from_millis(20));
+            }
+            _ => panic!(),
+        }
+    }
+}

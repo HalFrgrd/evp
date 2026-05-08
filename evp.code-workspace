@@ -1,0 +1,18 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../vhs"
+		},
+		{
+			"path": "../libghostty-rs"
+		}
+	],
+	"settings": {
+		"chat.tools.terminal.autoApprove": {
+			"cargo check": true
+		}
+	}
+}
