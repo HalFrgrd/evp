@@ -5,6 +5,8 @@
 //! line into tokens (whitespace separated, with `"…"` / `'…'` / `` `…` ``
 //! quoted strings preserved verbatim) then dispatch on the first token.
 
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -12,16 +14,51 @@ use anyhow::{Context, Result, anyhow, bail};
 use super::ast::{Event, KeySpec, ModSet, NamedKey, Script, Settings, WaitScope};
 
 /// Parse a complete script source.
+///
+/// `Source` directives are resolved relative to the current working
+/// directory (since we don't know the source file's location).
 pub fn parse(src: &str) -> Result<Script> {
     let mut script = Script::default();
+    let mut visited = HashSet::new();
+    parse_into(src, None, &mut script, &mut visited)?;
+    Ok(script)
+}
+
+/// Parse a `.tape` file from disk. `Source` directives are resolved
+/// relative to the file's parent directory (matching vhs's behaviour).
+pub fn parse_path(path: &Path) -> Result<Script> {
+    let canonical = path
+        .canonicalize()
+        .with_context(|| format!("resolving {}", path.display()))?;
+    let src = std::fs::read_to_string(&canonical)
+        .with_context(|| format!("reading {}", canonical.display()))?;
+    let mut script = Script::default();
+    let mut visited = HashSet::new();
+    visited.insert(canonical.clone());
+    let base = canonical.parent().map(Path::to_path_buf);
+    parse_into(&src, base.as_deref(), &mut script, &mut visited)?;
+    Ok(script)
+}
+
+/// Internal: append `src`'s parse result onto `script`. `base_dir` is the
+/// directory used to resolve relative `Source` paths; `None` falls back
+/// to the process cwd. `visited` is the set of canonical paths already
+/// being parsed, used to break include cycles.
+fn parse_into(
+    src: &str,
+    base_dir: Option<&Path>,
+    script: &mut Script,
+    visited: &mut HashSet<PathBuf>,
+) -> Result<()> {
     for (lineno, raw) in src.lines().enumerate() {
         let line = strip_comment(raw).trim();
         if line.is_empty() {
             continue;
         }
-        parse_line(line, &mut script).with_context(|| format!("line {}: `{}`", lineno + 1, raw))?;
+        parse_line(line, script, base_dir, visited)
+            .with_context(|| format!("line {}: `{}`", lineno + 1, raw))?;
     }
-    Ok(script)
+    Ok(())
 }
 
 fn strip_comment(s: &str) -> &str {
@@ -89,7 +126,12 @@ fn tokenize(line: &str) -> Result<Vec<String>> {
     Ok(out)
 }
 
-fn parse_line(line: &str, script: &mut Script) -> Result<()> {
+fn parse_line(
+    line: &str,
+    script: &mut Script,
+    base_dir: Option<&Path>,
+    visited: &mut HashSet<PathBuf>,
+) -> Result<()> {
     let tokens = tokenize(line)?;
     if tokens.is_empty() {
         return Ok(());
@@ -136,7 +178,35 @@ fn parse_line(line: &str, script: &mut Script) -> Result<()> {
             script.events.push(Event::Screenshot(path));
         }
         "Wait" => script.events.push(parse_wait(rest, &script.settings)?),
-        "Source" => bail!("`Source` is not supported yet"),
+        "Source" => {
+            // `Source path/to/other.tape` — inline the contents at this
+            // point. Equivalent to a textual #include: events, settings,
+            // env, etc. all merge into the current script as if the
+            // sourced file's lines were pasted here.
+            let raw = rest
+                .first()
+                .ok_or_else(|| anyhow!("Source requires a path"))?;
+            let rel = unquote(raw);
+            let resolved = match base_dir {
+                Some(d) => d.join(rel),
+                None => PathBuf::from(rel),
+            };
+            let canonical = resolved
+                .canonicalize()
+                .with_context(|| format!("resolving Source `{}`", rel))?;
+            if !visited.insert(canonical.clone()) {
+                bail!(
+                    "Source cycle detected including `{}`",
+                    canonical.display()
+                );
+            }
+            let inner = std::fs::read_to_string(&canonical)
+                .with_context(|| format!("reading {}", canonical.display()))?;
+            let inner_base = canonical.parent().map(Path::to_path_buf);
+            let res = parse_into(&inner, inner_base.as_deref(), script, visited);
+            visited.remove(&canonical);
+            res?;
+        }
         "Copy" | "Paste" => bail!("clipboard commands are not supported yet"),
         // `Type[@duration] "text" ["text" ...]`
         h if h == "Type" || h.starts_with("Type@") => {
@@ -408,5 +478,58 @@ mod tests {
             }
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn source_inlines_another_tape_relative_to_file() {
+        // Layout:
+        //   <tmp>/main.tape   ->  Source helpers/inner.tape
+        //   <tmp>/helpers/inner.tape  ->  Type "hello"
+        let dir = tempdir();
+        std::fs::create_dir(dir.join("helpers")).unwrap();
+        std::fs::write(
+            dir.join("helpers/inner.tape"),
+            "Type \"hello\"\nSleep 100ms\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("main.tape"),
+            "Output out.gif\nSource helpers/inner.tape\nEnter\n",
+        )
+        .unwrap();
+
+        let s = parse_path(&dir.join("main.tape")).unwrap();
+        assert_eq!(s.outputs, vec!["out.gif"]);
+        assert_eq!(s.events.len(), 3);
+        assert!(matches!(&s.events[0], Event::Type { text, .. } if text == "hello"));
+        assert!(matches!(&s.events[1], Event::Sleep(_)));
+        assert!(matches!(&s.events[2], Event::Key { .. }));
+    }
+
+    #[test]
+    fn source_cycle_is_rejected() {
+        let dir = tempdir();
+        std::fs::write(dir.join("a.tape"), "Source b.tape\n").unwrap();
+        std::fs::write(dir.join("b.tape"), "Source a.tape\n").unwrap();
+        let err = parse_path(&dir.join("a.tape")).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("cycle"),
+            "expected cycle error, got: {err:#}"
+        );
+    }
+
+    /// Tiny self-cleaning tempdir helper so we don't pull in `tempfile`.
+    fn tempdir() -> PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!(
+            "evp-parser-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&p).unwrap();
+        p
     }
 }

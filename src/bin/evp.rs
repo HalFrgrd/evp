@@ -45,9 +45,8 @@ fn real_main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let src = std::fs::read_to_string(&cli.script)
-        .with_context(|| format!("reading {}", cli.script.display()))?;
-    let script = evp::parse_script(&src)?;
+    let script = evp::parse_script_file(&cli.script)
+        .with_context(|| format!("parsing {}", cli.script.display()))?;
 
     // Resolve output path: CLI flag wins, otherwise first `Output` directive.
     let output_path: PathBuf = match cli.output.clone() {

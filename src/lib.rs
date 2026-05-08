@@ -38,8 +38,18 @@ pub use runner::{RunOptions, RunOutput};
 pub use script::{Event, KeySpec, ModSet, NamedKey, Script, Settings, WaitScope};
 
 /// Parse a `.tape` script source string into an AST.
+///
+/// `Source` directives are resolved relative to the current working
+/// directory. Use [`parse_script_file`] to resolve them relative to a
+/// `.tape` file on disk.
 pub fn parse_script(source: &str) -> Result<Script> {
     script::parse(source)
+}
+
+/// Parse a `.tape` file from disk. `Source` directives inside the file
+/// are resolved relative to the file's parent directory.
+pub fn parse_script_file(path: &Path) -> Result<Script> {
+    script::parse_path(path)
 }
 
 /// Run a parsed script end-to-end and return the resulting recording.
