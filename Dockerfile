@@ -14,7 +14,7 @@
 #   `/bin/sh`, ca-certificates, and a free monospace TTF so evp's GIF
 #   renderer always has a fallback font.
 
-ARG RUST_VERSION=1.93
+ARG RUST_VERSION=1.95
 ARG DEBIAN_VERSION=bookworm
 
 # ---------------------------------------------------------------------------
