@@ -31,10 +31,18 @@ jobs:
     runs-on: ubuntu-latest
     env:
       REGISTRY: ghcr.io
-      IMAGE_NAME: ${{ github.repository_owner }}/evp
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Compute image name
+        # Container references must be lowercase. `github.repository_owner`
+        # preserves original GitHub casing (e.g. `HalFrgrd`), so normalise
+        # before feeding it to docker / metadata-action.
+        id: img
+        run: |
+          owner_lc="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "name=${owner_lc}/evp" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -54,7 +62,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ steps.img.outputs.name }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr

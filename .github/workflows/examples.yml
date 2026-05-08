@@ -43,10 +43,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Compute image name
+        # Container references must be lowercase, but `github.repository_owner`
+        # preserves the original GitHub casing (e.g. `HalFrgrd`). Normalise.
+        id: img
+        run: |
+          owner_lc="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "ref=ghcr.io/${owner_lc}/evp:latest" >> "$GITHUB_OUTPUT"
+
       - name: Pull the evp image
         # We always run examples against the latest published image. The
         # docker workflow is responsible for keeping it up to date.
-        run: docker pull ghcr.io/${{ github.repository_owner }}/evp:latest
+        run: docker pull ${{ steps.img.outputs.ref }}
 
       - name: Render every example to a GIF and SVG
         run: |
@@ -58,7 +66,7 @@ jobs:
                   echo "::group::rendering $name.$ext"
                   docker run --rm \
                       -v "$PWD:/work" \
-                      ghcr.io/${{ github.repository_owner }}/evp:latest \
+                      ${{ steps.img.outputs.ref }} \
                       "examples/$name.tape" \
                       --output "out/$name.$ext"
                   echo "::endgroup::"
