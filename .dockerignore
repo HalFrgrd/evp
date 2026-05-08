@@ -1,0 +1,7 @@
+target/
+.git/
+.github/
+*.gif
+*.svg
+*.json
+.dockerignore

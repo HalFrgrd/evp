@@ -1,0 +1,65 @@
+name: ci
+
+# Sanity-check builds and tests on every push / PR. Intentionally cheap
+# (no docker, no example rendering) so it runs fast and gates merges.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      ZIG_VERSION: 0.15.2
+      LIBGHOSTTY_RS_REPO: https://github.com/Uzaaft/libghostty-rs.git
+      LIBGHOSTTY_RS_REF: 5ac47e9eb166add2c00c432bc65c279133629712
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: evp
+
+      - name: Checkout libghostty-rs (sibling)
+        # Cargo.toml has a path dep on `../libghostty-rs/...`; clone it
+        # next to the evp checkout so the relative path resolves.
+        run: |
+          git clone "$LIBGHOSTTY_RS_REPO" libghostty-rs
+          git -C libghostty-rs checkout "$LIBGHOSTTY_RS_REF"
+
+      - name: Install Zig ${{ env.ZIG_VERSION }}
+        run: |
+          set -eux
+          tarball="zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
+          curl -fsSLo "/tmp/${tarball}" "https://ziglang.org/download/${ZIG_VERSION}/${tarball}"
+          sudo tar -xJf "/tmp/${tarball}" -C /opt
+          sudo mv "/opt/zig-x86_64-linux-${ZIG_VERSION}" /opt/zig
+          echo "/opt/zig" >> "$GITHUB_PATH"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: evp
+
+      - name: cargo build
+        working-directory: evp
+        run: cargo build --workspace
+
+      - name: cargo test
+        working-directory: evp
+        # Tests fork /bin/sh in a PTY; serialise to keep PTY allocation
+        # under control on small CI runners.
+        run: cargo test --workspace -- --test-threads=1

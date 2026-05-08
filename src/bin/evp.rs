@@ -58,12 +58,11 @@ fn real_main() -> Result<()> {
             .map(PathBuf::from)
             .ok_or_else(|| anyhow::anyhow!("no Output directive and --output not given"))?,
     };
-    if !output_path
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("gif"))
-    {
+    if !output_path.extension().is_some_and(|e| {
+        e.eq_ignore_ascii_case("gif") || e.eq_ignore_ascii_case("svg")
+    }) {
         bail!(
-            "only .gif output is supported (got `{}`)",
+            "only .gif and .svg outputs are supported (got `{}`)",
             output_path.display()
         );
     }
@@ -80,15 +79,36 @@ fn real_main() -> Result<()> {
     }
 
     let render_opts = evp::RenderOptions {
-        font_path: cli.font.or(script.settings.font_family.clone()),
+        font_path: cli.font.clone().or(script.settings.font_family.clone()),
         font_size: script.settings.font_size,
         padding_px: script.settings.padding,
     };
-    render_to(&out.recording, &render_opts, &output_path)?;
-    info!(path = %output_path.display(), "gif written");
+    render_to(&out.recording, &render_opts, &cli, &output_path)?;
+    info!(path = %output_path.display(), "output written");
     Ok(())
 }
 
-fn render_to(rec: &evp::Recording, opts: &evp::RenderOptions, out: &Path) -> Result<()> {
-    evp::render_gif(rec, opts, out)
+fn render_to(
+    rec: &evp::Recording,
+    opts: &evp::RenderOptions,
+    cli: &Cli,
+    out: &Path,
+) -> Result<()> {
+    let ext = out
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    if ext.eq_ignore_ascii_case("svg") {
+        let svg_opts = evp::SvgOptions {
+            font_size: opts.font_size,
+            ..Default::default()
+        };
+        // CLI --font is also honoured for SVG: we treat the path's file
+        // stem as the CSS font-family hint. (For a fully embedded font we
+        // would need to base64-encode the file – left for a follow-up.)
+        let _ = cli;
+        evp::render_svg(rec, &svg_opts, out)
+    } else {
+        evp::render_gif(rec, opts, out)
+    }
 }

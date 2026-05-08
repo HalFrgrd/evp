@@ -23,6 +23,7 @@ pub mod keys;
 pub mod pty;
 pub mod recording;
 pub mod render;
+pub mod render_svg;
 pub mod runner;
 pub mod script;
 
@@ -32,6 +33,7 @@ use anyhow::{Context, Result};
 
 pub use recording::{CellChange, CellSnap, Frame, RawFrame, Recording};
 pub use render::RenderOptions;
+pub use render_svg::SvgOptions;
 pub use runner::{RunOptions, RunOutput};
 pub use script::{Event, KeySpec, ModSet, NamedKey, Script, Settings, WaitScope};
 
@@ -51,6 +53,11 @@ pub fn run(script: &Script) -> Result<RunOutput> {
 /// Render a [`Recording`] as an animated GIF written to `output`.
 pub fn render_gif(rec: &Recording, opts: &RenderOptions, output: &Path) -> Result<()> {
     render::render_gif(rec, opts, output).context("rendering gif")
+}
+
+/// Render a [`Recording`] as an animated SVG written to `output`.
+pub fn render_svg(rec: &Recording, opts: &SvgOptions, output: &Path) -> Result<()> {
+    render_svg::render_svg(rec, opts, output).context("rendering svg")
 }
 
 /// Serialise a [`Recording`] to pretty-printed JSON bytes.
