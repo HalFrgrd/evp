@@ -97,6 +97,13 @@ impl Frame {
             Frame::Key { t_ms, .. } | Frame::Diff { t_ms, .. } => *t_ms,
         }
     }
+
+    /// Cursor position recorded with this frame, if visible.
+    pub fn cursor(&self) -> Option<(u16, u16)> {
+        match self {
+            Frame::Key { cursor, .. } | Frame::Diff { cursor, .. } => *cursor,
+        }
+    }
 }
 
 /// The full recording artifact (de)serialisable to JSON.

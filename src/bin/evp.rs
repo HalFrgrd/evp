@@ -1,12 +1,5 @@
-//! `evp` – record terminal sessions from VHS-style scripts into GIFs.
-
-mod encoder;
-mod keys;
-mod pty;
-mod recording;
-mod render;
-mod runner;
-mod script;
+//! `evp` binary entry point. All real work lives in the library crate
+//! (`evp::*`); this file is the thinnest possible CLI shim around it.
 
 use std::{
     path::{Path, PathBuf},
@@ -27,7 +20,7 @@ struct Cli {
     #[arg(short, long)]
     output: Option<PathBuf>,
     /// Optional path to a TTF font file. If omitted, a system monospace
-    /// font is auto‑discovered.
+    /// font is auto-discovered.
     #[arg(long)]
     font: Option<String>,
     /// Also dump the intermediate Recording as JSON to this path.
@@ -54,7 +47,7 @@ fn real_main() -> Result<()> {
     let cli = Cli::parse();
     let src = std::fs::read_to_string(&cli.script)
         .with_context(|| format!("reading {}", cli.script.display()))?;
-    let script = script::parse(&src)?;
+    let script = evp::parse_script(&src)?;
 
     // Resolve output path: CLI flag wins, otherwise first `Output` directive.
     let output_path: PathBuf = match cli.output.clone() {
@@ -77,16 +70,16 @@ fn real_main() -> Result<()> {
 
     info!(events = script.events.len(), "script loaded");
 
-    let out = runner::run(&script).context("running script")?;
+    let out = evp::run(&script).context("running script")?;
     info!(frames = out.recording.frames.len(), "recording captured");
 
     if let Some(path) = &cli.recording_json {
-        let json = serde_json::to_vec_pretty(&out.recording)?;
-        std::fs::write(path, json).with_context(|| format!("writing {}", path.display()))?;
+        let bytes = evp::recording_to_json(&out.recording)?;
+        std::fs::write(path, bytes).with_context(|| format!("writing {}", path.display()))?;
         info!(path = %path.display(), "recording written");
     }
 
-    let render_opts = render::RenderOptions {
+    let render_opts = evp::RenderOptions {
         font_path: cli.font.or(script.settings.font_family.clone()),
         font_size: script.settings.font_size,
         padding_px: script.settings.padding,
@@ -96,6 +89,6 @@ fn real_main() -> Result<()> {
     Ok(())
 }
 
-fn render_to(rec: &recording::Recording, opts: &render::RenderOptions, out: &Path) -> Result<()> {
-    render::render_gif(rec, opts, out).context("rendering gif")
+fn render_to(rec: &evp::Recording, opts: &evp::RenderOptions, out: &Path) -> Result<()> {
+    evp::render_gif(rec, opts, out)
 }

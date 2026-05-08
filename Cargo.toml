@@ -3,9 +3,20 @@ name = "evp"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "evp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "evp"
+path = "src/bin/evp.rs"
+
 [dependencies]
-# Terminal emulator (sibling workspace; not modified).
-libghostty-vt = { path = "../libghostty-rs/crates/libghostty-vt" }
+# Terminal emulator (sibling workspace; not modified). `link-static`
+# vendors `libghostty-vt.a` into the final binary so neither the binary
+# nor library consumers (tests, downstream crates) need
+# `libghostty-vt.so` on `LD_LIBRARY_PATH` at runtime.
+libghostty-vt = { path = "../libghostty-rs/crates/libghostty-vt", features = ["link-static"] }
 
 # CLI / errors / logging.
 anyhow = "1"
