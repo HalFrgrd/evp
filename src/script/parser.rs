@@ -195,10 +195,7 @@ fn parse_line(
                 .canonicalize()
                 .with_context(|| format!("resolving Source `{}`", rel))?;
             if !visited.insert(canonical.clone()) {
-                bail!(
-                    "Source cycle detected including `{}`",
-                    canonical.display()
-                );
+                bail!("Source cycle detected including `{}`", canonical.display());
             }
             let inner = std::fs::read_to_string(&canonical)
                 .with_context(|| format!("reading {}", canonical.display()))?;
@@ -520,16 +517,27 @@ mod tests {
 
     /// Tiny self-cleaning tempdir helper so we don't pull in `tempfile`.
     fn tempdir() -> PathBuf {
-        let mut p = std::env::temp_dir();
-        p.push(format!(
-            "evp-parser-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir(&p).unwrap();
-        p
+        let base = std::env::temp_dir();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        for attempt in 0u32..1000 {
+            let mut p = base.clone();
+            p.push(format!(
+                "evp-parser-test-{}-{}-{}",
+                std::process::id(),
+                stamp,
+                attempt
+            ));
+            match std::fs::create_dir(&p) {
+                Ok(()) => return p,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => panic!("failed to create temp dir {}: {e}", p.display()),
+            }
+        }
+
+        panic!("failed to create unique temp dir after 1000 attempts")
     }
 }

@@ -102,7 +102,7 @@ use this same API end-to-end.
 ## CLI
 
 ```text
-evp <script> [-o <output.gif>] [--font <path.ttf>] [--recording-json <path.json>]
+evp <script> [-o <output.gif>] [--font <path.ttf>] [--recording-json <path.json>] [--log-level <level>]
 ```
 
 | Flag | Meaning |
@@ -111,6 +111,10 @@ evp <script> [-o <output.gif>] [--font <path.ttf>] [--recording-json <path.json>
 | `-o`, `--output` | Override the script's `Output` directive. Output extension picks the renderer (`.gif` or `.svg`). |
 | `--font` | Path to a TTF/OTF used by the GIF renderer. Defaults to a system monospace font discovered via `fontdb`. |
 | `--recording-json` | Also dump the intermediate `Recording` to JSON for later re-rendering or inspection. |
+| `--log-level` | Explicit level override: `error`, `warn`, `info`, `debug`, `trace`. |
+
+`--log-level` overrides the default `info` level. If it is not provided,
+`RUST_LOG` is still honored.
 
 ## Using `evp` in GitHub Actions
 

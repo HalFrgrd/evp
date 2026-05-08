@@ -44,6 +44,108 @@ scripts and produces an animated GIF by driving a real shell inside an embedded
    glyph outlines and the `gif` crate for encoding
    ([src/render.rs](src/render.rs)).
 
+## Main runner loop (detailed)
+
+The loop in [src/runner.rs](src/runner.rs) is deadline-driven rather than
+"tick and sleep", which keeps both timing and interactivity stable:
+
+1. **One-time setup**
+   - Build PTY + child shell and connect libghostty's write callback to PTY
+     writes.
+   - Construct a complete absolute event timeline (`build_timeline`), where
+     relative script durations are already expanded/scaled.
+   - Start the encoder thread and allocate render iterators/scratch state.
+
+2. **Per-iteration PTY drain**
+   - `pty.drain_into(&mut terminal)` feeds all currently available shell bytes
+     into libghostty's parser so terminal state stays current before decisions
+     are made.
+
+3. **Wait-state resolution**
+   - If a `Wait` is active, regex matching runs against either the screen or
+     last line (depending on `WaitScope`).
+   - On match: unblock timeline progression.
+   - On timeout: log warning and unblock (matching vhs's pragmatic behaviour).
+
+4. **Event dispatch**
+   - While no wait is active and the next scheduled event is due, execute it.
+   - `Type`/`Key` writes go to PTY; `Hide`/`Show` toggles a local hidden gate;
+     `Screenshot` is currently accepted in parsing but not yet emitted as a
+     PNG artifact.
+   - If hidden, all events except `Show` are skipped.
+
+5. **Frame capture**
+   - While frame deadline(s) are due, capture via ghostty render iterators into
+     a dense `RawFrame` (`cells + cursor + default colors + t_ms`).
+   - Send each frame over a bounded channel to the encoder thread.
+     Backpressure is intentional: if encoding falls behind, capture naturally
+     slows rather than dropping frames.
+
+6. **Exit condition**
+   - Stop only after the event timeline is exhausted, no wait is active, and
+     frame capture has passed the computed `total_duration`.
+   - `total_duration` extends beyond the last event by multiple frame intervals
+     so the final terminal state is visible in output.
+
+7. **Sleep strategy**
+   - Compute the next relevant deadline (next event / frame / wait timeout).
+   - `poll(2)` the PTY fd until that deadline so incoming shell output wakes
+     the loop immediately.
+
+This design gives deterministic frame timestamps while still reacting quickly
+to shell output-driven prompts.
+
+## Rendering internals (GIF and SVG)
+
+Both renderers consume the same diff-compressed `Recording` and call
+`Recording::reconstruct(i)` to materialize dense frames as needed. That keeps
+the storage format compact while preserving exact rendering fidelity.
+
+### GIF path ([src/render.rs](src/render.rs))
+
+1. **Font + geometry**
+   - Load explicit `--font` path or discover a system monospace via `fontdb`.
+   - Compute cell metrics from glyph advances (`M` width + scaled height).
+
+2. **Rasterization**
+   - Build an RGB canvas per frame.
+   - Paint default background, then per-cell background overrides.
+   - Draw text glyph outlines with alpha blending (`ab_glyph`).
+   - Apply style flags:
+     - inverse: swap fg/bg,
+     - bold: second draw pass with +1px x offset,
+     - underline: 1px line near cell bottom.
+   - Cursor is rendered by inverting the covered cell rectangle.
+
+3. **Frame timing + write**
+   - Skip visually identical frames to reduce output size.
+   - Convert `t_ms` deltas to GIF centiseconds (clamped to viewer-safe minimum).
+   - Emit frames via `gif::Encoder` with `Repeat::Infinite` (loop forever).
+
+### SVG path ([src/render_svg.rs](src/render_svg.rs))
+
+1. **Frame windowing**
+   - Reconstruct frames and collapse consecutive visually identical frames into
+     visibility windows (`start_ms..end_ms`) instead of duplicating markup.
+
+2. **Document model**
+   - Static canvas background `<rect>`.
+   - One hidden `<g>` per unique frame containing:
+     - background run rectangles,
+     - text runs (coalesced by style/color),
+     - cursor block.
+
+3. **Animation model (SMIL)**
+   - A dummy master timer `<animate id="t" ... repeatCount="indefinite"/>`.
+   - Each frame group uses `<set attributeName="visibility" ...>` with
+     begin/end offsets relative to `t.begin`.
+   - When the master timer repeats, visibility sets re-fire, so playback loops
+     forever without JavaScript.
+
+4. **Tradeoffs vs GIF**
+   - Pros: selectable/searchable text, crisp scaling, often much smaller files.
+   - Cons: depends on browser font availability and SMIL support.
+
 ## Threading
 
 Two threads, communicating over a single bounded `crossbeam_channel`:
@@ -99,81 +201,3 @@ interactive user. Plain `Type` text bypasses the encoder and is written as
 raw UTF‑8 — that's what an actual keyboard would emit and avoids per‑char
 overhead.
 
-## Is the crossbeam channel large enough?
-
-The channel is `crossbeam_channel::bounded(64)`
-([src/encoder.rs#L42](src/encoder.rs)). Concretely:
-
-* **Production rate**: one `RawFrame` per frame deadline, i.e. up to
-  `framerate` frames/sec (default 50, common values 30–60).
-* **Per‑frame work on the consumer**: a single linear scan of `cols * rows`
-  cells comparing the current dense frame to the previous one, plus a
-  small `Vec<CellChange>` allocation. For an 80×24 grid (1 920 cells) this
-  is on the order of microseconds — orders of magnitude faster than the
-  16–33 ms between frames.
-
-So under normal operation the channel sits at depth 0–1 and 64 slots is
-massive overkill. The bound matters in two corner cases:
-
-1. **GC / OS hiccup**: if the encoder thread is preempted for, say, 100 ms
-   at 50 fps the channel will briefly fill to ~5 entries — well under 64.
-2. **Back‑pressure as a safety valve**: if the encoder ever *did* fall
-   behind (e.g. someone adds expensive PNG keyframe encoding) `send` blocks
-   the main thread. That's the right behaviour: it stalls capture rather
-   than silently dropping frames.
-
-A `RawFrame` for a 200×60 grid is roughly `200 * 60 * (~40 bytes) ≈
-480 KiB`, so a fully saturated 64‑slot channel peaks at ~30 MiB — fine for
-a recording tool but worth knowing if we ever want to record very large
-terminals at very high framerates. If that becomes a concern the bound
-can be lowered (32 or even 8 is plenty) without behavioural change.
-
-**Verdict: 64 is comfortably enough; the bound is there for safety, not
-throughput.**
-
-## Next steps
-
-These are the two highest‑leverage follow‑ups, in order:
-
-### 1. `Screenshot` export
-
-`Screenshot "path.png"` is already parsed and threaded through the
-timeline (`Event::Screenshot(path)`) but the runner currently just logs a
-warning. The plan:
-
-1. When the runner hits the event, record `(path, t_ms)` into a side
-   list it owns.
-2. After `runner::run` returns, iterate that list and for each entry:
-   * find the frame in the `Recording` whose `t_ms` is closest to the
-     screenshot's `t_ms`,
-   * call `Recording::reconstruct(i)` to materialise it,
-   * call a new `render::rasterize_frame` → `image::RgbImage::from_raw`
-     pipeline and write the PNG via the `image` crate (already a
-     dependency).
-
-This is small, isolated, and exercises the same reconstruction path the
-GIF renderer uses, so it doubles as a regression test for the diff format.
-
-### 2. Animated SVG output
-
-The user explicitly mentioned this as a future target. The architecture
-is already set up for it: the `Recording` is the rendering‑agnostic
-intermediate. To add SVG:
-
-1. Introduce a `render::Renderer` trait with one method,
-   `render(&Recording, &Path) -> Result<()>`, and move the GIF encoder
-   behind a `GifRenderer` impl.
-2. Add an `SvgRenderer` impl that emits one `<svg>` document containing:
-   * a `<style>` block with the cell metrics + default colors,
-   * one `<g class="frame fN">` per `Frame`, where each `<g>` either
-     re‑emits the full grid (keyframe) or only the changed cells (diff
-     frame),
-   * CSS animation timing derived from each frame's `t_ms` so that the
-     diff structure of the `Recording` maps almost directly onto a tiny,
-     scalable, text‑indexable artifact.
-3. Pick the renderer from the output extension (`.gif` → GIF, `.svg` →
-   SVG) in `main::real_main`.
-
-Because diffs already minimise the changed‑cell set per frame, the SVG
-output ends up dramatically smaller than a frame‑per‑frame screenshot
-approach — the encoder thread's work directly subsidises the renderer.
