@@ -19,8 +19,7 @@ pub fn parse(src: &str) -> Result<Script> {
         if line.is_empty() {
             continue;
         }
-        parse_line(line, &mut script)
-            .with_context(|| format!("line {}: `{}`", lineno + 1, raw))?;
+        parse_line(line, &mut script).with_context(|| format!("line {}: `{}`", lineno + 1, raw))?;
     }
     Ok(script)
 }
@@ -64,7 +63,9 @@ fn tokenize(line: &str) -> Result<Vec<String>> {
                     closed = true;
                     break;
                 }
-                if c == '\\' && let Some(&next) = chars.peek() {
+                if c == '\\'
+                    && let Some(&next) = chars.peek()
+                {
                     s.push(next);
                     chars.next();
                 }
@@ -287,9 +288,7 @@ fn parse_key_spec(s: &str) -> Result<KeySpec> {
         // the `keys` module.
         other => {
             let mut chars = other.chars();
-            let c = chars
-                .next()
-                .ok_or_else(|| anyhow!("empty key in `{s}`"))?;
+            let c = chars.next().ok_or_else(|| anyhow!("empty key in `{s}`"))?;
             if chars.next().is_some() {
                 bail!("unknown key name `{other}`");
             }
@@ -357,7 +356,9 @@ fn unquote(s: &str) -> &str {
 
 fn unquote_required(s: &str) -> Result<&str> {
     let bytes = s.as_bytes();
-    if bytes.len() < 2 || bytes[0] != *bytes.last().unwrap() || !matches!(bytes[0], b'"' | b'\'' | b'`')
+    if bytes.len() < 2
+        || bytes[0] != *bytes.last().unwrap()
+        || !matches!(bytes[0], b'"' | b'\'' | b'`')
     {
         bail!("expected quoted string, got `{s}`");
     }

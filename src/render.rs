@@ -27,10 +27,7 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<(
     let scaled = font.as_scaled(scale);
 
     // Measure cell size from a representative monospace glyph.
-    let cell_w = scaled
-        .h_advance(font.glyph_id('M'))
-        .ceil()
-        .max(1.0) as u32;
+    let cell_w = scaled.h_advance(font.glyph_id('M')).ceil().max(1.0) as u32;
     let cell_h = (scaled.height() + scaled.line_gap()).ceil().max(1.0) as u32;
     let baseline = scaled.ascent().ceil() as u32;
 
@@ -55,7 +52,15 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<(
             .reconstruct(i)
             .ok_or_else(|| anyhow!("failed to reconstruct frame {i}"))?;
 
-        let buf = rasterize_frame(&frame, &font, scale, cell_w, cell_h, baseline, opts.padding_px);
+        let buf = rasterize_frame(
+            &frame,
+            &font,
+            scale,
+            cell_w,
+            cell_h,
+            baseline,
+            opts.padding_px,
+        );
 
         // Skip frames that are visually identical to the previous one –
         // this keeps the GIF small when the terminal sits idle.
@@ -92,7 +97,15 @@ fn rasterize_frame(
     let mut buf = vec![0u8; (canvas_w * canvas_h * 3) as usize];
 
     // Fill background.
-    fill_rect(&mut buf, canvas_w, 0, 0, canvas_w, canvas_h, frame.default_bg);
+    fill_rect(
+        &mut buf,
+        canvas_w,
+        0,
+        0,
+        canvas_w,
+        canvas_h,
+        frame.default_bg,
+    );
 
     let scaled = font.as_scaled(scale);
     for row in 0..frame.rows {
@@ -108,9 +121,7 @@ fn rasterize_frame(
             }
 
             // Draw cell background if it differs from the canvas default.
-            if bg != frame.default_bg
-                || cell.flags & style_flags::INVERSE != 0
-            {
+            if bg != frame.default_bg || cell.flags & style_flags::INVERSE != 0 {
                 fill_rect(&mut buf, canvas_w, x, y, cell_w, cell_h, bg);
             }
 
@@ -248,8 +259,9 @@ fn load_font(path: Option<&str>) -> Result<Vec<u8>> {
         .ok_or_else(|| anyhow!("no monospace font found on the system"))?;
     let face = db.face(id).ok_or_else(|| anyhow!("font face not found"))?;
     match &face.source {
-        fontdb::Source::File(path) => std::fs::read(path)
-            .with_context(|| format!("reading font {}", path.display())),
+        fontdb::Source::File(path) => {
+            std::fs::read(path).with_context(|| format!("reading font {}", path.display()))
+        }
         fontdb::Source::Binary(data) | fontdb::Source::SharedFile(_, data) => {
             Ok(data.as_ref().as_ref().to_vec())
         }

@@ -61,8 +61,12 @@ pub fn derive_options(s: &Settings) -> RunOptions {
     let cell_h_px = (s.font_size * s.line_height).round().max(1.0) as u32;
     let inner_w = s.width.saturating_sub(s.padding * 2);
     let inner_h = s.height.saturating_sub(s.padding * 2);
-    let cols = s.cols.unwrap_or_else(|| (inner_w / cell_w_px).max(20) as u16);
-    let rows = s.rows.unwrap_or_else(|| (inner_h / cell_h_px).max(5) as u16);
+    let cols = s
+        .cols
+        .unwrap_or_else(|| (inner_w / cell_w_px).max(20) as u16);
+    let rows = s
+        .rows
+        .unwrap_or_else(|| (inner_h / cell_h_px).max(5) as u16);
     RunOptions {
         cols,
         rows,
@@ -83,9 +87,8 @@ pub fn run(script: &Script) -> Result<RunOutput> {
     };
 
     info!(cols = opts.cols, rows = opts.rows, "spawning pty");
-    let (pty, _child) =
-        Pty::spawn(script.settings.shell.as_deref(), &script.env, pty_size)
-            .context("spawning pty")?;
+    let (pty, _child) = Pty::spawn(script.settings.shell.as_deref(), &script.env, pty_size)
+        .context("spawning pty")?;
 
     let mut terminal = Terminal::new(TerminalOptions {
         cols: opts.cols,
@@ -198,10 +201,7 @@ pub fn run(script: &Script) -> Result<RunOutput> {
         }
 
         // 5. Exit when both the script and the recording window are done.
-        if event_idx >= timeline.len()
-            && wait_state.is_none()
-            && next_frame_at > total_duration
-        {
+        if event_idx >= timeline.len() && wait_state.is_none() && next_frame_at > total_duration {
             break;
         }
 
@@ -217,7 +217,10 @@ pub fn run(script: &Script) -> Result<RunOutput> {
         if next_deadline > now {
             let timeout_ms = (next_deadline - now).as_millis().min(1000) as u16;
             let timeout = PollTimeout::try_from(timeout_ms).unwrap_or(PollTimeout::ZERO);
-            let mut fds = [PollFd::new(unsafe { borrow_fd(pty.fd()) }, PollFlags::POLLIN)];
+            let mut fds = [PollFd::new(
+                unsafe { borrow_fd(pty.fd()) },
+                PollFlags::POLLIN,
+            )];
             let _ = poll(&mut fds, timeout);
         }
     }
@@ -285,13 +288,12 @@ fn build_timeline(events: &[Event], settings: &Settings) -> Vec<Scheduled> {
                     });
                 }
             }
-            Event::Wait { .. }
-            | Event::Screenshot(_)
-            | Event::Hide
-            | Event::Show => out.push(Scheduled {
-                at: cursor,
-                event: ev.clone(),
-            }),
+            Event::Wait { .. } | Event::Screenshot(_) | Event::Hide | Event::Show => {
+                out.push(Scheduled {
+                    at: cursor,
+                    event: ev.clone(),
+                })
+            }
         }
     }
     out
@@ -342,8 +344,8 @@ fn execute_event(
             timeout,
             pattern,
         } => {
-            let re = Regex::new(pattern)
-                .with_context(|| format!("invalid Wait regex `{pattern}`"))?;
+            let re =
+                Regex::new(pattern).with_context(|| format!("invalid Wait regex `{pattern}`"))?;
             *wait_state = Some(WaitState {
                 scope: *scope,
                 pattern: pattern.clone(),
@@ -461,10 +463,7 @@ fn capture<'a>(
             }
             // Underline is an enum (None/Single/Double/...) – treat anything
             // non‑None as a generic underline for now.
-            if !matches!(
-                style.underline,
-                libghostty_vt::style::Underline::None
-            ) {
+            if !matches!(style.underline, libghostty_vt::style::Underline::None) {
                 flags |= style_flags::UNDERLINE;
             }
             cells[idx] = CellSnap {

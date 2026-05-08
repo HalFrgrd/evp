@@ -2,7 +2,7 @@ name: docker
 
 # Builds and publishes the evp container image to GitHub Container Registry.
 #
-# - On every push to `main` and on tag pushes, multi-arch images are built
+# - On every push to `master` and on tag pushes, multi-arch images are built
 #   and pushed under `ghcr.io/<owner>/evp` with sensible tags (sha,
 #   branch, semver).
 # - Pull requests get a build-only run (no push) so we never poison the
@@ -10,10 +10,10 @@ name: docker
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     tags: ["v*.*.*"]
   pull_request:
-    branches: [main]
+    branches: [master]
   workflow_dispatch:
 
 # Required for the GitHub-issued OIDC token used by `docker/login-action`

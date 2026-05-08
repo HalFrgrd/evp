@@ -11,7 +11,7 @@ name: examples
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     paths:
       - "examples/**"
       - "src/**"
@@ -78,7 +78,7 @@ jobs:
             Pre-rendered GIFs of every script in `examples/`.
 
             These assets are rebuilt automatically by the
-            `examples` workflow on every push to `main`. The README links
+            `examples` workflow on every push to `master`. The README links
             to them via the stable release-download URL.
 
             Last build: ${{ github.sha }}

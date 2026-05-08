@@ -1,6 +1,6 @@
 # evp
 
-> **e**mbedded **v**ideo for the terminal **p**rompt — a small Rust CLI
+> **evp** — a small Rust CLI
 > that ingests [VHS](https://github.com/charmbracelet/vhs)-format scripts
 > and produces animated GIFs (and, soon, SVGs) using
 > [libghostty](https://ghostty.org) as the underlying terminal emulator.
@@ -20,7 +20,7 @@ the resulting `Recording` to an animated artifact.
 ## Examples
 
 These GIFs are produced by the [`examples`](.github/workflows/examples.yml)
-workflow on every push to `main` and uploaded as assets on the rolling
+workflow on every push to `master` and uploaded as assets on the rolling
 [`assets` release](https://github.com/HalFrgrd/evp/releases/tag/assets).
 
 ### `hello` — bare-minimum recording

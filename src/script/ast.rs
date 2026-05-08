@@ -164,7 +164,11 @@ pub struct ModSet {
 }
 
 impl ModSet {
-    pub const NONE: Self = Self { ctrl: false, alt: false, shift: false };
+    pub const NONE: Self = Self {
+        ctrl: false,
+        alt: false,
+        shift: false,
+    };
 
     pub fn any(&self) -> bool {
         self.ctrl || self.alt || self.shift

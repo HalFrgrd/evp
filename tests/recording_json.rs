@@ -185,8 +185,16 @@ Sleep 500ms
     let rec = record(tape);
     let last = rec.frames.last().expect("at least one frame");
     let (cx, cy) = last.cursor().expect("cursor should be visible");
-    assert!(cx < rec.cols, "cursor x={cx} out of bounds (cols={})", rec.cols);
-    assert!(cy < rec.rows, "cursor y={cy} out of bounds (rows={})", rec.rows);
+    assert!(
+        cx < rec.cols,
+        "cursor x={cx} out of bounds (cols={})",
+        rec.cols
+    );
+    assert!(
+        cy < rec.rows,
+        "cursor y={cy} out of bounds (rows={})",
+        rec.rows
+    );
 }
 
 /// JSON round-trip must preserve every field used by downstream

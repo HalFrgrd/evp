@@ -66,11 +66,13 @@ impl std::error::Error for PtyError {}
 impl Pty {
     /// Spawn `shell` (or the user's default) in a fresh pseudo-terminal,
     /// applying `env` and an initial window `size`.
-    pub fn spawn(shell: Option<&str>, env: &[(String, String)], size: PtySize) -> Result<(Self, Child)> {
+    pub fn spawn(
+        shell: Option<&str>,
+        env: &[(String, String)],
+        size: PtySize,
+    ) -> Result<(Self, Child)> {
         let ws = size.to_winsize();
-        match unsafe { nix::pty::forkpty(&ws, None) }
-            .map_err(|e| anyhow!("forkpty failed: {e}"))?
-        {
+        match unsafe { nix::pty::forkpty(&ws, None) }.map_err(|e| anyhow!("forkpty failed: {e}"))? {
             ForkptyResult::Child => {
                 let shell_path = match shell {
                     Some(s) if !s.is_empty() => PathBuf::from(s),

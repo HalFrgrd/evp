@@ -54,8 +54,7 @@ pub struct SvgOptions {
 impl Default for SvgOptions {
     fn default() -> Self {
         Self {
-            font_family: "ui-monospace, Menlo, Consolas, 'DejaVu Sans Mono', monospace"
-                .to_string(),
+            font_family: "ui-monospace, Menlo, Consolas, 'DejaVu Sans Mono', monospace".to_string(),
             font_size: 16.0,
         }
     }
@@ -261,17 +260,16 @@ fn emit_frame_body(
             } else {
                 ""
             };
-            let decoration = if style & style_flags::UNDERLINE != 0
-                && style & style_flags::STRIKETHROUGH != 0
-            {
-                " text-decoration=\"underline line-through\""
-            } else if style & style_flags::UNDERLINE != 0 {
-                " text-decoration=\"underline\""
-            } else if style & style_flags::STRIKETHROUGH != 0 {
-                " text-decoration=\"line-through\""
-            } else {
-                ""
-            };
+            let decoration =
+                if style & style_flags::UNDERLINE != 0 && style & style_flags::STRIKETHROUGH != 0 {
+                    " text-decoration=\"underline line-through\""
+                } else if style & style_flags::UNDERLINE != 0 {
+                    " text-decoration=\"underline\""
+                } else if style & style_flags::STRIKETHROUGH != 0 {
+                    " text-decoration=\"line-through\""
+                } else {
+                    ""
+                };
             s.push_str(&format!(
                 r#"<text x="{x}" y="{y}" fill="{fg}"{w}{i}{d}>{txt}</text>"#,
                 fg = rgb_hex(fg),
@@ -361,15 +359,13 @@ mod tests {
             cell_width_px: 8,
             cell_height_px: 16,
             padding_px: 4,
-            frames: vec![
-                Frame::Key {
-                    t_ms: 0,
-                    cursor: Some((2, 0)),
-                    default_fg: [255, 255, 255],
-                    default_bg: [0, 0, 0],
-                    cells,
-                },
-            ],
+            frames: vec![Frame::Key {
+                t_ms: 0,
+                cursor: Some((2, 0)),
+                default_fg: [255, 255, 255],
+                default_bg: [0, 0, 0],
+                cells,
+            }],
         }
     }
 

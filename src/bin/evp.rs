@@ -58,9 +58,10 @@ fn real_main() -> Result<()> {
             .map(PathBuf::from)
             .ok_or_else(|| anyhow::anyhow!("no Output directive and --output not given"))?,
     };
-    if !output_path.extension().is_some_and(|e| {
-        e.eq_ignore_ascii_case("gif") || e.eq_ignore_ascii_case("svg")
-    }) {
+    if !output_path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("gif") || e.eq_ignore_ascii_case("svg"))
+    {
         bail!(
             "only .gif and .svg outputs are supported (got `{}`)",
             output_path.display()
@@ -88,16 +89,8 @@ fn real_main() -> Result<()> {
     Ok(())
 }
 
-fn render_to(
-    rec: &evp::Recording,
-    opts: &evp::RenderOptions,
-    cli: &Cli,
-    out: &Path,
-) -> Result<()> {
-    let ext = out
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+fn render_to(rec: &evp::Recording, opts: &evp::RenderOptions, cli: &Cli, out: &Path) -> Result<()> {
+    let ext = out.extension().and_then(|e| e.to_str()).unwrap_or("");
     if ext.eq_ignore_ascii_case("svg") {
         let svg_opts = evp::SvgOptions {
             font_size: opts.font_size,
