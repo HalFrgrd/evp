@@ -45,10 +45,10 @@ nix = { version = "0.31", features = ["term", "fs", "signal", "process", "user",
 # Pattern matching for `Wait /regex/`.
 regex = "1"
 
-# Image / GIF rendering.
-image = { version = "0.25", default-features = false, features = ["png"] }
-gif = "0.13"
-color_quant = "1"
+# Image / GIF rendering with streaming support.
+gifski = "1.34"
+rgb = "0.8"
+imgref = "1.10"
 ab_glyph = "0.2"
 fontdb = "0.23"
 

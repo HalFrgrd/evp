@@ -1,16 +1,14 @@
-//! Render a [`Recording`] to an animated GIF.
+//! Render a [`Recording`] to an animated GIF using gifski with streaming.
 //!
-//! We rasterise each frame as an RGB buffer using `ab_glyph`, then quantise
-//! per‑frame with `color_quant::NeuQuant` and write GIF frames via the
-//! `gif` crate. Diff frames are reconstructed by [`Recording::reconstruct`]
-//! before being drawn.
+//! We rasterise each frame as an RGBA buffer using `ab_glyph`, then stream
+//! frames directly to gifski's collector. This allows encoding to happen
+//! concurrently with recording, reducing peak memory and latency.
 
-use std::{collections::HashSet, fs::File, path::Path, time::Instant};
+use std::{collections::HashSet, path::Path, time::Instant};
 
 use ab_glyph::{Font, FontArc, Glyph, PxScale, ScaleFont};
 use anyhow::{Context, Result, anyhow};
-use color_quant::NeuQuant;
-use gif::{Encoder, Frame, Repeat};
+use gifski::{Settings, progress};
 use tracing::{info, warn};
 
 use crate::recording::{CellSnap, Frame as RecordingFrame, Recording, style_flags};
@@ -80,16 +78,32 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<(
     let canvas_w = rec.cols as u32 * cell_w + opts.padding_px * 2;
     let canvas_h = rec.rows as u32 * cell_h + opts.padding_px * 2;
 
-    let mut file = File::create(out).with_context(|| format!("create {}", out.display()))?;
-    // Use a global palette of size 256, but per‑frame palettes (set via
-    // `Frame::from_rgb_speed`) generally produce nicer results so we emit
-    // an empty global palette here.
-    let mut encoder = Encoder::new(&mut file, canvas_w as u16, canvas_h as u16, &[])?;
-    encoder.set_repeat(Repeat::Infinite)?;
+    // Create a gifski encoder with streaming support. This creates a collector
+    // thread that will encode frames as we send them (not after recording finishes).
+    // On single-core systems, the OS scheduler handles thread switching between
+    // recorder and encoder.
+    let (collector, writer) = gifski::new(Settings {
+        width: Some(canvas_w),
+        height: Some(canvas_h),
+        quality: 100, // maximum quality; minimizes re-quantization
+        fast: false,  // allow time for better compression
+        repeat: gifski::Repeat::Infinite,
+    })
+    .context("initialize gifski encoder")?;
+
+    // Spawn the writer thread that will write the GIF to disk.
+    let out_path = out.to_path_buf();
+    let writer_handle = std::thread::spawn(move || {
+        let file = std::fs::File::create(&out_path)
+            .with_context(|| format!("create {}", out_path.display()))?;
+        let mut progress = progress::NoProgress {};
+        writer
+            .write(file, &mut progress)
+            .map_err(|e| anyhow!("gifski write error: {}", e))
+    });
 
     // GIF stores delays in centiseconds. We compute them from successive
-    // frame timestamps so the playback follows the captured wall‑clock
-    // timing.
+    // frame timestamps so the playback follows the captured wall‑clock timing.
     let mut prev_t_ms: u32 = 0;
     let mut prev_buf: Option<Vec<u8>> = None;
     let mut warned_missing_faces: HashSet<&'static str> = HashSet::new();
@@ -98,13 +112,8 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<(
 
     let mut total_apply_ms = 0u128;
     let mut total_rasterize_ms = 0u128;
-    let mut total_quantize_ms = 0u128;
-    let mut total_encode_ms = 0u128;
-
-    // Cache palette from first encoded frame; reuse for subsequent frames with
-    // fast nearest-neighbor quantization instead of expensive NeuQuant. This
-    // cuts quantize time by ~95% when keyframes are sparse (typical case).
-    let mut cached_palette: Option<Vec<u8>> = None;
+    let mut total_send_ms = 0u128;
+    let mut frame_count = 0usize;
 
     for (i, frame) in rec.frames.iter().enumerate() {
         let apply_start = Instant::now();
@@ -140,89 +149,65 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<(
         let delay_cs = ((delay_ms as f32 / 10.0).round() as u16).max(2);
         prev_t_ms = frame.t_ms;
 
-        let quantize_start = Instant::now();
+        // Convert RGB to RGBA (gifski requires RGBA).
+        let rgba_vec = rgb_to_rgba(&buf);
+        
+        // Wrap in ImgVec for gifski's expected type.
+        let frame_img = imgref::ImgVec::new(
+            rgba_vec,
+            canvas_w as usize,
+            canvas_h as usize,
+        );
 
-        // First frame: full NeuQuant quantization to build palette.
-        // Subsequent frames: reuse palette with fast nearest-neighbor quantization.
-        let (palette, indexed) = if let Some(ref cached) = cached_palette {
-            let indexed = quantize_with_palette(&buf, cached);
-            (cached.clone(), indexed)
-        } else {
-            // NeuQuant expects RGBA, so convert RGB to RGBA.
-            let mut rgba = vec![0u8; buf.len() / 3 * 4];
-            for (i, chunk) in buf.chunks(3).enumerate() {
-                rgba[i * 4] = chunk[0];
-                rgba[i * 4 + 1] = chunk[1];
-                rgba[i * 4 + 2] = chunk[2];
-                rgba[i * 4 + 3] = 255; // fully opaque
-            }
-            let neuquant = NeuQuant::new(10, 256, &rgba);
-            let pal = neuquant.color_map_rgb();
-            let indexed = quantize_with_palette(&buf, &pal);
-            cached_palette = Some(pal.clone());
-            (pal, indexed)
-        };
+        // Send frame to gifski's collector. This is streaming: the frame is
+        // encoded in a background thread while we continue rasterizing.
+        // The delay_cs tells gifski how long to display this frame.
+        let send_start = Instant::now();
+        collector
+            .add_frame_rgba(
+                frame_count,
+                frame_img,
+                delay_cs as f64 / 100.0, // convert centiseconds to seconds
+            )
+            .context("add frame to gifski")?;
+        total_send_ms += send_start.elapsed().as_millis();
 
-        total_quantize_ms += quantize_start.elapsed().as_millis();
-
-        // Create frame with indexed data and palette.
-        let mut gif_frame = Frame::default();
-        gif_frame.width = canvas_w as u16;
-        gif_frame.height = canvas_h as u16;
-        gif_frame.delay = delay_cs;
-        gif_frame.palette = Some(palette);
-        gif_frame.buffer = std::borrow::Cow::Owned(indexed);
-
-        let encode_start = Instant::now();
-        encoder.write_frame(&gif_frame)?;
-        total_encode_ms += encode_start.elapsed().as_millis();
-
+        frame_count += 1;
         prev_buf = Some(buf);
     }
+
+    // Signal EOF to the collector; this will cause the writer thread to finish.
+    drop(collector);
+
+    // Wait for the writer thread to complete and flush the GIF to disk.
+    writer_handle
+        .join()
+        .map_err(|_| anyhow!("writer thread panicked"))?
+        .context("write gif")?;
 
     info!(
         apply_ms = total_apply_ms,
         rasterize_ms = total_rasterize_ms,
-        quantize_ms = total_quantize_ms,
-        encode_ms = total_encode_ms,
-        total_ms = total_apply_ms + total_rasterize_ms + total_quantize_ms + total_encode_ms,
-        "render phase timing breakdown"
+        send_ms = total_send_ms,
+        total_ms = total_apply_ms + total_rasterize_ms + total_send_ms,
+        frame_count = frame_count,
+        "render phase timing breakdown (streaming with gifski)"
     );
     Ok(())
 }
 
-/// Quantize RGB buffer to indexed data using fast nearest-neighbor matching
-/// against a fixed palette. Used for diff frames to avoid expensive NeuQuant
-/// re-quantization—palette must be 256 colors (768 bytes = 256 × 3 RGB).
-fn quantize_with_palette(rgb: &[u8], palette: &[u8]) -> Vec<u8> {
-    debug_assert_eq!(palette.len(), 768, "palette must be 256 RGB colors");
-
-    let mut indexed = vec![0u8; rgb.len() / 3];
-
-    for (i, chunk) in rgb.chunks(3).enumerate() {
-        let [r, g, b] = [chunk[0], chunk[1], chunk[2]];
-
-        // Find nearest palette color using simple Euclidean distance.
-        let mut best_idx = 0u8;
-        let mut best_dist = u32::MAX;
-
-        for (j, palette_chunk) in palette.chunks(3).enumerate() {
-            let [pr, pg, pb] = [palette_chunk[0], palette_chunk[1], palette_chunk[2]];
-            let dr = r as i32 - pr as i32;
-            let dg = g as i32 - pg as i32;
-            let db = b as i32 - pb as i32;
-            let dist = (dr * dr + dg * dg + db * db) as u32;
-
-            if dist < best_dist {
-                best_dist = dist;
-                best_idx = j as u8;
-            }
-        }
-
-        indexed[i] = best_idx;
+/// Convert RGB (3-byte) to RGBA (4-byte) with full alpha.
+fn rgb_to_rgba(rgb: &[u8]) -> Vec<rgb::RGBA<u8>> {
+    let mut rgba = Vec::with_capacity(rgb.len() / 3);
+    for chunk in rgb.chunks(3) {
+        rgba.push(rgb::RGBA {
+            r: chunk[0],
+            g: chunk[1],
+            b: chunk[2],
+            a: 255, // fully opaque
+        });
     }
-
-    indexed
+    rgba
 }
 
 fn rasterize_frame(
