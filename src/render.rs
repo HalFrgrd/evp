@@ -180,7 +180,8 @@ fn run_gif_stream_worker(
     .context("initialize gifski encoder")?;
 
     let mut warned_missing_faces: HashSet<&'static str> = HashSet::new();
-    let mut prev_t_ms = 0u32;
+    let mut last_seen_t_ms = 0u32;
+    let mut last_emitted_t_ms = 0u32;
     let mut prev_buf: Option<Vec<u8>> = None;
     let mut frame_index = 0usize;
 
@@ -213,23 +214,49 @@ fn run_gif_stream_worker(
             &mut warned_missing_faces,
         );
 
-        if prev_buf.as_ref() == Some(&buf) {
-            prev_t_ms = frame.t_ms;
+        last_seen_t_ms = frame.t_ms;
+
+        if prev_buf.is_none() {
+            // gifski expects absolute presentation timestamps and the first
+            // frame at t=0. Emit the very first captured frame unconditionally
+            // so leading sleeps are represented correctly.
+            let rgba = rgb_to_rgba(&buf);
+            let frame_img = imgref::ImgVec::new(rgba, canvas_w as usize, canvas_h as usize);
+            collector
+                .add_frame_rgba(frame_index, frame_img, 0.0)
+                .context("add first frame to gifski")?;
+            frame_index += 1;
+            last_emitted_t_ms = frame.t_ms;
+            prev_buf = Some(buf);
             continue;
         }
 
-        let delay_ms = frame.t_ms.saturating_sub(prev_t_ms);
-        let delay_cs = ((delay_ms as f32 / 10.0).round() as u16).max(2);
-        prev_t_ms = frame.t_ms;
+        if prev_buf.as_ref() == Some(&buf) {
+            continue;
+        }
 
         let rgba = rgb_to_rgba(&buf);
         let frame_img = imgref::ImgVec::new(rgba, canvas_w as usize, canvas_h as usize);
         collector
-            .add_frame_rgba(frame_index, frame_img, delay_cs as f64 / 100.0)
+            .add_frame_rgba(frame_index, frame_img, frame.t_ms as f64 / 1000.0)
             .context("add frame to gifski")?;
 
         frame_index += 1;
+        last_emitted_t_ms = frame.t_ms;
         prev_buf = Some(buf);
+    }
+
+    // If capture ended on unchanged frames (common for trailing Sleep),
+    // flush the trailing delay by duplicating the last emitted frame at
+    // the final absolute timestamp.
+    if last_seen_t_ms > last_emitted_t_ms
+        && let Some(buf) = prev_buf.as_ref()
+    {
+        let rgba = rgb_to_rgba(buf);
+        let frame_img = imgref::ImgVec::new(rgba, canvas_w as usize, canvas_h as usize);
+        collector
+            .add_frame_rgba(frame_index, frame_img, last_seen_t_ms as f64 / 1000.0)
+            .context("add trailing delay frame to gifski")?;
     }
 
     drop(collector);
