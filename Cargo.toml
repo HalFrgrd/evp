@@ -1,7 +1,7 @@
 [package]
 name = "evp"
 version = "0.3.0"
-edition = "2021"
+edition = "2024"
 build = "build.rs"
 
 [lib]
@@ -51,7 +51,7 @@ rgb = "0.8"
 imgref = "1.10"
 ab_glyph = "0.2"
 fontdb = "0.23"
-woff2 = "0.3"
+woff2-patched = "0.4"
 
 # Allocator. We build the release binary against musl libc (see
 # Dockerfile + .github/workflows/release.yml), and musl's default

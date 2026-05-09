@@ -15,7 +15,7 @@ use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
 use gifski::{Settings, progress};
 use tracing::{info, warn};
-use woff2::decode;
+use woff2_patched::convert_woff2_to_ttf;
 
 use crate::recording::{RawFrame, Recording, style_flags};
 
@@ -23,14 +23,22 @@ use crate::recording::{RawFrame, Recording, style_flags};
 // bursts so the upstream pipeline usually stays lock-free.
 const RENDER_STREAM_CHANNEL_CAPACITY: usize = 4096;
 
-const EMBEDDED_JETBRAINS_NERD_MONO_REGULAR_WOFF2: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/JetBrainsMonoNerdFontMono-Regular.woff2"));
-const EMBEDDED_JETBRAINS_NERD_MONO_BOLD_WOFF2: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/JetBrainsMonoNerdFontMono-Bold.woff2"));
-const EMBEDDED_JETBRAINS_NERD_MONO_ITALIC_WOFF2: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/JetBrainsMonoNerdFontMono-Italic.woff2"));
-const EMBEDDED_JETBRAINS_NERD_MONO_BOLD_ITALIC_WOFF2: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/JetBrainsMonoNerdFontMono-BoldItalic.woff2"));
+const EMBEDDED_JETBRAINS_NERD_MONO_REGULAR_WOFF2: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/JetBrainsMonoNerdFontMono-Regular.woff2"
+));
+const EMBEDDED_JETBRAINS_NERD_MONO_BOLD_WOFF2: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/JetBrainsMonoNerdFontMono-Bold.woff2"
+));
+const EMBEDDED_JETBRAINS_NERD_MONO_ITALIC_WOFF2: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/JetBrainsMonoNerdFontMono-Italic.woff2"
+));
+const EMBEDDED_JETBRAINS_NERD_MONO_BOLD_ITALIC_WOFF2: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/JetBrainsMonoNerdFontMono-BoldItalic.woff2"
+));
 const EMBEDDED_UNIFONT_UPPER_WOFF2: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/unifont_upper-17.0.04.woff2"));
 const EMBEDDED_UNIFONT_CSUR_WOFF2: &[u8] =
@@ -94,8 +102,7 @@ pub fn spawn_gif_stream(
     let canvas_w = cfg.cols as u32 * cell_w + opts.padding_px * 2;
     let canvas_h = cfg.rows as u32 * cell_h + opts.padding_px * 2;
 
-    let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) =
-        bounded(RENDER_STREAM_CHANNEL_CAPACITY);
+    let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) = bounded(RENDER_STREAM_CHANNEL_CAPACITY);
     let join = thread::Builder::new()
         .name("evp-gif-stream".into())
         .spawn(move || {
@@ -311,7 +318,8 @@ fn rasterize_raw_frame(
                 continue;
             }
 
-            let primary_font = select_primary_font_for_cell(family, cell.flags, warned_missing_faces);
+            let primary_font =
+                select_primary_font_for_cell(family, cell.flags, warned_missing_faces);
             let mut pen_x = x as f32;
             for ch in cell.text.chars() {
                 let font = select_font_for_char(primary_font, &family.fallback_regular, ch);
@@ -525,8 +533,8 @@ fn load_default_fallback_faces() -> (Vec<FontArc>, Vec<String>) {
 }
 
 fn decode_embedded_face(name: &'static str, bytes: &'static [u8]) -> Result<FontArc> {
-    let ttf = decode(bytes)
-        .ok_or_else(|| anyhow!("failed to decompress embedded WOFF2 face: {}", name))?;
+    let ttf = convert_woff2_to_ttf(&mut std::io::Cursor::new(bytes))
+        .with_context(|| format!("failed to decompress embedded WOFF2 face: {}", name))?;
     FontArc::try_from_vec(ttf).with_context(|| format!("invalid embedded font face: {}", name))
 }
 
@@ -579,7 +587,11 @@ fn select_primary_font_for_cell<'a>(
     &family.regular
 }
 
-fn select_font_for_char<'a>(primary: &'a FontArc, fallback: &'a [FontArc], ch: char) -> &'a FontArc {
+fn select_font_for_char<'a>(
+    primary: &'a FontArc,
+    fallback: &'a [FontArc],
+    ch: char,
+) -> &'a FontArc {
     if has_glyph(primary, ch) {
         return primary;
     }

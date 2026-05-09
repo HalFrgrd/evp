@@ -4,7 +4,6 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use ttf2woff2::{encode, BrotliQuality};
 use vergen_gitcl::{Build, Cargo, Emitter, Gitcl, Rustc};
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -73,9 +72,7 @@ fn in_git_worktree() -> bool {
 }
 
 fn emit_git_fallbacks() {
-    println!(
-        "cargo:warning=git metadata unavailable; using fallback VERGEN_GIT_* values"
-    );
+    println!("cargo:warning=git metadata unavailable; using fallback VERGEN_GIT_* values");
 
     emit_git_fallback(
         "VERGEN_GIT_SHA",
@@ -122,16 +119,8 @@ fn emit_git_fallbacks() {
         &["VERGEN_GIT_COMMIT_MESSAGE"],
         "unknown",
     );
-    emit_git_fallback(
-        "VERGEN_GIT_DESCRIBE",
-        &["VERGEN_GIT_DESCRIBE"],
-        "unknown",
-    );
-    emit_git_fallback(
-        "VERGEN_GIT_DIRTY",
-        &["VERGEN_GIT_DIRTY"],
-        "unknown",
-    );
+    emit_git_fallback("VERGEN_GIT_DESCRIBE", &["VERGEN_GIT_DESCRIBE"], "unknown");
+    emit_git_fallback("VERGEN_GIT_DIRTY", &["VERGEN_GIT_DIRTY"], "unknown");
 }
 
 fn emit_git_fallback(key: &str, candidates: &[&str], default: &str) {

@@ -158,13 +158,13 @@ pub fn run_with_frame_tap(
 
     let encoder = crate::encoder::spawn(
         EncoderConfig {
-        cols: opts.cols,
-        rows: opts.rows,
-        framerate: script.settings.framerate,
-        cell_width_px: opts.cell_w_px,
-        cell_height_px: opts.cell_h_px,
-        padding_px: opts.padding_px,
-        keyframe_interval: script.settings.framerate * 5,
+            cols: opts.cols,
+            rows: opts.rows,
+            framerate: script.settings.framerate,
+            cell_width_px: opts.cell_w_px,
+            cell_height_px: opts.cell_h_px,
+            padding_px: opts.padding_px,
+            keyframe_interval: script.settings.framerate * 5,
         },
         frame_tap,
     );

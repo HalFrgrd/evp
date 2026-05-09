@@ -1,10 +1,7 @@
 //! `evp` binary entry point. All real work lives in the library crate
 //! (`evp::*`); this file is the thinnest possible CLI shim around it.
 
-use std::{
-    path::PathBuf,
-    process::ExitCode,
-};
+use std::{path::PathBuf, process::ExitCode};
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, ValueEnum};
@@ -155,7 +152,10 @@ fn real_main() -> Result<()> {
 
     info!(events = script.events.len(), "script loaded");
 
-    let ext = output_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let ext = output_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
     let out = if ext.eq_ignore_ascii_case("svg") {
         let svg_opts = evp::SvgOptions {
             font_size: render_opts.font_size,

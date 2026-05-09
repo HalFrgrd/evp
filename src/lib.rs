@@ -28,8 +28,8 @@ pub mod keys;
 pub mod pty;
 pub mod recording;
 pub mod render;
-pub mod renderer;
 pub mod render_svg;
+pub mod renderer;
 pub mod runner;
 pub mod script;
 

@@ -93,11 +93,7 @@ pub fn spawn_renderer(
     }
 }
 
-pub fn render_recording(
-    rec: &Recording,
-    backend: RendererBackend,
-    output: PathBuf,
-) -> Result<()> {
+pub fn render_recording(rec: &Recording, backend: RendererBackend, output: PathBuf) -> Result<()> {
     let renderer = spawn_renderer(
         RendererConfig {
             cols: rec.cols,

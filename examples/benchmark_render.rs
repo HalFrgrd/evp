@@ -24,8 +24,7 @@ fn main() -> anyhow::Result<()> {
     let fixture_dir = create_fixture_fs()?;
     let script = build_script(&fixture_dir);
     let script_out = fixture_dir.join("benchmark.tape");
-    fs::write(&script_out, &script)
-        .with_context(|| format!("writing {}", script_out.display()))?;
+    fs::write(&script_out, &script).with_context(|| format!("writing {}", script_out.display()))?;
 
     let rec_build_start = Instant::now();
     let rec = capture_once_from_script(&script)?;
@@ -106,7 +105,10 @@ fn create_fixture_fs() -> anyhow::Result<PathBuf> {
     fs::write(p.join("alpha_one.txt"), "alpha one\n")?;
     fs::write(p.join("alpha_two.log"), "alpha two\n")?;
     fs::write(p.join("alpha_dir/nested/readme.md"), "nested file\n")?;
-    fs::write(p.join("long-directory-name-for-tab-completion/sample.txt"), "sample\n")?;
+    fs::write(
+        p.join("long-directory-name-for-tab-completion/sample.txt"),
+        "sample\n",
+    )?;
     fs::write(p.join("bin/run-me.sh"), "#!/bin/sh\necho run\n")?;
 
     #[cfg(unix)]
