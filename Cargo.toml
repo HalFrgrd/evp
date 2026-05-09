@@ -52,5 +52,14 @@ imgref = "1.10"
 ab_glyph = "0.2"
 fontdb = "0.23"
 
+# Allocator. We build the release binary against musl libc (see
+# Dockerfile + .github/workflows/release.yml), and musl's default
+# allocator is markedly slower than glibc's on the alloc-heavy gif /
+# svg / glyph-cache workloads in this crate. mimalloc closes that gap
+# (and beats glibc on most benchmarks). Wired up only for the binary
+# in src/bin/evp.rs — the library itself stays allocator-agnostic so
+# downstream embedders can pick their own.
+mimalloc = { version = "0.1", default-features = false }
+
 [build-dependencies]
 vergen-gitcl = { version = "10.0.0-beta.8", features = ["build", "cargo", "rustc"] }

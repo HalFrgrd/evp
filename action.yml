@@ -91,7 +91,7 @@ runs:
 
         # Tarball name layout matches .github/workflows/release.yml.
         version_no_v="${tag#v}"
-        stage="evp-${version_no_v}-x86_64-unknown-linux-gnu"
+        stage="evp-${version_no_v}-x86_64-unknown-linux-musl"
         url="https://github.com/${repo}/releases/download/${tag}/${stage}.tar.gz"
         sha_url="${url}.sha256"
 

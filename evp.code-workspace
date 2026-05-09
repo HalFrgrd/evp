@@ -18,7 +18,9 @@
 			"cargo check": true,
 			"cargo info": true,
 			"cargo run": true,
-			"cargo build": true
+			"cargo build": true,
+			"docker build": true,
+			"docker history": true
 		}
 	}
 }

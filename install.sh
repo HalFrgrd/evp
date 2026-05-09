@@ -60,7 +60,7 @@ OS="$(uname -s)"
 ARCH="$(uname -m)"
 
 case "$OS" in
-    Linux) os_tag="unknown-linux-gnu" ;;
+    Linux) os_tag="unknown-linux-musl" ;;
     *)
         err "Unsupported OS: $OS. Only Linux prebuilt binaries are published today.
 Build from source instead: https://github.com/${REPO}#build-from-source"

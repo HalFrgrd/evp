@@ -45,11 +45,57 @@ workflow on every push to `master` and uploaded as assets on the rolling
 
 ## Quick start
 
+Grab a prebuilt binary into the current directory — no Rust, no Zig,
+no Docker:
+
+```bash
+curl -sSfL https://raw.githubusercontent.com/HalFrgrd/evp/master/install.sh | sh
+```
+
+This drops an `evp` executable into `$PWD`. Override the destination
+with `EVP_INSTALL_DIR=~/.local/bin sh` or pin a release with
+`EVP_VERSION=v0.2.0 sh`. The binary is a single fully static
+(`musl` + `static-pie`) ELF — see [System requirements](#system-requirements)
+below.
+
+Verify the install with the built-in demo (no script files needed):
+
+```bash
+./evp --run-test-script
+# → writes ./evp-test.gif
+```
+
+Then render your own scripts:
+
+```bash
+./evp examples/hello.tape -o hello.gif
+```
+
+### System requirements
+
+The prebuilt binary is statically linked against `musl` libc as a
+`static-pie` executable, so it has **no** dynamic library dependencies
+at all:
+
+```text
+$ ldd evp
+        statically linked
+$ file evp
+evp: ELF 64-bit LSB pie executable, x86-64, ..., static-pie linked
+```
+
+It runs unmodified on any x86_64 Linux kernel — Alpine, Debian (any
+version), Ubuntu, RHEL/CentOS (any version), distroless, scratch — no
+glibc version requirement.
+
+**Not required**: fontconfig, freetype, ImageMagick, ffmpeg, a display
+server, or any installed fonts. JetBrains Mono is embedded into the
+binary.
+
 ### Using the Docker image
 
-The published image is fully self-contained — `libghostty-vt.a` is
-statically linked into the binary, so there is nothing to install on
-your host.
+If you don't want a binary on the host, the published image is fully
+self-contained:
 
 ```bash
 docker run --rm -v "$PWD:/work" \
@@ -57,9 +103,10 @@ docker run --rm -v "$PWD:/work" \
     examples/hello.tape -o hello.gif
 ```
 
-### Using the binary
+### Build from source
 
-You will need:
+Build dependencies (only needed at *build* time — the resulting binary
+does not need either):
 
 - a Rust toolchain,
 - [Zig 0.15.x](https://ziglang.org/download/) on `$PATH` (libghostty's
@@ -73,7 +120,8 @@ cargo build --release
 ./target/release/evp examples/hello.tape -o hello.gif
 ```
 
-The runtime binary has **no** dynamic dependency on `libghostty-vt.so`:
+The resulting binary has **no** dynamic dependency on `libghostty-vt.so`
+and **no** runtime requirement on Zig:
 
 ```bash
 $ ldd ./target/release/evp | grep ghostty || echo "statically linked"
@@ -103,11 +151,13 @@ use this same API end-to-end.
 
 ```text
 evp <script> [-o <output.gif>] [--font <path.ttf>] [--recording-json <path.json>] [--log-level <level>]
+evp --run-test-script [-o <output.gif>]
 ```
 
 | Flag | Meaning |
 | --- | --- |
-| `<script>` | Path to a `.tape` file. |
+| `<script>` | Path to a `.tape` file. Required unless `--run-test-script` is set. |
+| `--run-test-script` | Run a small built-in demo tape embedded in the binary. Writes `./evp-test.gif` by default. Useful for verifying an install end-to-end with no external files. |
 | `-o`, `--output` | Override the script's `Output` directive. Output extension picks the renderer (`.gif` or `.svg`). |
 | `--font` | Path to a TTF/OTF/TTC used by the GIF renderer. Defaults to embedded `JetBrains Mono` family files in `assets/fonts/`. |
 | `--recording-json` | Also dump the intermediate `Recording` to JSON for later re-rendering or inspection. |
@@ -171,30 +221,19 @@ Pin to a specific release for reproducibility:
 
 ### System requirements
 
-`evp` is a static-ish glibc-linked binary. The release tarball is built
-on Ubuntu 22.04 (glibc 2.35) and runs unmodified on:
+The release tarball is a fully static `musl` + `static-pie` x86_64
+binary, so it runs on every GitHub-hosted Linux runner (`ubuntu-22.04`,
+`ubuntu-24.04`, etc.) without any glibc version concern.
 
-- the GitHub-hosted `ubuntu-22.04` and `ubuntu-24.04` runners,
-- Debian 12+, Ubuntu 22.04+, recent Fedora/RHEL/Arch.
-
-Required at runtime: just `glibc`, `libm`, `libgcc_s` (already present
-on every standard Linux distro). **No** fontconfig, **no** display
-server, **no** ImageMagick, **no** ffmpeg. Fonts are embedded into the
-binary, so even a fresh container without `fonts-*` packages will work.
-
-```bash
-$ ldd /usr/local/bin/evp
-        linux-vdso.so.1
-        libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1
-        libm.so.6     => /lib/x86_64-linux-gnu/libm.so.6
-        libc.so.6     => /lib/x86_64-linux-gnu/libc.so.6
-```
+Required at runtime: nothing — `ldd` reports `statically linked`. **No**
+fontconfig, **no** display server, **no** ImageMagick, **no** ffmpeg,
+**no** Zig. Fonts are embedded into the binary. See the top-level
+[System requirements](#system-requirements) section for details.
 
 ### Self-hosted runners
 
-If you run on a non-amd64 host (arm64, macOS, Windows) or your runner
-predates glibc 2.35, the prebuilt binary won't load. For now you have
-two options:
+The prebuilt tarball is x86_64-only. On non-amd64 hosts (arm64, macOS,
+Windows) you have two options:
 
 1. **Use the published Docker image** — see [Docker fallback](#docker-fallback)
    below.

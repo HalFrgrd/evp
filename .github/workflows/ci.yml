@@ -1,10 +1,15 @@
 name: ci
 
-# Sanity-check builds and tests on every push / PR. Intentionally cheap
-# (no docker, no example rendering) so it runs fast and gates merges.
+# Sanity-check builds and tests on every push / PR.
 #
-# `libghostty-vt` and `libghostty-vt-sys` are pulled from crates.io – no
-# sibling git checkout needed.
+# Everything runs inside the project Dockerfile so the build environment
+# stays identical to the one used by `release.yml` and `docker.yml`:
+# Rust + Zig 0.15.x + cargo-zigbuild, targeting glibc 2.17 for max
+# portability.
+#
+# The Dockerfile's `test` stage runs `cargo build --workspace` and
+# `cargo test --workspace`. If that stage builds successfully, the
+# whole workspace compiles and all tests pass. No further steps needed.
 
 on:
   push:
@@ -23,38 +28,25 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:
-      ZIG_VERSION: 0.15.2
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Zig ${{ env.ZIG_VERSION }}
-        # libghostty-vt-sys's build.rs invokes `zig build` to compile the
-        # vendored Ghostty source; Zig 0.15.x must be on PATH.
-        run: |
-          set -eux
-          tarball="zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
-          curl -fsSLo "/tmp/${tarball}" "https://ziglang.org/download/${ZIG_VERSION}/${tarball}"
-          sudo tar -xJf "/tmp/${tarball}" -C /opt
-          sudo mv "/opt/zig-x86_64-linux-${ZIG_VERSION}" /opt/zig
-          echo "/opt/zig" >> "$GITHUB_PATH"
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+      - name: Build + test (Dockerfile `test` stage)
+        # `--target test` runs the workspace test suite as part of the
+        # docker build — cache mounts inside the Dockerfile speed up
+        # subsequent runs. We don't push anything; the image stays on
+        # the runner and is discarded.
+        uses: docker/build-push-action@v6
         with:
-          # libghostty-vt-sys compiles native code via Zig. Restoring a
-          # previously built target/ directory from a different runner CPU
-          # can trip SIGILL at test runtime.
-          cache-targets: false
+          context: .
+          file: ./Dockerfile
+          target: test
+          push: false
+          load: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: cargo build
-        run: cargo build --workspace
-
-      - name: cargo test
-        # Tests fork /bin/sh in a PTY; serialise to keep PTY allocation
-        # under control on small CI runners.
-        run: cargo test --workspace -- --test-threads=1

@@ -11,6 +11,14 @@ use clap::{Parser, ValueEnum};
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
+// We ship a musl-linked release build for max portability. musl's
+// default allocator is significantly slower than glibc's on this
+// crate's gif / svg / glyph-cache workloads; mimalloc closes the gap
+// and outperforms glibc on most benchmarks. Library users can pick
+// their own allocator — this only applies to the bundled CLI.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 /// Embedded demo tape used by `--run-test-script`. Source lives in
 /// `examples/test.tape` so it stays in sync with the rest of the demos.
 const EMBEDDED_TEST_TAPE: &str = include_str!("../../examples/test.tape");
