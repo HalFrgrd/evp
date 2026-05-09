@@ -15,7 +15,7 @@ use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
 use gifski::{Settings, progress};
 use tracing::{info, warn};
-use woff2_patched::from_woff2;
+use woff2::decode;
 
 use crate::recording::{RawFrame, Recording, style_flags};
 
@@ -525,7 +525,7 @@ fn load_default_fallback_faces() -> (Vec<FontArc>, Vec<String>) {
 }
 
 fn decode_embedded_face(name: &'static str, bytes: &'static [u8]) -> Result<FontArc> {
-    let ttf = from_woff2(bytes)
+    let ttf = decode(bytes)
         .ok_or_else(|| anyhow!("failed to decompress embedded WOFF2 face: {}", name))?;
     FontArc::try_from_vec(ttf).with_context(|| format!("invalid embedded font face: {}", name))
 }

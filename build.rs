@@ -38,28 +38,25 @@ fn compress_embedded_fonts() -> Result<(), Box<dyn Error>> {
     let out_dir = env::var("OUT_DIR")?;
     let out_dir = Path::new(&out_dir);
 
-    // Faces embedded into the renderer. We compress all of them to WOFF2
-    // at build time and include the compressed bytes in the final binary.
+    // All fonts are pre-compressed to WOFF2 in assets/fonts/*.woff2
+    // Just copy them to OUT_DIR for embedding in the binary.
     let faces = [
-        "JetBrainsMonoNerdFontMono-Regular.ttf",
-        "JetBrainsMonoNerdFontMono-Bold.ttf",
-        "JetBrainsMonoNerdFontMono-Italic.ttf",
-        "JetBrainsMonoNerdFontMono-BoldItalic.ttf",
-        "NotoSansMono-Regular.ttf",
-        "NotoSansSymbols2-Regular.ttf",
-        "NotoSansMonoCJKjp-Subset.ttf",
-        "unifont_upper-17.0.04.ttf",
-        "unifont_csur-17.0.04.ttf",
+        "JetBrainsMonoNerdFontMono-Regular",
+        "JetBrainsMonoNerdFontMono-Bold",
+        "JetBrainsMonoNerdFontMono-Italic",
+        "JetBrainsMonoNerdFontMono-BoldItalic",
+        "NotoSansMono-Regular",
+        "NotoSansSymbols2-Regular",
+        "NotoSansMonoCJKjp-Subset",
+        "unifont_upper-17.0.04",
+        "unifont_csur-17.0.04",
     ];
 
     for face in faces {
-        let src = Path::new("assets/fonts").join(face);
+        let src = Path::new("assets/fonts").join(format!("{}.woff2", face));
         println!("cargo:rerun-if-changed={}", src.display());
-        let font = fs::read(&src)?;
-        let woff2 = encode(&font, BrotliQuality::default())
-            .map_err(|e| format!("failed to compress {} as WOFF2: {}", src.display(), e))?;
-        let out = out_dir.join(face.replace(".ttf", ".woff2"));
-        fs::write(out, woff2)?;
+        let out = out_dir.join(format!("{}.woff2", face));
+        fs::copy(&src, &out)?;
     }
 
     Ok(())
