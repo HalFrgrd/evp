@@ -1,0 +1,105 @@
+name: release
+
+# Builds a prebuilt `evp` binary on tag push and uploads it to the
+# GitHub Release. The accompanying `action.yml` at the repo root
+# downloads this artifact in user workflows.
+#
+# Currently amd64 Linux only. We build on Ubuntu 22.04 (glibc 2.35) for
+# wide compatibility — the resulting binary runs on Ubuntu 22.04+,
+# Debian 12+, recent Fedora/RHEL, and the GitHub-hosted ubuntu-22.04 /
+# ubuntu-24.04 runners.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag name to attach the release to (e.g. v0.2.0)"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-linux-amd64:
+    name: build evp-x86_64-unknown-linux-gnu
+    # Pin to ubuntu-22.04 rather than ubuntu-latest. The binary links
+    # against the host glibc; building on the older LTS gives a binary
+    # that runs on every supported Ubuntu/Debian release without forcing
+    # the user to upgrade glibc.
+    runs-on: ubuntu-22.04
+    env:
+      ZIG_VERSION: 0.15.2
+      TARGET: x86_64-unknown-linux-gnu
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Zig ${{ env.ZIG_VERSION }}
+        # libghostty-vt-sys's build.rs invokes `zig build` to compile the
+        # vendored Ghostty source; Zig 0.15.x must be on PATH.
+        run: |
+          set -eux
+          tarball="zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
+          curl -fsSLo "/tmp/${tarball}" "https://ziglang.org/download/${ZIG_VERSION}/${tarball}"
+          sudo tar -xJf "/tmp/${tarball}" -C /opt
+          sudo mv "/opt/zig-x86_64-linux-${ZIG_VERSION}" /opt/zig
+          echo "/opt/zig" >> "$GITHUB_PATH"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.TARGET }}
+
+      - name: cargo build --release
+        run: cargo build --release --bin evp --target ${{ env.TARGET }}
+
+      - name: Verify binary
+        run: |
+          set -eux
+          ./target/${TARGET}/release/evp --version
+          # Print runtime library deps so users can see what's required
+          ldd ./target/${TARGET}/release/evp || true
+
+      - name: Package tarball
+        id: pkg
+        run: |
+          set -eux
+          tag="${{ steps.tag.outputs.name }}"
+          # Strip leading 'v' for the version field inside the archive name.
+          version="${tag#v}"
+          stage="evp-${version}-${TARGET}"
+          mkdir -p "dist/${stage}"
+          cp "target/${TARGET}/release/evp" "dist/${stage}/"
+          cp README.md LICENSE "dist/${stage}/" 2>/dev/null || true
+          tar -C dist -czf "dist/${stage}.tar.gz" "${stage}"
+          (cd dist && sha256sum "${stage}.tar.gz" > "${stage}.tar.gz.sha256")
+          ls -lh dist
+          echo "tarball=dist/${stage}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "checksum=dist/${stage}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          files: |
+            ${{ steps.pkg.outputs.tarball }}
+            ${{ steps.pkg.outputs.checksum }}
+          fail_on_unmatched_files: true
+          generate_release_notes: true

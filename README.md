@@ -132,7 +132,79 @@ falls back to the regular face.
 
 ## Using `evp` in GitHub Actions
 
-The Docker image is the easiest path:
+The recommended path is the bundled composite action, which downloads a
+prebuilt linux-amd64 binary from the matching GitHub Release and adds it
+to `$PATH`. No Docker daemon, no Rust toolchain, no Zig — just one
+`uses:` step.
+
+```yaml
+- uses: HalFrgrd/evp@v1
+  with:
+    script: docs/demo.tape
+    output: docs/demo.gif
+
+- uses: stefanzweifel/git-auto-commit-action@v5
+  with:
+    file_pattern: docs/demo.gif
+```
+
+Pin to a specific release for reproducibility:
+
+```yaml
+- uses: HalFrgrd/evp@v0.2.0
+  with:
+    script: docs/demo.tape
+    output: docs/demo.gif
+    version: v0.2.0
+```
+
+### Action inputs
+
+| Input | Default | Meaning |
+| --- | --- | --- |
+| `script`      | *(required)* | Path to the `.tape` script. |
+| `output`      | from script's `Output` directive | Output file path. Extension picks the renderer (`.gif` or `.svg`). |
+| `version`     | `latest`     | evp release tag to install. |
+| `font`        | embedded JetBrains Mono | Optional path to a TTF/OTF font for the GIF renderer. |
+| `log-level`   | `info`       | One of `error`, `warn`, `info`, `debug`, `trace`. |
+| `install-dir` | `/usr/local/bin` | Where to install the `evp` binary. Added to `$GITHUB_PATH`. |
+
+### System requirements
+
+`evp` is a static-ish glibc-linked binary. The release tarball is built
+on Ubuntu 22.04 (glibc 2.35) and runs unmodified on:
+
+- the GitHub-hosted `ubuntu-22.04` and `ubuntu-24.04` runners,
+- Debian 12+, Ubuntu 22.04+, recent Fedora/RHEL/Arch.
+
+Required at runtime: just `glibc`, `libm`, `libgcc_s` (already present
+on every standard Linux distro). **No** fontconfig, **no** display
+server, **no** ImageMagick, **no** ffmpeg. Fonts are embedded into the
+binary, so even a fresh container without `fonts-*` packages will work.
+
+```bash
+$ ldd /usr/local/bin/evp
+        linux-vdso.so.1
+        libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1
+        libm.so.6     => /lib/x86_64-linux-gnu/libm.so.6
+        libc.so.6     => /lib/x86_64-linux-gnu/libc.so.6
+```
+
+### Self-hosted runners
+
+If you run on a non-amd64 host (arm64, macOS, Windows) or your runner
+predates glibc 2.35, the prebuilt binary won't load. For now you have
+two options:
+
+1. **Use the published Docker image** — see [Docker fallback](#docker-fallback)
+   below.
+2. **Build from source** — install Zig 0.15.x and Rust, then
+   `cargo install --git https://github.com/HalFrgrd/evp evp`.
+
+### Docker fallback
+
+A multi-arch image is published on every push to `master` and on tag
+pushes:
 
 ```yaml
 - name: Render terminal demo
@@ -140,11 +212,11 @@ The Docker image is the easiest path:
     docker run --rm -v "$PWD:/work" \
       ghcr.io/halfrgrd/evp:latest \
       docs/demo.tape --output docs/demo.gif
-- name: Commit the gif
-  uses: stefanzweifel/git-auto-commit-action@v5
-  with:
-    file_pattern: docs/demo.gif
 ```
+
+The image is fully self-contained — `libghostty-vt.a` is statically
+linked into the binary — so no extra `--volume` for fonts or libraries
+is needed.
 
 ## Status
 

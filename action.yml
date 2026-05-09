@@ -1,0 +1,139 @@
+name: 'evp'
+description: >-
+  Render a VHS-format .tape script with evp, producing an animated GIF or SVG.
+  Downloads a prebuilt linux-amd64 binary from the GitHub Release matching the
+  requested version (no Docker, no Rust toolchain required).
+author: 'HalFrgrd'
+branding:
+  icon: 'film'
+  color: 'purple'
+
+inputs:
+  script:
+    description: 'Path to the .tape script to render.'
+    required: true
+  output:
+    description: >-
+      Output file path. Extension picks the renderer (.gif or .svg). If unset,
+      the script's `Output` directive is used.
+    required: false
+    default: ''
+  version:
+    description: >-
+      evp release tag to install (e.g. `v0.2.0`), or `latest`.
+    required: false
+    default: 'latest'
+  font:
+    description: >-
+      Optional path to a TTF/OTF font for the GIF renderer. Defaults to the
+      embedded JetBrains Mono family.
+    required: false
+    default: ''
+  log-level:
+    description: 'Log level: error|warn|info|debug|trace.'
+    required: false
+    default: 'info'
+  install-dir:
+    description: >-
+      Directory where the `evp` binary is installed. Added to $PATH for
+      subsequent steps.
+    required: false
+    default: '/usr/local/bin'
+
+outputs:
+  output-path:
+    description: 'Resolved output path that evp wrote to.'
+    value: ${{ steps.render.outputs.output-path }}
+  evp-version:
+    description: 'Resolved evp release tag that was installed.'
+    value: ${{ steps.install.outputs.tag }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: install
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        repo="${{ github.action_repository || 'HalFrgrd/evp' }}"
+        version="${{ inputs.version }}"
+        install_dir="${{ inputs.install-dir }}"
+
+        # Skip the install if a matching evp is already on PATH (useful
+        # for self-hosted runners or local testing with `act`).
+        if command -v evp >/dev/null 2>&1; then
+          existing="$(evp --version 2>/dev/null | head -n1 || true)"
+          echo "evp already on PATH: ${existing}"
+        fi
+
+        if [ "${version}" = "latest" ]; then
+          api="https://api.github.com/repos/${repo}/releases/latest"
+        else
+          api="https://api.github.com/repos/${repo}/releases/tags/${version}"
+        fi
+
+        # Resolve the release JSON (with auth where available — public
+        # repos work unauthenticated but we get a much higher rate limit
+        # by sending the workflow's GITHUB_TOKEN).
+        auth=()
+        if [ -n "${GITHUB_TOKEN:-}" ]; then
+          auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+        fi
+        release_json="$(curl -fsSL "${auth[@]}" "${api}")"
+
+        tag="$(printf '%s' "${release_json}" | grep -m1 '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
+        if [ -z "${tag}" ]; then
+          echo "::error ::could not resolve evp release tag from ${api}"
+          exit 1
+        fi
+        echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+        # Tarball name layout matches .github/workflows/release.yml.
+        version_no_v="${tag#v}"
+        stage="evp-${version_no_v}-x86_64-unknown-linux-gnu"
+        url="https://github.com/${repo}/releases/download/${tag}/${stage}.tar.gz"
+        sha_url="${url}.sha256"
+
+        tmpdir="$(mktemp -d)"
+        echo "downloading ${url}"
+        curl -fsSL "${auth[@]}" -o "${tmpdir}/evp.tar.gz" "${url}"
+        if curl -fsSL "${auth[@]}" -o "${tmpdir}/evp.tar.gz.sha256" "${sha_url}" 2>/dev/null; then
+          (cd "${tmpdir}" && sha256sum -c evp.tar.gz.sha256)
+        else
+          echo "::warning ::no .sha256 checksum published for ${tag}; skipping verification"
+        fi
+
+        tar -xzf "${tmpdir}/evp.tar.gz" -C "${tmpdir}"
+        sudo install -Dm755 "${tmpdir}/${stage}/evp" "${install_dir}/evp"
+        echo "${install_dir}" >> "$GITHUB_PATH"
+
+        "${install_dir}/evp" --version
+
+    - id: render
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        script="${{ inputs.script }}"
+        output="${{ inputs.output }}"
+        font="${{ inputs.font }}"
+        log_level="${{ inputs.log-level }}"
+
+        args=("${script}")
+        if [ -n "${output}" ]; then
+          args+=(--output "${output}")
+        fi
+        if [ -n "${font}" ]; then
+          args+=(--font "${font}")
+        fi
+        if [ -n "${log_level}" ]; then
+          args+=(--log-level "${log_level}")
+        fi
+
+        echo "running: evp ${args[*]}"
+        evp "${args[@]}"
+
+        if [ -n "${output}" ]; then
+          echo "output-path=${output}" >> "$GITHUB_OUTPUT"
+        fi
