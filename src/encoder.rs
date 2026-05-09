@@ -8,6 +8,10 @@ use crossbeam_channel::{Receiver, Sender, bounded};
 
 use crate::recording::{CellChange, Frame, RawFrame, Recording};
 
+// Keep enough buffered frames that short encode spikes do not immediately
+// push back on the terminal-driving thread.
+const RAW_FRAME_CHANNEL_CAPACITY: usize = 4096;
+
 /// Configuration constants for the encoder.
 #[derive(Debug, Clone, Copy)]
 pub struct EncoderConfig {
@@ -39,21 +43,32 @@ impl EncoderHandle {
 }
 
 /// Spawn the encoder thread.
-pub fn spawn(cfg: EncoderConfig) -> EncoderHandle {
-    let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) = bounded(64);
+pub fn spawn(cfg: EncoderConfig, frame_tap: Option<Sender<RawFrame>>) -> EncoderHandle {
+    let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) = bounded(RAW_FRAME_CHANNEL_CAPACITY);
     let join = thread::Builder::new()
         .name("evp-encoder".into())
-        .spawn(move || run(cfg, rx))
+        .spawn(move || run(cfg, rx, frame_tap))
         .expect("failed to spawn encoder thread");
     EncoderHandle { tx, join }
 }
 
-fn run(cfg: EncoderConfig, rx: Receiver<RawFrame>) -> Result<Recording> {
+fn run(
+    cfg: EncoderConfig,
+    rx: Receiver<RawFrame>,
+    frame_tap: Option<Sender<RawFrame>>,
+) -> Result<Recording> {
     let mut frames: Vec<Frame> = Vec::new();
     let mut last_dense: Option<RawFrame> = None;
     let mut frames_since_key: u32 = 0;
 
     while let Ok(frame) = rx.recv() {
+        if let Some(tap) = &frame_tap {
+            // Forward every dense frame to the renderer. If the renderer has
+            // exited early we ignore the send failure and keep producing the
+            // recording so callers can still inspect JSON output.
+            let _ = tap.send(frame.clone());
+        }
+
         // Decide between keyframe and diff.
         let is_key = match &last_dense {
             None => true,

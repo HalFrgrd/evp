@@ -2,7 +2,7 @@
 //! (`evp::*`); this file is the thinnest possible CLI shim around it.
 
 use std::{
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::ExitCode,
 };
 
@@ -122,10 +122,32 @@ fn real_main() -> Result<()> {
         );
     }
 
+    let render_opts = evp::RenderOptions {
+        font_path: cli.font.clone().or(script.settings.font_family.clone()),
+        font_size: script.settings.font_size,
+        padding_px: script.settings.padding,
+    };
+
     info!(events = script.events.len(), "script loaded");
 
-    let out = evp::run(&script).context("running script")?;
-    info!(frames = out.recording.frames.len(), "recording captured");
+    let ext = output_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let out = if ext.eq_ignore_ascii_case("svg") {
+        let svg_opts = evp::SvgOptions {
+            font_size: render_opts.font_size,
+            ..Default::default()
+        };
+        info!(path = %output_path.display(), "streaming svg render while recording");
+        let out = evp::run_and_render_svg(&script, svg_opts, output_path.clone())
+            .context("running script + streaming svg")?;
+        info!(frames = out.recording.frames.len(), "recording captured");
+        out
+    } else {
+        info!(path = %output_path.display(), "streaming gif render while recording");
+        let out = evp::run_and_render_gif(&script, render_opts, output_path.clone())
+            .context("running script + streaming gif")?;
+        info!(frames = out.recording.frames.len(), "recording captured");
+        out
+    };
 
     if let Some(path) = &cli.recording_json {
         let bytes = evp::recording_to_json(&out.recording)?;
@@ -133,12 +155,6 @@ fn real_main() -> Result<()> {
         info!(path = %path.display(), "recording written");
     }
 
-    let render_opts = evp::RenderOptions {
-        font_path: cli.font.clone().or(script.settings.font_family.clone()),
-        font_size: script.settings.font_size,
-        padding_px: script.settings.padding,
-    };
-    render_to(&out.recording, &render_opts, &cli, &output_path)?;
     info!(path = %output_path.display(), "output written");
     Ok(())
 }
@@ -170,31 +186,4 @@ fn log_build_info_debug() {
         opt_level = env!("VERGEN_CARGO_OPT_LEVEL"),
         "build information"
     );
-}
-
-fn render_to(rec: &evp::Recording, opts: &evp::RenderOptions, cli: &Cli, out: &Path) -> Result<()> {
-    let ext = out.extension().and_then(|e| e.to_str()).unwrap_or("");
-    if ext.eq_ignore_ascii_case("svg") {
-        info!(
-            path = %out.display(),
-            frames = rec.frames.len(),
-            "rendering svg"
-        );
-        let svg_opts = evp::SvgOptions {
-            font_size: opts.font_size,
-            ..Default::default()
-        };
-        // CLI --font is also honoured for SVG: we treat the path's file
-        // stem as the CSS font-family hint. (For a fully embedded font we
-        // would need to base64-encode the file – left for a follow-up.)
-        let _ = cli;
-        evp::render_svg(rec, &svg_opts, out)
-    } else {
-        info!(
-            path = %out.display(),
-            frames = rec.frames.len(),
-            "rendering gif"
-        );
-        evp::render_gif(rec, opts, out)
-    }
 }

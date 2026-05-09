@@ -18,6 +18,7 @@
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use crossbeam_channel::{Sender, TrySendError};
 use libghostty_vt::{
     Terminal, TerminalOptions,
     render::{CellIterator, RenderState, RowIterator},
@@ -101,6 +102,17 @@ pub fn derive_options(s: &Settings) -> RunOptions {
 
 /// Run the script end‑to‑end. Returns the completed recording.
 pub fn run(script: &Script) -> Result<RunOutput> {
+    run_with_frame_tap(script, None)
+}
+
+/// Run the script and optionally mirror dense raw frames into `frame_tap`.
+///
+/// The tap is attached to the encoder worker, so the terminal-driving thread
+/// still performs only one send per frame.
+pub fn run_with_frame_tap(
+    script: &Script,
+    frame_tap: Option<Sender<RawFrame>>,
+) -> Result<RunOutput> {
     let opts = derive_options(&script.settings);
     let pty_size = PtySize {
         cols: opts.cols,
@@ -140,7 +152,8 @@ pub fn run(script: &Script) -> Result<RunOutput> {
         .unwrap_or(Duration::ZERO)
         + frame_interval * 4;
 
-    let encoder = crate::encoder::spawn(EncoderConfig {
+    let encoder = crate::encoder::spawn(
+        EncoderConfig {
         cols: opts.cols,
         rows: opts.rows,
         framerate: script.settings.framerate,
@@ -148,7 +161,9 @@ pub fn run(script: &Script) -> Result<RunOutput> {
         cell_height_px: opts.cell_h_px,
         padding_px: opts.padding_px,
         keyframe_interval: script.settings.framerate * 5,
-    });
+        },
+        frame_tap,
+    );
 
     // Snapshot scratch state.
     let mut render_state = RenderState::new()?;
@@ -163,6 +178,7 @@ pub fn run(script: &Script) -> Result<RunOutput> {
     // Wait‑for state. When we're inside a `Wait`, all later events stall
     // until the regex matches or the timeout elapses.
     let mut wait_state: Option<WaitState> = None;
+    let mut dropped_capture_frames: u64 = 0;
 
     loop {
         // 1. Drain everything currently available from the PTY.
@@ -223,11 +239,18 @@ pub fn run(script: &Script) -> Result<RunOutput> {
                 opts.cols,
                 opts.rows,
             )?;
-            // Channel is bounded; if the encoder falls behind we'll block
-            // here briefly which back‑pressures snapshot capture.
-            if encoder.tx.send(frame).is_err() {
-                debug!("encoder channel closed early");
-                break;
+            // Never block the terminal-driving thread: if the queue is full,
+            // we drop this frame and continue. This preserves input/output
+            // responsiveness under sustained encode pressure.
+            match encoder.tx.try_send(frame) {
+                Ok(()) => {}
+                Err(TrySendError::Full(_)) => {
+                    dropped_capture_frames += 1;
+                }
+                Err(TrySendError::Disconnected(_)) => {
+                    debug!("encoder channel closed early");
+                    break;
+                }
             }
             next_frame_at += frame_interval;
         }
@@ -264,6 +287,12 @@ pub fn run(script: &Script) -> Result<RunOutput> {
         .join()
         .expect("encoder thread panicked")
         .context("encoder failure")?;
+    if dropped_capture_frames > 0 {
+        warn!(
+            dropped_capture_frames,
+            "capture queue was full; dropped frames to keep terminal loop non-blocking"
+        );
+    }
     Ok(RunOutput { recording })
 }
 

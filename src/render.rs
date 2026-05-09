@@ -4,14 +4,24 @@
 //! frames directly to gifski's collector. This allows encoding to happen
 //! concurrently with recording, reducing peak memory and latency.
 
-use std::{collections::HashSet, path::Path, time::Instant};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    thread::{self, JoinHandle},
+    time::Instant,
+};
 
 use ab_glyph::{Font, FontArc, Glyph, PxScale, ScaleFont};
 use anyhow::{Context, Result, anyhow};
+use crossbeam_channel::{Receiver, Sender, bounded};
 use gifski::{Settings, progress};
 use tracing::{info, warn};
 
-use crate::recording::{CellSnap, Frame as RecordingFrame, Recording, style_flags};
+use crate::recording::{CellSnap, Frame as RecordingFrame, RawFrame, Recording, style_flags};
+
+// Rendering can briefly lag behind capture on busy systems; this queue absorbs
+// bursts so the upstream pipeline usually stays lock-free.
+const RENDER_STREAM_CHANNEL_CAPACITY: usize = 4096;
 
 const EMBEDDED_JETBRAINS_MONO_REGULAR: &[u8] =
     include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf");
@@ -57,6 +67,66 @@ pub struct RenderOptions {
     pub font_path: Option<String>,
     pub font_size: f32,
     pub padding_px: u32,
+}
+
+pub struct GifStreamConfig {
+    pub cols: u16,
+    pub rows: u16,
+}
+
+pub struct GifStreamHandle {
+    pub tx: Sender<RawFrame>,
+    join: JoinHandle<Result<()>>,
+}
+
+impl GifStreamHandle {
+    pub fn join(self) -> Result<()> {
+        drop(self.tx);
+        self.join.join().expect("gif stream worker panicked")
+    }
+}
+
+pub fn spawn_gif_stream(
+    cfg: GifStreamConfig,
+    opts: RenderOptions,
+    output: PathBuf,
+) -> Result<GifStreamHandle> {
+    let loaded = load_font_family(opts.font_path.as_deref())?;
+    info!(font = %loaded.description, "using font for gif streaming");
+
+    let family = loaded.family;
+    let scale = PxScale::from(opts.font_size);
+    let scaled = family.regular.as_scaled(scale);
+    let cell_w = scaled
+        .h_advance(family.regular.glyph_id('M'))
+        .ceil()
+        .max(1.0) as u32;
+    let cell_h = (scaled.height() + scaled.line_gap()).ceil().max(1.0) as u32;
+    let baseline = scaled.ascent().ceil() as u32;
+    let canvas_w = cfg.cols as u32 * cell_w + opts.padding_px * 2;
+    let canvas_h = cfg.rows as u32 * cell_h + opts.padding_px * 2;
+
+    let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) =
+        bounded(RENDER_STREAM_CHANNEL_CAPACITY);
+    let join = thread::Builder::new()
+        .name("evp-gif-stream".into())
+        .spawn(move || {
+            run_gif_stream_worker(
+                rx,
+                output,
+                family,
+                scale,
+                cell_w,
+                cell_h,
+                baseline,
+                opts.padding_px,
+                canvas_w,
+                canvas_h,
+            )
+        })
+        .expect("failed to spawn gif stream worker");
+
+    Ok(GifStreamHandle { tx, join })
 }
 
 pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<()> {
@@ -208,6 +278,169 @@ fn rgb_to_rgba(rgb: &[u8]) -> Vec<rgb::RGBA<u8>> {
         });
     }
     rgba
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_gif_stream_worker(
+    rx: Receiver<RawFrame>,
+    out: PathBuf,
+    family: FontFamily,
+    scale: PxScale,
+    cell_w: u32,
+    cell_h: u32,
+    baseline: u32,
+    padding: u32,
+    canvas_w: u32,
+    canvas_h: u32,
+) -> Result<()> {
+    let (collector, writer) = gifski::new(Settings {
+        width: Some(canvas_w),
+        height: Some(canvas_h),
+        quality: 100,
+        fast: false,
+        repeat: gifski::Repeat::Infinite,
+    })
+    .context("initialize gifski encoder")?;
+
+    let out_path = out.clone();
+    let writer_handle = thread::Builder::new()
+        .name("evp-gif-writer".into())
+        .spawn(move || {
+            let file = std::fs::File::create(&out_path)
+                .with_context(|| format!("create {}", out_path.display()))?;
+            let mut p = progress::NoProgress {};
+            writer
+                .write(file, &mut p)
+                .map_err(|e| anyhow!("gifski write error: {e}"))
+        })
+        .expect("failed to spawn gif writer thread");
+
+    let mut warned_missing_faces: HashSet<&'static str> = HashSet::new();
+    let mut prev_t_ms = 0u32;
+    let mut prev_buf: Option<Vec<u8>> = None;
+    let mut frame_index = 0usize;
+
+    while let Ok(frame) = rx.recv() {
+        let buf = rasterize_raw_frame(
+            &frame,
+            &family,
+            scale,
+            cell_w,
+            cell_h,
+            baseline,
+            padding,
+            &mut warned_missing_faces,
+        );
+
+        if prev_buf.as_ref() == Some(&buf) {
+            prev_t_ms = frame.t_ms;
+            continue;
+        }
+
+        let delay_ms = frame.t_ms.saturating_sub(prev_t_ms);
+        let delay_cs = ((delay_ms as f32 / 10.0).round() as u16).max(2);
+        prev_t_ms = frame.t_ms;
+
+        let rgba = rgb_to_rgba(&buf);
+        let frame_img = imgref::ImgVec::new(rgba, canvas_w as usize, canvas_h as usize);
+        collector
+            .add_frame_rgba(frame_index, frame_img, delay_cs as f64 / 100.0)
+            .context("add frame to gifski")?;
+
+        frame_index += 1;
+        prev_buf = Some(buf);
+    }
+
+    drop(collector);
+    writer_handle
+        .join()
+        .map_err(|_| anyhow!("gif writer thread panicked"))?
+        .context("write gif")?;
+    Ok(())
+}
+
+fn rasterize_raw_frame(
+    frame: &RawFrame,
+    family: &FontFamily,
+    scale: PxScale,
+    cell_w: u32,
+    cell_h: u32,
+    baseline: u32,
+    padding: u32,
+    warned_missing_faces: &mut HashSet<&'static str>,
+) -> Vec<u8> {
+    let canvas_w = frame.cols as u32 * cell_w + padding * 2;
+    let canvas_h = frame.rows as u32 * cell_h + padding * 2;
+    let mut buf = vec![0u8; (canvas_w * canvas_h * 3) as usize];
+
+    fill_rect(
+        &mut buf,
+        canvas_w,
+        0,
+        0,
+        canvas_w,
+        canvas_h,
+        frame.default_bg,
+    );
+
+    for row in 0..frame.rows {
+        for col in 0..frame.cols {
+            let idx = row as usize * frame.cols as usize + col as usize;
+            let cell = &frame.cells[idx];
+            let x = padding + col as u32 * cell_w;
+            let y = padding + row as u32 * cell_h;
+
+            let (mut fg, mut bg) = (cell.fg, cell.bg);
+            if cell.flags & style_flags::INVERSE != 0 {
+                std::mem::swap(&mut fg, &mut bg);
+            }
+
+            if bg != frame.default_bg || cell.flags & style_flags::INVERSE != 0 {
+                fill_rect(&mut buf, canvas_w, x, y, cell_w, cell_h, bg);
+            }
+
+            if cell.text.is_empty() {
+                continue;
+            }
+
+            let font = select_font_for_cell(family, cell.flags, warned_missing_faces);
+            let scaled = font.as_scaled(scale);
+            let mut pen_x = x as f32;
+            for ch in cell.text.chars() {
+                let glyph_id = font.glyph_id(ch);
+                let glyph: Glyph = glyph_id.with_scale(scale);
+                if let Some(outline) = font.outline_glyph(glyph) {
+                    let bounds = outline.px_bounds();
+                    outline.draw(|gx, gy, coverage| {
+                        let px = pen_x as i32 + bounds.min.x as i32 + gx as i32;
+                        let py = y as i32 + baseline as i32 + bounds.min.y as i32 + gy as i32;
+                        if px < 0 || py < 0 {
+                            return;
+                        }
+                        let (px, py) = (px as u32, py as u32);
+                        if px >= canvas_w || py >= canvas_h {
+                            return;
+                        }
+                        blend_pixel(&mut buf, canvas_w, px, py, fg, coverage);
+                    });
+                }
+                pen_x += scaled.h_advance(glyph_id);
+            }
+
+            if cell.flags & style_flags::UNDERLINE != 0 {
+                let uy = y + cell_h.saturating_sub(2);
+                fill_rect(&mut buf, canvas_w, x, uy, cell_w, 1, fg);
+            }
+        }
+    }
+
+    if let Some((cx, cy)) = frame.cursor {
+        let x = padding + cx as u32 * cell_w;
+        let y = padding + cy as u32 * cell_h;
+        invert_rect(&mut buf, canvas_w, x, y, cell_w, cell_h);
+    }
+
+    buf
 }
 
 fn rasterize_frame(

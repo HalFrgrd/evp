@@ -1,0 +1,116 @@
+use std::path::PathBuf;
+
+use anyhow::{Context, Result, anyhow};
+use crossbeam_channel::Sender;
+
+use crate::{
+    RawFrame, Recording, RenderOptions, SvgOptions,
+    render::{self, GifStreamConfig, GifStreamHandle},
+    render_svg::{self, SvgStreamConfig, SvgStreamHandle},
+};
+
+pub enum RendererBackend {
+    Gif(RenderOptions),
+    Svg(SvgOptions),
+}
+
+pub struct RendererConfig {
+    pub cols: u16,
+    pub rows: u16,
+    pub framerate: u32,
+    pub cell_width_px: u32,
+    pub cell_height_px: u32,
+    pub padding_px: u32,
+}
+
+enum RendererJoin {
+    Gif(GifStreamHandle),
+    Svg(SvgStreamHandle),
+}
+
+pub struct RendererHandle {
+    pub tx: Sender<RawFrame>,
+    join: RendererJoin,
+}
+
+impl RendererHandle {
+    pub fn join(self) -> Result<()> {
+        match self.join {
+            RendererJoin::Gif(h) => h.join(),
+            RendererJoin::Svg(h) => h.join(),
+        }
+    }
+}
+
+pub fn spawn_renderer(
+    cfg: RendererConfig,
+    backend: RendererBackend,
+    output: PathBuf,
+) -> Result<RendererHandle> {
+    match backend {
+        RendererBackend::Gif(opts) => {
+            let h = render::spawn_gif_stream(
+                GifStreamConfig {
+                    cols: cfg.cols,
+                    rows: cfg.rows,
+                },
+                opts,
+                output,
+            )
+            .context("spawning gif renderer")?;
+            Ok(RendererHandle {
+                tx: h.tx.clone(),
+                join: RendererJoin::Gif(h),
+            })
+        }
+        RendererBackend::Svg(opts) => {
+            let h = render_svg::spawn_svg_stream(
+                SvgStreamConfig {
+                    cols: cfg.cols,
+                    rows: cfg.rows,
+                    framerate: cfg.framerate,
+                    cell_width_px: cfg.cell_width_px,
+                    cell_height_px: cfg.cell_height_px,
+                    padding_px: cfg.padding_px,
+                },
+                opts,
+                output,
+            )
+            .context("spawning svg renderer")?;
+            Ok(RendererHandle {
+                tx: h.tx.clone(),
+                join: RendererJoin::Svg(h),
+            })
+        }
+    }
+}
+
+pub fn render_recording(
+    rec: &Recording,
+    backend: RendererBackend,
+    output: PathBuf,
+) -> Result<()> {
+    let renderer = spawn_renderer(
+        RendererConfig {
+            cols: rec.cols,
+            rows: rec.rows,
+            framerate: rec.framerate,
+            cell_width_px: rec.cell_width_px,
+            cell_height_px: rec.cell_height_px,
+            padding_px: rec.padding_px,
+        },
+        backend,
+        output,
+    )?;
+
+    for i in 0..rec.frames.len() {
+        let frame = rec
+            .reconstruct(i)
+            .ok_or_else(|| anyhow!("failed to reconstruct frame {i}"))?;
+        if renderer.tx.send(frame).is_err() {
+            break;
+        }
+    }
+
+    renderer.join()
+}

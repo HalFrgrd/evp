@@ -32,11 +32,19 @@
 //! - Cursor           → an inverted-fill rect over the cell, sourced from
 //!   the recorded cursor position.
 
-use std::{fs::File, io::Write, path::Path};
+use std::{
+    fs::File,
+    io::Write,
+    path::{Path, PathBuf},
+    thread::{self, JoinHandle},
+};
 
 use anyhow::{Context, Result, anyhow};
+use crossbeam_channel::{Receiver, Sender, bounded};
 
 use crate::recording::{RawFrame, Recording, style_flags};
+
+const SVG_STREAM_CHANNEL_CAPACITY: usize = 4096;
 
 /// Tunables for the SVG renderer.
 #[derive(Debug, Clone)]
@@ -51,6 +59,40 @@ pub struct SvgOptions {
     pub font_size: f32,
 }
 
+pub struct SvgStreamConfig {
+    pub cols: u16,
+    pub rows: u16,
+    pub framerate: u32,
+    pub cell_width_px: u32,
+    pub cell_height_px: u32,
+    pub padding_px: u32,
+}
+
+pub struct SvgStreamHandle {
+    pub tx: Sender<RawFrame>,
+    join: JoinHandle<Result<()>>,
+}
+
+impl SvgStreamHandle {
+    pub fn join(self) -> Result<()> {
+        drop(self.tx);
+        self.join.join().expect("svg stream worker panicked")
+    }
+}
+
+pub fn spawn_svg_stream(
+    cfg: SvgStreamConfig,
+    opts: SvgOptions,
+    output: PathBuf,
+) -> Result<SvgStreamHandle> {
+    let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) = bounded(SVG_STREAM_CHANNEL_CAPACITY);
+    let join = thread::Builder::new()
+        .name("evp-svg-stream".into())
+        .spawn(move || run_svg_stream_worker(rx, cfg, opts, output))
+        .expect("failed to spawn svg stream worker");
+    Ok(SvgStreamHandle { tx, join })
+}
+
 impl Default for SvgOptions {
     fn default() -> Self {
         Self {
@@ -62,11 +104,29 @@ impl Default for SvgOptions {
 
 /// Render `rec` as an animated SVG written to `out`.
 pub fn render_svg(rec: &Recording, opts: &SvgOptions, out: &Path) -> Result<()> {
-    let mut file = File::create(out).with_context(|| format!("create {}", out.display()))?;
-    let body = render_svg_to_string(rec, opts)?;
-    file.write_all(body.as_bytes())
-        .with_context(|| format!("writing {}", out.display()))?;
-    Ok(())
+    let stream = spawn_svg_stream(
+        SvgStreamConfig {
+            cols: rec.cols,
+            rows: rec.rows,
+            framerate: rec.framerate,
+            cell_width_px: rec.cell_width_px,
+            cell_height_px: rec.cell_height_px,
+            padding_px: rec.padding_px,
+        },
+        opts.clone(),
+        out.to_path_buf(),
+    )?;
+
+    for i in 0..rec.frames.len() {
+        let frame = rec
+            .reconstruct(i)
+            .ok_or_else(|| anyhow!("failed to reconstruct frame {i}"))?;
+        if stream.tx.send(frame).is_err() {
+            break;
+        }
+    }
+
+    stream.join()
 }
 
 /// Same as [`render_svg`] but returns the document as a `String` —
@@ -109,11 +169,6 @@ pub fn render_svg_to_string(rec: &Recording, opts: &SvgOptions) -> Result<String
     // Compute (start_ms, end_ms) windows for each unique frame. Frames
     // identical to their predecessor extend the previous window rather
     // than emitting their own group.
-    struct Window {
-        start_ms: u32,
-        end_ms: u32,
-        frame_idx: usize,
-    }
     let mut windows: Vec<Window> = Vec::new();
     for (i, f) in frames.iter().enumerate() {
         let same_as_prev = windows
@@ -178,6 +233,113 @@ pub fn render_svg_to_string(rec: &Recording, opts: &SvgOptions) -> Result<String
 
     s.push_str("</svg>\n");
     Ok(s)
+}
+
+struct Window {
+    start_ms: u32,
+    end_ms: u32,
+    frame_idx: usize,
+}
+
+fn run_svg_stream_worker(
+    rx: Receiver<RawFrame>,
+    cfg: SvgStreamConfig,
+    opts: SvgOptions,
+    out: PathBuf,
+) -> Result<()> {
+    let mut frames: Vec<RawFrame> = Vec::new();
+    let mut windows: Vec<Window> = Vec::new();
+    let mut last_t_ms = 0u32;
+
+    while let Ok(frame) = rx.recv() {
+        last_t_ms = frame.t_ms;
+        let same_as_prev = windows
+            .last()
+            .is_some_and(|w| frames_visually_identical(&frames[w.frame_idx], &frame));
+        if same_as_prev {
+            if let Some(prev) = windows.last_mut() {
+                prev.end_ms = frame.t_ms;
+            }
+            continue;
+        }
+
+        if let Some(prev) = windows.last_mut() {
+            prev.end_ms = frame.t_ms;
+        }
+
+        let idx = frames.len();
+        frames.push(frame.clone());
+        windows.push(Window {
+            start_ms: frame.t_ms,
+            end_ms: frame.t_ms,
+            frame_idx: idx,
+        });
+    }
+
+    let frame_ms = if cfg.framerate > 0 {
+        1000 / cfg.framerate.max(1)
+    } else {
+        33
+    };
+    let total_ms = (last_t_ms + frame_ms).max(1);
+    if let Some(last) = windows.last_mut() {
+        last.end_ms = total_ms;
+    }
+
+    let default_bg_hex = frames.first().map(|f| f.default_bg).unwrap_or([0, 0, 0]);
+    let canvas_w = cfg.cols as u32 * cfg.cell_width_px.max(1) + cfg.padding_px * 2;
+    let canvas_h = cfg.rows as u32 * cfg.cell_height_px.max(1) + cfg.padding_px * 2;
+    let total_s = total_ms as f32 / 1000.0;
+
+    let mut s = String::with_capacity(64 * 1024);
+    s.push_str(&format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" font-family="{font}" font-size="{fs}" xml:space="preserve">
+"#,
+        w = canvas_w,
+        h = canvas_h,
+        font = escape_attr(&opts.font_family),
+        fs = opts.font_size,
+    ));
+    s.push_str(&format!(
+        r#"<rect width="{w}" height="{h}" fill="{bg}"/>
+"#,
+        w = canvas_w,
+        h = canvas_h,
+        bg = rgb_hex(default_bg_hex),
+    ));
+    s.push_str(&format!(
+        r#"<rect width="0" height="0"><animate id="t" attributeName="x" from="0" to="0" dur="{dur}s" repeatCount="indefinite"/></rect>
+"#,
+        dur = total_s
+    ));
+
+    for w in &windows {
+        let frame = &frames[w.frame_idx];
+        let begin_s = w.start_ms as f32 / 1000.0;
+        let end_s = w.end_ms as f32 / 1000.0;
+        s.push_str(&format!(
+            r#"<g visibility="hidden"><set attributeName="visibility" to="visible" begin="t.begin+{b}s" end="t.begin+{e}s"/>"#,
+            b = begin_s,
+            e = end_s,
+        ));
+        emit_frame_body(
+            &mut s,
+            frame,
+            cfg.cell_width_px.max(1),
+            cfg.cell_height_px.max(1),
+            cfg.padding_px,
+            opts.font_size,
+        );
+        s.push_str("</g>\n");
+    }
+
+    s.push_str("</svg>\n");
+
+    let mut file = File::create(&out).with_context(|| format!("create {}", out.display()))?;
+    file.write_all(s.as_bytes())
+        .with_context(|| format!("writing {}", out.display()))?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

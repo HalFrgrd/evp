@@ -10,7 +10,12 @@
 //! - [`parse_script`] — parse a `.tape` source string into a [`Script`].
 //! - [`run`] — drive the script end-to-end against a real PTY, returning
 //!   an in-memory [`Recording`].
+//! - [`run_and_render_gif`] — run and stream frames into gifski while the
+//!   capture is still in progress.
+//! - [`run_and_render_svg`] — run and stream frames into the animated SVG
+//!   assembler while capture is in progress.
 //! - [`render_gif`] — turn a [`Recording`] into an animated GIF on disk.
+//! - [`render_svg`] — turn a [`Recording`] into an animated SVG on disk.
 //! - [`recording_to_json`] / [`recording_from_json`] — round-trip a
 //!   recording through JSON.
 //!
@@ -23,11 +28,12 @@ pub mod keys;
 pub mod pty;
 pub mod recording;
 pub mod render;
+pub mod renderer;
 pub mod render_svg;
 pub mod runner;
 pub mod script;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
@@ -60,14 +66,86 @@ pub fn run(script: &Script) -> Result<RunOutput> {
     runner::run(script)
 }
 
+/// Run a parsed script while streaming GIF encoding in parallel.
+///
+/// This keeps the terminal-driving thread focused on libghostty + PTY I/O,
+/// and pushes dense frames through encoder -> renderer channels so gifski can
+/// encode on the fly.
+pub fn run_and_render_gif(
+    script: &Script,
+    render_opts: RenderOptions,
+    output: PathBuf,
+) -> Result<RunOutput> {
+    let opts = runner::derive_options(&script.settings);
+    let stream = renderer::spawn_renderer(
+        renderer::RendererConfig {
+            cols: opts.cols,
+            rows: opts.rows,
+            framerate: script.settings.framerate,
+            cell_width_px: opts.cell_w_px,
+            cell_height_px: opts.cell_h_px,
+            padding_px: opts.padding_px,
+        },
+        renderer::RendererBackend::Gif(render_opts),
+        output,
+    )
+    .context("spawning gif stream")?;
+
+    let out = runner::run_with_frame_tap(script, Some(stream.tx.clone()))
+        .context("running script with gif stream")?;
+    stream.join().context("finalising gif stream")?;
+    Ok(out)
+}
+
+/// Run a parsed script while streaming SVG assembly in parallel.
+pub fn run_and_render_svg(
+    script: &Script,
+    render_opts: SvgOptions,
+    output: PathBuf,
+) -> Result<RunOutput> {
+    let opts = runner::derive_options(&script.settings);
+    let stream = renderer::spawn_renderer(
+        renderer::RendererConfig {
+            cols: opts.cols,
+            rows: opts.rows,
+            framerate: script.settings.framerate,
+            cell_width_px: opts.cell_w_px,
+            cell_height_px: opts.cell_h_px,
+            padding_px: opts.padding_px,
+        },
+        renderer::RendererBackend::Svg(render_opts),
+        output,
+    )
+    .context("spawning svg stream")?;
+
+    let out = runner::run_with_frame_tap(script, Some(stream.tx.clone()))
+        .context("running script with svg stream")?;
+    stream.join().context("finalising svg stream")?;
+    Ok(out)
+}
+
 /// Render a [`Recording`] as an animated GIF written to `output`.
 pub fn render_gif(rec: &Recording, opts: &RenderOptions, output: &Path) -> Result<()> {
-    render::render_gif(rec, opts, output).context("rendering gif")
+    renderer::render_recording(
+        rec,
+        renderer::RendererBackend::Gif(RenderOptions {
+            font_path: opts.font_path.clone(),
+            font_size: opts.font_size,
+            padding_px: opts.padding_px,
+        }),
+        output.to_path_buf(),
+    )
+    .context("rendering gif")
 }
 
 /// Render a [`Recording`] as an animated SVG written to `output`.
 pub fn render_svg(rec: &Recording, opts: &SvgOptions, output: &Path) -> Result<()> {
-    render_svg::render_svg(rec, opts, output).context("rendering svg")
+    renderer::render_recording(
+        rec,
+        renderer::RendererBackend::Svg(opts.clone()),
+        output.to_path_buf(),
+    )
+    .context("rendering svg")
 }
 
 /// Serialise a [`Recording`] to pretty-printed JSON bytes.
