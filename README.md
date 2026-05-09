@@ -109,12 +109,14 @@ evp <script> [-o <output.gif>] [--font <path.ttf>] [--recording-json <path.json>
 | --- | --- |
 | `<script>` | Path to a `.tape` file. |
 | `-o`, `--output` | Override the script's `Output` directive. Output extension picks the renderer (`.gif` or `.svg`). |
-| `--font` | Path to a TTF/OTF used by the GIF renderer. Defaults to a system monospace font discovered via `fontdb`. |
+| `--font` | Path to a TTF/OTF/TTC used by the GIF renderer. Defaults to an embedded `Iosevka Term` font (`assets/fonts/SGr-IosevkaTerm-Regular.ttc`). |
 | `--recording-json` | Also dump the intermediate `Recording` to JSON for later re-rendering or inspection. |
 | `--log-level` | Explicit level override: `error`, `warn`, `info`, `debug`, `trace`. |
 
 `--log-level` overrides the default `info` level. If it is not provided,
 `RUST_LOG` is still honored.
+
+The embedded font is distributed under SIL OFL 1.1; see [licenses/IOSEVKA-OFL-1.1.txt](licenses/IOSEVKA-OFL-1.1.txt).
 
 ## Using `evp` in GitHub Actions
 

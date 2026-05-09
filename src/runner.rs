@@ -35,6 +35,29 @@ use crate::{
     script::{Event, NamedKey, Script, Settings, WaitScope},
 };
 
+// Default terminal colors from `/usr/share/ghostty/themes/Snazzy`.
+const SNAZZY_PALETTE_16: [[u8; 3]; 16] = [
+    [0x00, 0x00, 0x00],
+    [0xfc, 0x43, 0x46],
+    [0x50, 0xfb, 0x7c],
+    [0xf0, 0xfb, 0x8c],
+    [0x49, 0xba, 0xff],
+    [0xfc, 0x4c, 0xb4],
+    [0x8b, 0xe9, 0xfe],
+    [0xed, 0xed, 0xec],
+    [0x55, 0x55, 0x55],
+    [0xfc, 0x43, 0x46],
+    [0x50, 0xfb, 0x7c],
+    [0xf0, 0xfb, 0x8c],
+    [0x49, 0xba, 0xff],
+    [0xfc, 0x4c, 0xb4],
+    [0x8b, 0xe9, 0xfe],
+    [0xed, 0xed, 0xec],
+];
+const SNAZZY_BACKGROUND: [u8; 3] = [0x1e, 0x1f, 0x29];
+const SNAZZY_FOREGROUND: [u8; 3] = [0xeb, 0xec, 0xe6];
+const SNAZZY_CURSOR: [u8; 3] = [0xe4, 0xe4, 0xe4];
+
 /// Output of [`run`].
 pub struct RunOutput {
     pub recording: crate::recording::Recording,
@@ -100,6 +123,8 @@ pub fn run(script: &Script) -> Result<RunOutput> {
     // those queries are dropped and applications such as vim/tmux can hang
     // waiting for a response.
     terminal.on_pty_write(|_t, data| pty.write(data))?;
+
+    apply_default_palette(&mut terminal);
 
     let mut translator = KeyTranslator::new()?;
 
@@ -240,6 +265,39 @@ pub fn run(script: &Script) -> Result<RunOutput> {
         .expect("encoder thread panicked")
         .context("encoder failure")?;
     Ok(RunOutput { recording })
+}
+
+fn apply_default_palette(terminal: &mut Terminal<'_, '_>) {
+    // OSC 4 controls indexed palette entries, OSC 10/11/12 control
+    // foreground/background/cursor color. Using ST terminator keeps the
+    // sequences unambiguous for the VT parser.
+    for (idx, rgb) in SNAZZY_PALETTE_16.iter().enumerate() {
+        let seq = format!(
+            "\x1b]4;{idx};rgb:{:02x}/{:02x}/{:02x}\x1b\\",
+            rgb[0], rgb[1], rgb[2]
+        );
+        terminal.vt_write(seq.as_bytes());
+    }
+
+    let fg = format!(
+        "\x1b]10;rgb:{:02x}/{:02x}/{:02x}\x1b\\",
+        SNAZZY_FOREGROUND[0], SNAZZY_FOREGROUND[1], SNAZZY_FOREGROUND[2]
+    );
+    terminal.vt_write(fg.as_bytes());
+
+    let bg = format!(
+        "\x1b]11;rgb:{:02x}/{:02x}/{:02x}\x1b\\",
+        SNAZZY_BACKGROUND[0], SNAZZY_BACKGROUND[1], SNAZZY_BACKGROUND[2]
+    );
+    terminal.vt_write(bg.as_bytes());
+
+    let cursor = format!(
+        "\x1b]12;rgb:{:02x}/{:02x}/{:02x}\x1b\\",
+        SNAZZY_CURSOR[0], SNAZZY_CURSOR[1], SNAZZY_CURSOR[2]
+    );
+    terminal.vt_write(cursor.as_bytes());
+
+    info!("applied default Snazzy color palette");
 }
 
 // ---------------------------------------------------------------------------

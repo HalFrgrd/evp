@@ -8,6 +8,9 @@
 		},
 		{
 			"path": "../libghostty-rs"
+		},
+		{
+			"path": "../Iosevka"
 		}
 	],
 	"settings": {

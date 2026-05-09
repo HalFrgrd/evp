@@ -11,8 +11,12 @@ use ab_glyph::{Font, FontArc, Glyph, PxScale, ScaleFont};
 use anyhow::{Context, Result, anyhow};
 use color_quant::NeuQuant;
 use gif::{Encoder, Frame, Repeat};
+use tracing::info;
 
 use crate::recording::{RawFrame, Recording, style_flags};
+
+const EMBEDDED_IOSEVKA_TERM_REGULAR: &[u8] =
+    include_bytes!("../assets/fonts/SGr-IosevkaTerm-Regular.ttc");
 
 pub struct RenderOptions {
     pub font_path: Option<String>,
@@ -21,7 +25,10 @@ pub struct RenderOptions {
 }
 
 pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<()> {
-    let font_data = load_font(opts.font_path.as_deref())?;
+    let loaded = load_font(opts.font_path.as_deref())?;
+    info!(font = %loaded.description, "using font for gif rendering");
+
+    let font_data = loaded.bytes;
     let font = FontArc::try_from_vec(font_data).context("invalid font file")?;
     let scale = PxScale::from(opts.font_size);
     let scaled = font.as_scaled(scale);
@@ -244,10 +251,30 @@ fn blend_pixel(buf: &mut [u8], w: u32, x: u32, y: u32, color: [u8; 3], coverage:
 /// directly, otherwise we ask `fontdb` for any monospace family installed
 /// on the system. Returns an error if no usable font is found – there is
 /// no embedded fallback in `evp` (the user can pass `--font /path/to.ttf`).
-fn load_font(path: Option<&str>) -> Result<Vec<u8>> {
+#[derive(Debug)]
+struct LoadedFont {
+    bytes: Vec<u8>,
+    description: String,
+}
+
+fn load_font(path: Option<&str>) -> Result<LoadedFont> {
     if let Some(p) = path {
-        return std::fs::read(p).with_context(|| format!("reading font {p}"));
+        return Ok(LoadedFont {
+            bytes: std::fs::read(p).with_context(|| format!("reading font {p}"))?,
+            description: format!("explicit path: {p}"),
+        });
     }
+
+    // Deterministic default for GIF rendering: use embedded Iosevka Term.
+    // License text is shipped in `licenses/IOSEVKA-OFL-1.1.txt`.
+    Ok(LoadedFont {
+        bytes: EMBEDDED_IOSEVKA_TERM_REGULAR.to_vec(),
+        description: "embedded default: SGr-IosevkaTerm-Regular.ttc".to_string(),
+    })
+}
+
+#[allow(dead_code)]
+fn _system_monospace_fallback() -> Result<LoadedFont> {
     let mut db = fontdb::Database::new();
     db.load_system_fonts();
     let query = fontdb::Query {
@@ -259,11 +286,17 @@ fn load_font(path: Option<&str>) -> Result<Vec<u8>> {
         .ok_or_else(|| anyhow!("no monospace font found on the system"))?;
     let face = db.face(id).ok_or_else(|| anyhow!("font face not found"))?;
     match &face.source {
-        fontdb::Source::File(path) => {
-            std::fs::read(path).with_context(|| format!("reading font {}", path.display()))
-        }
-        fontdb::Source::Binary(data) | fontdb::Source::SharedFile(_, data) => {
-            Ok(data.as_ref().as_ref().to_vec())
-        }
+        fontdb::Source::File(path) => Ok(LoadedFont {
+            bytes: std::fs::read(path).with_context(|| format!("reading font {}", path.display()))?,
+            description: format!("system monospace file: {}", path.display()),
+        }),
+        fontdb::Source::SharedFile(path, data) => Ok(LoadedFont {
+            bytes: data.as_ref().as_ref().to_vec(),
+            description: format!("system monospace shared file: {}", path.display()),
+        }),
+        fontdb::Source::Binary(data) => Ok(LoadedFont {
+            bytes: data.as_ref().as_ref().to_vec(),
+            description: "system monospace binary source".to_string(),
+        }),
     }
 }
