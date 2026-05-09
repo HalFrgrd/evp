@@ -45,6 +45,11 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          # libghostty-vt-sys compiles native code via Zig. Restoring a
+          # previously built target/ directory from a different runner CPU
+          # can trip SIGILL at test runtime.
+          cache-targets: false
 
       - name: cargo build
         run: cargo build --workspace
