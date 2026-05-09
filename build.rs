@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use woofwoof::compress;
+use ttf2woff2::{encode, BrotliQuality};
 use vergen_gitcl::{Build, Cargo, Emitter, Gitcl, Rustc};
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -47,21 +47,18 @@ fn compress_embedded_fonts() -> Result<(), Box<dyn Error>> {
         "JetBrainsMonoNerdFontMono-BoldItalic.ttf",
         "NotoSansMono-Regular.ttf",
         "NotoSansSymbols2-Regular.ttf",
-        "NotoSansMonoCJKjp-Subset.otf",
-        "unifont_upper-17.0.04.otf",
-        "unifont_csur-17.0.04.otf",
+        "NotoSansMonoCJKjp-Subset.ttf",
+        "unifont_upper-17.0.04.ttf",
+        "unifont_csur-17.0.04.ttf",
     ];
 
     for face in faces {
         let src = Path::new("assets/fonts").join(face);
         println!("cargo:rerun-if-changed={}", src.display());
         let font = fs::read(&src)?;
-        let woff2 = compress(&font, "", 8, true)
-            .ok_or_else(|| format!("failed to compress font as WOFF2: {}", src.display()))?;
-        let out = out_dir.join(
-            face.replace(".ttf", ".woff2")
-                .replace(".otf", ".woff2"),
-        );
+        let woff2 = encode(&font, BrotliQuality::default())
+            .map_err(|e| format!("failed to compress {} as WOFF2: {}", src.display(), e))?;
+        let out = out_dir.join(face.replace(".ttf", ".woff2"));
         fs::write(out, woff2)?;
     }
 

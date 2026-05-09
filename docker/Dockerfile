@@ -53,9 +53,9 @@ ARG VERGEN_GIT_DESCRIBE=unknown
 ARG VERGEN_GIT_DIRTY=unknown
 
 # Build deps:
-#   - musl-tools / musl-dev  : musl-gcc + headers (used by cc-rs for
-#                              C bits like mimalloc's runtime)
-#   - clang / pkg-config     : misc -sys crates
+#   - musl-tools / musl-dev  : musl headers + runtime bits for the musl target
+#   - clang                  : fallback compiler front-end for some -sys crates
+#   - pkg-config             : misc -sys crates
 #   - curl / xz-utils / ca-certs : download + extract Zig
 #   - git                    : libghostty-vt-sys's build.rs fetches the
 #                              pinned Ghostty source at build time when
@@ -91,14 +91,14 @@ ENV PATH="/opt/zig:${PATH}"
 
 RUN rustup target add ${TARGET}
 
-# Build scripts that compile native code (cc-rs) need both C and C++
-# compilers for the musl target. We route both through Zig so crates
-# like woofwoof (C++) don't look for x86_64-linux-musl-g++.
-# We deliberately do NOT override the Rust linker: rustc's default for
-# the musl target uses bundled musl + rust-lld with `+crt-static` and
-# `link-self-contained`, producing a fully static binary.
-ENV CC_x86_64_unknown_linux_musl="zig cc -target x86_64-linux-musl" \
-    CXX_x86_64_unknown_linux_musl="zig c++ -target x86_64-linux-musl" \
+# musl-gcc is used by cc-rs for any C compiled by build scripts (e.g.
+# mimalloc's C runtime). We deliberately do NOT override the Rust
+# linker: rustc's default for the musl target uses the bundled
+# musl-libc + rust-lld with `+crt-static` and `link-self-contained`, so
+# the resulting binary has no PT_INTERP at all and runs on any kernel
+# (debian, distroless, scratch, alpine, ancient RHEL, …) — not just
+# musl-based ones.
+ENV CC_x86_64_unknown_linux_musl=musl-gcc \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-C target-feature=+crt-static -C link-self-contained=yes -C linker=rust-lld"
 
 ENV VERGEN_GIT_SHA="${VERGEN_GIT_SHA}" \

@@ -51,7 +51,8 @@ rgb = "0.8"
 imgref = "1.10"
 ab_glyph = "0.2"
 fontdb = "0.23"
-woofwoof = "1.0"
+ttf2woff2 = "0.11.1"
+woff2-patched = "0.4"
 
 # Allocator. We build the release binary against musl libc (see
 # Dockerfile + .github/workflows/release.yml), and musl's default
@@ -63,7 +64,7 @@ woofwoof = "1.0"
 mimalloc = { version = "0.1", default-features = false }
 
 [build-dependencies]
-woofwoof = "1.0"
+ttf2woff2 = "0.11.1"
 vergen-gitcl = { version = "10.0.0-beta.8", features = ["build", "cargo", "rustc"] }
 
 # Release profile for distributed binaries. `lto = "fat"` lets the
