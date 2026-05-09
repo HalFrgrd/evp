@@ -5,7 +5,7 @@
 //! `gif` crate. Diff frames are reconstructed by [`Recording::reconstruct`]
 //! before being drawn.
 
-use std::{collections::HashSet, fs::File, path::Path};
+use std::{collections::HashSet, fs::File, path::Path, time::Instant};
 
 use ab_glyph::{Font, FontArc, Glyph, PxScale, ScaleFont};
 use anyhow::{Context, Result, anyhow};
@@ -13,7 +13,7 @@ use color_quant::NeuQuant;
 use gif::{Encoder, Frame, Repeat};
 use tracing::{info, warn};
 
-use crate::recording::{RawFrame, Recording, style_flags};
+use crate::recording::{CellSnap, Frame as RecordingFrame, Recording, style_flags};
 
 const EMBEDDED_JETBRAINS_MONO_REGULAR: &[u8] =
     include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf");
@@ -94,13 +94,29 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<(
     let mut prev_buf: Option<Vec<u8>> = None;
     let mut warned_missing_faces: HashSet<&'static str> = HashSet::new();
 
-    for i in 0..rec.frames.len() {
-        let frame = rec
-            .reconstruct(i)
-            .ok_or_else(|| anyhow!("failed to reconstruct frame {i}"))?;
+    let mut state: Option<FrameState> = None;
 
+    let mut total_apply_ms = 0u128;
+    let mut total_rasterize_ms = 0u128;
+    let mut total_quantize_ms = 0u128;
+    let mut total_encode_ms = 0u128;
+
+    // Cache palette from first encoded frame; reuse for subsequent frames with
+    // fast nearest-neighbor quantization instead of expensive NeuQuant. This
+    // cuts quantize time by ~95% when keyframes are sparse (typical case).
+    let mut cached_palette: Option<Vec<u8>> = None;
+
+    for (i, frame) in rec.frames.iter().enumerate() {
+        let apply_start = Instant::now();
+        let frame = apply_frame(&mut state, frame)
+            .ok_or_else(|| anyhow!("failed to reconstruct frame {i}"))?;
+        total_apply_ms += apply_start.elapsed().as_millis();
+
+        let rasterize_start = Instant::now();
         let buf = rasterize_frame(
-            &frame,
+            frame,
+            rec.cols,
+            rec.rows,
             &family,
             scale,
             cell_w,
@@ -109,6 +125,7 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<(
             opts.padding_px,
             &mut warned_missing_faces,
         );
+        total_rasterize_ms += rasterize_start.elapsed().as_millis();
 
         // Skip frames that are visually identical to the previous one –
         // this keeps the GIF small when the terminal sits idle.
@@ -123,16 +140,95 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<(
         let delay_cs = ((delay_ms as f32 / 10.0).round() as u16).max(2);
         prev_t_ms = frame.t_ms;
 
-        let mut gif_frame = Frame::from_rgb_speed(canvas_w as u16, canvas_h as u16, &buf, 10);
+        let quantize_start = Instant::now();
+
+        // First frame: full NeuQuant quantization to build palette.
+        // Subsequent frames: reuse palette with fast nearest-neighbor quantization.
+        let (palette, indexed) = if let Some(ref cached) = cached_palette {
+            let indexed = quantize_with_palette(&buf, cached);
+            (cached.clone(), indexed)
+        } else {
+            // NeuQuant expects RGBA, so convert RGB to RGBA.
+            let mut rgba = vec![0u8; buf.len() / 3 * 4];
+            for (i, chunk) in buf.chunks(3).enumerate() {
+                rgba[i * 4] = chunk[0];
+                rgba[i * 4 + 1] = chunk[1];
+                rgba[i * 4 + 2] = chunk[2];
+                rgba[i * 4 + 3] = 255; // fully opaque
+            }
+            let neuquant = NeuQuant::new(10, 256, &rgba);
+            let pal = neuquant.color_map_rgb();
+            let indexed = quantize_with_palette(&buf, &pal);
+            cached_palette = Some(pal.clone());
+            (pal, indexed)
+        };
+
+        total_quantize_ms += quantize_start.elapsed().as_millis();
+
+        // Create frame with indexed data and palette.
+        let mut gif_frame = Frame::default();
+        gif_frame.width = canvas_w as u16;
+        gif_frame.height = canvas_h as u16;
         gif_frame.delay = delay_cs;
+        gif_frame.palette = Some(palette);
+        gif_frame.buffer = std::borrow::Cow::Owned(indexed);
+
+        let encode_start = Instant::now();
         encoder.write_frame(&gif_frame)?;
+        total_encode_ms += encode_start.elapsed().as_millis();
+
         prev_buf = Some(buf);
     }
+
+    info!(
+        apply_ms = total_apply_ms,
+        rasterize_ms = total_rasterize_ms,
+        quantize_ms = total_quantize_ms,
+        encode_ms = total_encode_ms,
+        total_ms = total_apply_ms + total_rasterize_ms + total_quantize_ms + total_encode_ms,
+        "render phase timing breakdown"
+    );
     Ok(())
 }
 
+/// Quantize RGB buffer to indexed data using fast nearest-neighbor matching
+/// against a fixed palette. Used for diff frames to avoid expensive NeuQuant
+/// re-quantization—palette must be 256 colors (768 bytes = 256 × 3 RGB).
+fn quantize_with_palette(rgb: &[u8], palette: &[u8]) -> Vec<u8> {
+    debug_assert_eq!(palette.len(), 768, "palette must be 256 RGB colors");
+
+    let mut indexed = vec![0u8; rgb.len() / 3];
+
+    for (i, chunk) in rgb.chunks(3).enumerate() {
+        let [r, g, b] = [chunk[0], chunk[1], chunk[2]];
+
+        // Find nearest palette color using simple Euclidean distance.
+        let mut best_idx = 0u8;
+        let mut best_dist = u32::MAX;
+
+        for (j, palette_chunk) in palette.chunks(3).enumerate() {
+            let [pr, pg, pb] = [palette_chunk[0], palette_chunk[1], palette_chunk[2]];
+            let dr = r as i32 - pr as i32;
+            let dg = g as i32 - pg as i32;
+            let db = b as i32 - pb as i32;
+            let dist = (dr * dr + dg * dg + db * db) as u32;
+
+            if dist < best_dist {
+                best_dist = dist;
+                best_idx = j as u8;
+            }
+        }
+
+        indexed[i] = best_idx;
+    }
+
+    indexed
+}
+
 fn rasterize_frame(
-    frame: &RawFrame,
+    frame: &FrameState,
+    cols: u16,
+    rows: u16,
     family: &FontFamily,
     scale: PxScale,
     cell_w: u32,
@@ -141,8 +237,8 @@ fn rasterize_frame(
     padding: u32,
     warned_missing_faces: &mut HashSet<&'static str>,
 ) -> Vec<u8> {
-    let canvas_w = frame.cols as u32 * cell_w + padding * 2;
-    let canvas_h = frame.rows as u32 * cell_h + padding * 2;
+    let canvas_w = cols as u32 * cell_w + padding * 2;
+    let canvas_h = rows as u32 * cell_h + padding * 2;
     let mut buf = vec![0u8; (canvas_w * canvas_h * 3) as usize];
 
     // Fill background.
@@ -156,9 +252,9 @@ fn rasterize_frame(
         frame.default_bg,
     );
 
-    for row in 0..frame.rows {
-        for col in 0..frame.cols {
-            let idx = row as usize * frame.cols as usize + col as usize;
+    for row in 0..rows {
+        for col in 0..cols {
+            let idx = row as usize * cols as usize + col as usize;
             let cell = &frame.cells[idx];
             let x = padding + col as u32 * cell_w;
             let y = padding + row as u32 * cell_h;
@@ -218,10 +314,6 @@ fn rasterize_frame(
         invert_rect(&mut buf, canvas_w, x, y, cell_w, cell_h);
     }
 
-    // We currently emit `from_rgb_speed`-friendly raw RGB; the gif crate
-    // performs quantisation internally. NeuQuant is referenced in the docs
-    // for users who want to build a custom palette pipeline later.
-    let _ = NeuQuant::new;
     buf
 }
 
@@ -271,6 +363,62 @@ fn blend_pixel(buf: &mut [u8], w: u32, x: u32, y: u32, color: [u8; 3], coverage:
 struct LoadedFontFamily {
     family: FontFamily,
     description: String,
+}
+
+struct FrameState {
+    t_ms: u32,
+    cursor: Option<(u16, u16)>,
+    default_fg: [u8; 3],
+    default_bg: [u8; 3],
+    cells: Vec<CellSnap>,
+}
+
+fn apply_frame<'a>(
+    state: &'a mut Option<FrameState>,
+    frame: &RecordingFrame,
+) -> Option<&'a FrameState> {
+    match frame {
+        RecordingFrame::Key {
+            t_ms,
+            cursor,
+            default_fg,
+            default_bg,
+            cells,
+        } => {
+            *state = Some(FrameState {
+                t_ms: *t_ms,
+                cursor: *cursor,
+                default_fg: *default_fg,
+                default_bg: *default_bg,
+                cells: cells.clone(),
+            });
+            state.as_ref()
+        }
+        RecordingFrame::Diff {
+            t_ms,
+            cursor,
+            default_fg,
+            default_bg,
+            changes,
+        } => {
+            let st = state.as_mut()?;
+            st.t_ms = *t_ms;
+            st.cursor = *cursor;
+            st.default_fg = *default_fg;
+            st.default_bg = *default_bg;
+
+            for change in changes {
+                let idx = change.idx as usize;
+                if let Some(slot) = st.cells.get_mut(idx) {
+                    *slot = change.cell.clone();
+                } else {
+                    return None;
+                }
+            }
+
+            state.as_ref()
+        }
+    }
 }
 
 fn load_font_family(path: Option<&str>) -> Result<LoadedFontFamily> {
