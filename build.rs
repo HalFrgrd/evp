@@ -38,21 +38,27 @@ fn compress_embedded_fonts() -> Result<(), Box<dyn Error>> {
     let out_dir = env::var("OUT_DIR")?;
     let out_dir = Path::new(&out_dir);
 
-    // These are the four faces currently used by the GIF renderer.
+    // Faces embedded into the renderer. We compress all of them to WOFF2
+    // at build time and include the compressed bytes in the final binary.
     let faces = [
-        "JetBrainsMono-Regular.ttf",
-        "JetBrainsMono-Bold.ttf",
-        "JetBrainsMono-Italic.ttf",
-        "JetBrainsMono-BoldItalic.ttf",
+        "JetBrainsMonoNerdFontMono-Regular.ttf",
+        "JetBrainsMonoNerdFontMono-Bold.ttf",
+        "JetBrainsMonoNerdFontMono-Italic.ttf",
+        "JetBrainsMonoNerdFontMono-BoldItalic.ttf",
+        "unifont_upper-17.0.04.otf",
+        "unifont_csur-17.0.04.otf",
     ];
 
     for face in faces {
         let src = Path::new("assets/fonts").join(face);
         println!("cargo:rerun-if-changed={}", src.display());
-        let ttf = fs::read(&src)?;
-        let woff2 = compress(&ttf, "", 8, true)
+        let font = fs::read(&src)?;
+        let woff2 = compress(&font, "", 8, true)
             .ok_or_else(|| format!("failed to compress font as WOFF2: {}", src.display()))?;
-        let out = out_dir.join(face.replace(".ttf", ".woff2"));
+        let out = out_dir.join(
+            face.replace(".ttf", ".woff2")
+                .replace(".otf", ".woff2"),
+        );
         fs::write(out, woff2)?;
     }
 

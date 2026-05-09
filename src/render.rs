@@ -13,6 +13,7 @@ use std::{
 use ab_glyph::{Font, FontArc, Glyph, PxScale, ScaleFont};
 use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
+use fontdb::{Database, Family, Query, Stretch, Style, Weight};
 use gifski::{Settings, progress};
 use tracing::{info, warn};
 use woofwoof::decompress;
@@ -23,14 +24,18 @@ use crate::recording::{RawFrame, Recording, style_flags};
 // bursts so the upstream pipeline usually stays lock-free.
 const RENDER_STREAM_CHANNEL_CAPACITY: usize = 4096;
 
-const EMBEDDED_JETBRAINS_MONO_REGULAR_WOFF2: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/JetBrainsMono-Regular.woff2"));
-const EMBEDDED_JETBRAINS_MONO_BOLD_WOFF2: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/JetBrainsMono-Bold.woff2"));
-const EMBEDDED_JETBRAINS_MONO_ITALIC_WOFF2: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/JetBrainsMono-Italic.woff2"));
-const EMBEDDED_JETBRAINS_MONO_BOLD_ITALIC_WOFF2: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/JetBrainsMono-BoldItalic.woff2"));
+const EMBEDDED_JETBRAINS_NERD_MONO_REGULAR_WOFF2: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/JetBrainsMonoNerdFontMono-Regular.woff2"));
+const EMBEDDED_JETBRAINS_NERD_MONO_BOLD_WOFF2: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/JetBrainsMonoNerdFontMono-Bold.woff2"));
+const EMBEDDED_JETBRAINS_NERD_MONO_ITALIC_WOFF2: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/JetBrainsMonoNerdFontMono-Italic.woff2"));
+const EMBEDDED_JETBRAINS_NERD_MONO_BOLD_ITALIC_WOFF2: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/JetBrainsMonoNerdFontMono-BoldItalic.woff2"));
+const EMBEDDED_UNIFONT_UPPER_WOFF2: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/unifont_upper-17.0.04.woff2"));
+const EMBEDDED_UNIFONT_CSUR_WOFF2: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/unifont_csur-17.0.04.woff2"));
 
 #[derive(Debug)]
 struct FontFamily {
@@ -38,7 +43,13 @@ struct FontFamily {
     bold: Option<FontArc>,
     italic: Option<FontArc>,
     bold_italic: Option<FontArc>,
+    fallback_regular: Vec<FontArc>,
 }
+
+const DEFAULT_SYSTEM_FALLBACK_FONTS: [(&str, Weight); 2] = [
+    ("NotoSansJP-Medium", Weight::MEDIUM),
+    ("Noto Sans JP", Weight::MEDIUM),
+];
 
 pub struct RenderOptions {
     pub font_path: Option<String>,
@@ -273,10 +284,10 @@ fn rasterize_raw_frame(
                 continue;
             }
 
-            let font = select_font_for_cell(family, cell.flags, warned_missing_faces);
-            let scaled = font.as_scaled(scale);
+            let primary_font = select_primary_font_for_cell(family, cell.flags, warned_missing_faces);
             let mut pen_x = x as f32;
             for ch in cell.text.chars() {
+                let font = select_font_for_char(primary_font, &family.fallback_regular, ch);
                 let glyph_id = font.glyph_id(ch);
                 let glyph: Glyph = glyph_id.with_scale(scale);
                 if let Some(outline) = font.outline_glyph(glyph) {
@@ -294,6 +305,7 @@ fn rasterize_raw_frame(
                         blend_pixel(&mut buf, canvas_w, px, py, fg, coverage);
                     });
                 }
+                let scaled = font.as_scaled(scale);
                 pen_x += scaled.h_advance(glyph_id);
             }
 
@@ -371,35 +383,105 @@ fn load_font_family(path: Option<&str>) -> Result<LoadedFontFamily> {
                 bold: None,
                 italic: None,
                 bold_italic: None,
+                fallback_regular: Vec::new(),
             },
             description: format!("explicit path: {p}"),
         });
     }
 
-    // Deterministic default for GIF rendering: use embedded JetBrains Mono,
+    let (fallback_regular, fallback_names) = load_default_fallback_faces();
+
+    // Deterministic default for GIF rendering: use embedded JetBrains Mono
+    // Nerd Font (Mono variant),
     // compressed as WOFF2 at build time and decompressed at runtime.
     // License text is shipped in `licenses/JETBRAINSMONO-OFL-1.1.txt`.
     Ok(LoadedFontFamily {
         family: FontFamily {
             regular: decode_embedded_face(
-                "JetBrainsMono-Regular.woff2",
-                EMBEDDED_JETBRAINS_MONO_REGULAR_WOFF2,
+                "JetBrainsMonoNerdFontMono-Regular.woff2",
+                EMBEDDED_JETBRAINS_NERD_MONO_REGULAR_WOFF2,
             )?,
             bold: try_embedded_face(
-                "JetBrainsMono-Bold.woff2",
-                EMBEDDED_JETBRAINS_MONO_BOLD_WOFF2,
+                "JetBrainsMonoNerdFontMono-Bold.woff2",
+                EMBEDDED_JETBRAINS_NERD_MONO_BOLD_WOFF2,
             ),
             italic: try_embedded_face(
-                "JetBrainsMono-Italic.woff2",
-                EMBEDDED_JETBRAINS_MONO_ITALIC_WOFF2,
+                "JetBrainsMonoNerdFontMono-Italic.woff2",
+                EMBEDDED_JETBRAINS_NERD_MONO_ITALIC_WOFF2,
             ),
             bold_italic: try_embedded_face(
-                "JetBrainsMono-BoldItalic.woff2",
-                EMBEDDED_JETBRAINS_MONO_BOLD_ITALIC_WOFF2,
+                "JetBrainsMonoNerdFontMono-BoldItalic.woff2",
+                EMBEDDED_JETBRAINS_NERD_MONO_BOLD_ITALIC_WOFF2,
             ),
+            fallback_regular,
         },
-        description: "embedded default: JetBrainsMono family".to_string(),
+        description: if fallback_names.is_empty() {
+            "embedded default: JetBrainsMono Nerd Font Mono family".to_string()
+        } else {
+            format!(
+                "embedded default: JetBrainsMono Nerd Font Mono family + fallbacks [{}]",
+                fallback_names.join(" -> ")
+            )
+        },
     })
+}
+
+fn load_default_fallback_faces() -> (Vec<FontArc>, Vec<String>) {
+    let mut db = Database::new();
+    db.load_system_fonts();
+
+    let mut faces = Vec::new();
+    let mut names = Vec::new();
+
+    // 1) System NotoSansJP-Medium (or Noto Sans JP).
+    for (family_name, weight) in DEFAULT_SYSTEM_FALLBACK_FONTS {
+        let query = Query {
+            families: &[Family::Name(family_name)],
+            weight,
+            stretch: Stretch::Normal,
+            style: Style::Normal,
+        };
+
+        if let Some(id) = db.query(&query)
+            && let Some(bytes) = db.with_face_data(id, |data, _idx| data.to_vec())
+        {
+            match FontArc::try_from_vec(bytes) {
+                Ok(font) => {
+                    faces.push(font);
+                    names.push(family_name.to_string());
+                }
+                Err(err) => {
+                    warn!(family = family_name, error = ?err, "failed to load fallback font face");
+                }
+            }
+        } else {
+            warn!(family = family_name, "fallback font not found on system");
+        }
+    }
+
+    // 2) Embedded unifont_upper (U+10000 and above coverage).
+    match decode_embedded_face("unifont_upper-17.0.04.woff2", EMBEDDED_UNIFONT_UPPER_WOFF2) {
+        Ok(font) => {
+            faces.push(font);
+            names.push("unifont_upper-17.0.04 (embedded)".to_string());
+        }
+        Err(err) => {
+            warn!(error = ?err, "failed to load embedded fallback font face");
+        }
+    }
+
+    // 3) Embedded unifont_csur (CSUR/PUA coverage).
+    match decode_embedded_face("unifont_csur-17.0.04.woff2", EMBEDDED_UNIFONT_CSUR_WOFF2) {
+        Ok(font) => {
+            faces.push(font);
+            names.push("unifont_csur-17.0.04 (embedded)".to_string());
+        }
+        Err(err) => {
+            warn!(error = ?err, "failed to load embedded fallback font face");
+        }
+    }
+
+    (faces, names)
 }
 
 fn decode_embedded_face(name: &'static str, bytes: &'static [u8]) -> Result<FontArc> {
@@ -418,7 +500,7 @@ fn try_embedded_face(name: &'static str, bytes: &'static [u8]) -> Option<FontArc
     }
 }
 
-fn select_font_for_cell<'a>(
+fn select_primary_font_for_cell<'a>(
     family: &'a FontFamily,
     flags: u8,
     warned_missing_faces: &mut HashSet<&'static str>,
@@ -455,6 +537,24 @@ fn select_font_for_cell<'a>(
     }
 
     &family.regular
+}
+
+fn select_font_for_char<'a>(primary: &'a FontArc, fallback: &'a [FontArc], ch: char) -> &'a FontArc {
+    if has_glyph(primary, ch) {
+        return primary;
+    }
+
+    for font in fallback {
+        if has_glyph(font, ch) {
+            return font;
+        }
+    }
+
+    primary
+}
+
+fn has_glyph(font: &FontArc, ch: char) -> bool {
+    font.glyph_id(ch).0 != 0
 }
 
 fn warn_missing_once(

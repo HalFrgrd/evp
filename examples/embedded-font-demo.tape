@@ -17,6 +17,10 @@ Type "printf '%s\n' 'Embedded symbols: 🯁🯂🯃 🬛 🮐 🮑 🮔 🮖 �
 Enter
 Sleep 700ms
 
+Type "printf '%s\n' 'Powerline symbols:        '"
+Enter
+Sleep 7000ms
+
 Type "printf '%s\n' 'Half-width katakana: ｱ ｲ ｳ ｴ ｵ ｶ ｷ ｸ ｹ ｺ ｻ ｼ ｽ ｾ ｿ ﾀ ﾁ ﾂ ﾃ ﾄ ﾅ ﾆ ﾇ ﾈ ﾉ ﾊ ﾋ ﾌ ﾍ ﾎ ﾏ ﾐ ﾑ ﾒ ﾓ ﾔ ﾕ ﾖ ﾗ ﾘ ﾙ ﾚ ﾛ ﾜ ｦ'"
 Enter
 Sleep 1500ms
