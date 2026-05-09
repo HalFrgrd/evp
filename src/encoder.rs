@@ -57,16 +57,21 @@ fn run(
     rx: Receiver<RawFrame>,
     frame_tap: Option<Sender<RawFrame>>,
 ) -> Result<Recording> {
+    use crossbeam_channel::TrySendError;
     let mut frames: Vec<Frame> = Vec::new();
     let mut last_dense: Option<RawFrame> = None;
     let mut frames_since_key: u32 = 0;
 
     while let Ok(frame) = rx.recv() {
         if let Some(tap) = &frame_tap {
-            // Forward every dense frame to the renderer. If the renderer has
-            // exited early we ignore the send failure and keep producing the
-            // recording so callers can still inspect JSON output.
-            let _ = tap.send(frame.clone());
+            // Try to forward to the renderer. We use try_send so a slow
+            // renderer never stalls the encoder; the recording is always
+            // built completely even if some frames don't make it into the
+            // rendered output.
+            match tap.try_send(frame.clone()) {
+                Ok(()) => {}
+                Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {}
+            }
         }
 
         // Decide between keyframe and diff.
@@ -117,7 +122,7 @@ fn run(
         last_dense = Some(frame);
     }
 
-    Ok(Recording {
+    let recording = Recording {
         cols: cfg.cols,
         rows: cfg.rows,
         framerate: cfg.framerate,
@@ -125,5 +130,7 @@ fn run(
         cell_height_px: cfg.cell_height_px,
         padding_px: cfg.padding_px,
         frames,
-    })
+    };
+    drop(frame_tap);
+    Ok(recording)
 }

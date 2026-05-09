@@ -35,7 +35,15 @@ pub struct RendererHandle {
 
 impl RendererHandle {
     pub fn join(self) -> Result<()> {
-        match self.join {
+        // Destructure so we can explicitly drop `tx` BEFORE joining the
+        // backend. `tx` is a clone of the worker's sender; the inner handle
+        // holds the original. Both must be dropped for the worker's
+        // `rx.recv()` to return Err and the worker to exit. If we instead
+        // call `h.join()` (which blocks waiting for the worker) while
+        // `self.tx` is still alive, we deadlock.
+        let RendererHandle { tx, join } = self;
+        drop(tx);
+        match join {
             RendererJoin::Gif(h) => h.join(),
             RendererJoin::Svg(h) => h.join(),
         }

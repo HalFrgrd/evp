@@ -190,6 +190,15 @@ fn run_gif_stream_worker(
     })
     .context("initialize gifski encoder")?;
 
+    let mut warned_missing_faces: HashSet<&'static str> = HashSet::new();
+    let mut prev_t_ms = 0u32;
+    let mut prev_buf: Option<Vec<u8>> = None;
+    let mut frame_index = 0usize;
+
+    // The gifski writer must run concurrently with frame ingestion: the
+    // collector has a bounded internal queue, so `add_frame_rgba` blocks
+    // when the writer falls behind. Spawn the writer on its own thread and
+    // join it after we drop the collector (which signals EOF to gifski).
     let out_path = out.clone();
     let writer_handle = thread::Builder::new()
         .name("evp-gif-writer".into())
@@ -202,11 +211,6 @@ fn run_gif_stream_worker(
                 .map_err(|e| anyhow!("gifski write error: {e}"))
         })
         .expect("failed to spawn gif writer thread");
-
-    let mut warned_missing_faces: HashSet<&'static str> = HashSet::new();
-    let mut prev_t_ms = 0u32;
-    let mut prev_buf: Option<Vec<u8>> = None;
-    let mut frame_index = 0usize;
 
     while let Ok(frame) = rx.recv() {
         let buf = rasterize_raw_frame(

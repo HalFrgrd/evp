@@ -17,7 +17,8 @@
 		"chat.tools.terminal.autoApprove": {
 			"cargo check": true,
 			"cargo info": true,
-			"cargo run": true
+			"cargo run": true,
+			"cargo build": true
 		}
 	}
 }
