@@ -11,6 +11,10 @@ use clap::{Parser, ValueEnum};
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
+/// Embedded demo tape used by `--run-test-script`. Source lives in
+/// `examples/test.tape` so it stays in sync with the rest of the demos.
+const EMBEDDED_TEST_TAPE: &str = include_str!("../../examples/test.tape");
+
 const VERSION_LONG: &str = concat!(
     "version: ",
     env!("CARGO_PKG_VERSION"),
@@ -48,8 +52,15 @@ const VERSION_LONG: &str = concat!(
     long_version = VERSION_LONG
 )]
 struct Cli {
-    /// Path to the `.tape` script.
-    script: PathBuf,
+    /// Path to the `.tape` script. Optional when `--run-test-script` is set.
+    #[arg(required_unless_present = "run_test_script")]
+    script: Option<PathBuf>,
+    /// Run the built-in demo tape embedded in the binary. Writes to
+    /// `./evp-test.gif` in the current directory unless `--output` is
+    /// also given. Useful for verifying an install works end-to-end
+    /// without needing any external files.
+    #[arg(long, conflicts_with = "recording_json")]
+    run_test_script: bool,
     /// Override the script's `Output` directive.
     #[arg(short, long)]
     output: Option<PathBuf>,
@@ -100,8 +111,14 @@ fn real_main() -> Result<()> {
     init_tracing(&cli);
     log_build_info_debug();
 
-    let script = evp::parse_script_file(&cli.script)
-        .with_context(|| format!("parsing {}", cli.script.display()))?;
+    // Either parse the user's script file, or use the embedded demo.
+    let script = if cli.run_test_script {
+        info!("running embedded test tape (--run-test-script)");
+        evp::parse_script(EMBEDDED_TEST_TAPE).context("parsing embedded test tape")?
+    } else {
+        let path = cli.script.as_ref().expect("clap guarantees this is set");
+        evp::parse_script_file(path).with_context(|| format!("parsing {}", path.display()))?
+    };
 
     // Resolve output path: CLI flag wins, otherwise first `Output` directive.
     let output_path: PathBuf = match cli.output.clone() {
