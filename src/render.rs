@@ -13,7 +13,6 @@ use std::{
 use ab_glyph::{Font, FontArc, Glyph, PxScale, ScaleFont};
 use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
-use fontdb::{Database, Family, Query, Stretch, Style, Weight};
 use gifski::{Settings, progress};
 use tracing::{info, warn};
 use woofwoof::decompress;
@@ -36,6 +35,10 @@ const EMBEDDED_UNIFONT_UPPER_WOFF2: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/unifont_upper-17.0.04.woff2"));
 const EMBEDDED_UNIFONT_CSUR_WOFF2: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/unifont_csur-17.0.04.woff2"));
+const EMBEDDED_NOTO_SANS_MONO_REGULAR_WOFF2: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/NotoSansMono-Regular.woff2"));
+const EMBEDDED_NOTO_SANS_SYMBOLS2_REGULAR_WOFF2: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/NotoSansSymbols2-Regular.woff2"));
 
 #[derive(Debug)]
 struct FontFamily {
@@ -45,11 +48,6 @@ struct FontFamily {
     bold_italic: Option<FontArc>,
     fallback_regular: Vec<FontArc>,
 }
-
-const DEFAULT_SYSTEM_FALLBACK_FONTS: [(&str, Weight); 2] = [
-    ("NotoSansJP-Medium", Weight::MEDIUM),
-    ("Noto Sans JP", Weight::MEDIUM),
-];
 
 pub struct RenderOptions {
     pub font_path: Option<String>,
@@ -454,39 +452,38 @@ fn load_font_family(path: Option<&str>) -> Result<LoadedFontFamily> {
 }
 
 fn load_default_fallback_faces() -> (Vec<FontArc>, Vec<String>) {
-    let mut db = Database::new();
-    db.load_system_fonts();
-
     let mut faces = Vec::new();
     let mut names = Vec::new();
 
-    // 1) System NotoSansJP-Medium (or Noto Sans JP).
-    for (family_name, weight) in DEFAULT_SYSTEM_FALLBACK_FONTS {
-        let query = Query {
-            families: &[Family::Name(family_name)],
-            weight,
-            stretch: Stretch::Normal,
-            style: Style::Normal,
-        };
-
-        if let Some(id) = db.query(&query)
-            && let Some(bytes) = db.with_face_data(id, |data, _idx| data.to_vec())
-        {
-            match FontArc::try_from_vec(bytes) {
-                Ok(font) => {
-                    faces.push(font);
-                    names.push(family_name.to_string());
-                }
-                Err(err) => {
-                    warn!(family = family_name, error = ?err, "failed to load fallback font face");
-                }
-            }
-        } else {
-            warn!(family = family_name, "fallback font not found on system");
+    // 1) Embedded Noto Sans Mono (broad BMP + width-consistent text).
+    match decode_embedded_face(
+        "NotoSansMono-Regular.woff2",
+        EMBEDDED_NOTO_SANS_MONO_REGULAR_WOFF2,
+    ) {
+        Ok(font) => {
+            faces.push(font);
+            names.push("NotoSansMono-Regular (embedded)".to_string());
+        }
+        Err(err) => {
+            warn!(error = ?err, "failed to load embedded fallback font face");
         }
     }
 
-    // 2) Embedded unifont_upper (U+10000 and above coverage).
+    // 2) Embedded Noto Sans Symbols 2 (symbols incl. Braille patterns).
+    match decode_embedded_face(
+        "NotoSansSymbols2-Regular.woff2",
+        EMBEDDED_NOTO_SANS_SYMBOLS2_REGULAR_WOFF2,
+    ) {
+        Ok(font) => {
+            faces.push(font);
+            names.push("NotoSansSymbols2-Regular (embedded)".to_string());
+        }
+        Err(err) => {
+            warn!(error = ?err, "failed to load embedded fallback font face");
+        }
+    }
+
+    // 3) Embedded unifont_upper (U+10000 and above coverage).
     match decode_embedded_face("unifont_upper-17.0.04.woff2", EMBEDDED_UNIFONT_UPPER_WOFF2) {
         Ok(font) => {
             faces.push(font);
@@ -497,7 +494,7 @@ fn load_default_fallback_faces() -> (Vec<FontArc>, Vec<String>) {
         }
     }
 
-    // 3) Embedded unifont_csur (CSUR/PUA coverage).
+    // 4) Embedded unifont_csur (CSUR/PUA coverage).
     match decode_embedded_face("unifont_csur-17.0.04.woff2", EMBEDDED_UNIFONT_CSUR_WOFF2) {
         Ok(font) => {
             faces.push(font);

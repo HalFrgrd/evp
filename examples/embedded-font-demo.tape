@@ -13,7 +13,7 @@ Set TypingSpeed 25ms
 Set Framerate 30
 
 Sleep 400ms
-Type "printf '%s\n' 'Embedded symbols: 🯁🯂🯃 🬛 🮐 🮑 🮔 🮖 🮘'"
+Type "printf '%s\n' 'Embedded symbols: 🯁🯂🯃 🬛 🮐 🮑 🮔 🮖 🮘 ⣾ ⣷ ⣯ ⣟ ⡿ ⢿ ⣻ ⣽'"
 Enter
 Sleep 700ms
 

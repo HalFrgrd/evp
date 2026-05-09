@@ -141,29 +141,20 @@ pub fn run_with_frame_tap(
     let mut translator = KeyTranslator::new()?;
 
     // Build absolute timeline.
-    let timeline = build_timeline(&script.events, &script.settings);
+    let (timeline, timeline_end) = build_timeline(&script.events, &script.settings);
     // The recording continues for one full frame interval after the last
     // event so the final state is always captured.
     let frame_interval = Duration::from_secs_f64(1.0 / script.settings.framerate as f64);
-    let total_duration = timeline
-        .iter()
-        .map(|s| s.at)
-        .max()
-        .unwrap_or(Duration::ZERO)
-        + frame_interval * 4;
+    let total_duration = timeline_end + frame_interval * 4;
 
     // Expected wall-clock duration assuming `Wait` events resolve
     // instantly (i.e. just the sum of `Sleep` + typing/key delays).
-    // This is exactly the largest scheduled `.at` in the timeline,
-    // because `build_timeline` advances `cursor` for `Sleep`/`Type`/
-    // `Key` but not for `Wait`. Used by the decile-progress log lines
+    // This is the final timeline cursor from `build_timeline`, so it
+    // includes trailing `Sleep` even when no event follows it. `Wait`
+    // does not advance the cursor. Used by the decile-progress log lines
     // below so users can eyeball "we're 30 % through, ~12 s expected
     // total" while a tape is rendering.
-    let expected_total = timeline
-        .iter()
-        .map(|s| s.at)
-        .max()
-        .unwrap_or(Duration::ZERO);
+    let expected_total = timeline_end;
 
     let encoder = crate::encoder::spawn(
         EncoderConfig {
@@ -382,7 +373,7 @@ struct Scheduled {
     event: Event,
 }
 
-fn build_timeline(events: &[Event], settings: &Settings) -> Vec<Scheduled> {
+fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Duration) {
     let mut out = Vec::new();
     let mut cursor = Duration::ZERO;
     let speed = settings.playback_speed.max(0.01);
@@ -434,7 +425,7 @@ fn build_timeline(events: &[Event], settings: &Settings) -> Vec<Scheduled> {
             }
         }
     }
-    out
+    (out, cursor)
 }
 
 // ---------------------------------------------------------------------------

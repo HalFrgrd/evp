@@ -45,6 +45,8 @@ fn compress_embedded_fonts() -> Result<(), Box<dyn Error>> {
         "JetBrainsMonoNerdFontMono-Bold.ttf",
         "JetBrainsMonoNerdFontMono-Italic.ttf",
         "JetBrainsMonoNerdFontMono-BoldItalic.ttf",
+        "NotoSansMono-Regular.ttf",
+        "NotoSansSymbols2-Regular.ttf",
         "unifont_upper-17.0.04.otf",
         "unifont_csur-17.0.04.otf",
     ];
