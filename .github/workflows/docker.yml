@@ -2,7 +2,7 @@ name: docker
 
 # Builds and publishes the evp container image to GitHub Container Registry.
 #
-# - On every push to `master` and on tag pushes, multi-arch images are built
+# - On every push to `master` and on tag pushes, amd64 images are built
 #   and pushed under `ghcr.io/<owner>/evp` with sensible tags (sha,
 #   branch, semver).
 # - Pull requests get a build-only run (no push) so we never poison the
@@ -44,9 +44,6 @@ jobs:
           owner_lc="${GITHUB_REPOSITORY_OWNER,,}"
           echo "name=${owner_lc}/evp" >> "$GITHUB_OUTPUT"
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -76,9 +73,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          # arm64 cross-builds via QEMU are slow; restrict to amd64 on PRs
-          # to keep CI snappy. Tagged releases get the full matrix.
-          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
