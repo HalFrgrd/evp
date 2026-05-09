@@ -169,6 +169,13 @@ pub fn run(script: &Script) -> Result<RunOutput> {
             if hidden && !matches!(scheduled.event, Event::Show) {
                 continue;
             }
+            debug!(
+                event_idx,
+                at_ms = scheduled.at.as_millis(),
+                now_ms = now.as_millis(),
+                event = ?scheduled.event,
+                "dispatching scheduled event"
+            );
             execute_event(
                 &scheduled.event,
                 &pty,

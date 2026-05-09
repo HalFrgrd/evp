@@ -116,12 +116,18 @@ fn init_tracing(cli: &Cli) {
         .unwrap_or_else(|| {
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))
         });
+    info!(%filter, "initialising tracing");
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 
 fn render_to(rec: &evp::Recording, opts: &evp::RenderOptions, cli: &Cli, out: &Path) -> Result<()> {
     let ext = out.extension().and_then(|e| e.to_str()).unwrap_or("");
     if ext.eq_ignore_ascii_case("svg") {
+        info!(
+            path = %out.display(),
+            frames = rec.frames.len(),
+            "rendering svg"
+        );
         let svg_opts = evp::SvgOptions {
             font_size: opts.font_size,
             ..Default::default()
@@ -132,6 +138,11 @@ fn render_to(rec: &evp::Recording, opts: &evp::RenderOptions, cli: &Cli, out: &P
         let _ = cli;
         evp::render_svg(rec, &svg_opts, out)
     } else {
+        info!(
+            path = %out.display(),
+            frames = rec.frames.len(),
+            "rendering gif"
+        );
         evp::render_gif(rec, opts, out)
     }
 }
