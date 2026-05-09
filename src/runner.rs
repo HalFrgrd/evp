@@ -199,9 +199,8 @@ pub fn run_with_frame_tap(
     let total_actions = timeline.len();
     let mut next_decile: u32 = 10;
     info!(
-        expanded_actions = total_actions,
-        expected_total_ms = expected_total.as_millis() as u64,
-        "script timeline built"
+        "timeline built: {total_actions} expanded actions, ~{expected:.1}s expected wall-clock (waits assumed instant)",
+        expected = expected_total.as_secs_f64(),
     );
 
     loop {
@@ -254,20 +253,20 @@ pub fn run_with_frame_tap(
 
         // 3b. Decile progress logging. Emits one info line each time
         //     `event_idx / total_actions` crosses a multiple of 10 %.
-        //     `expected_total_ms` is repeated on every line so users can
-        //     see "we're 30 % through, expected total ~12 s" without
-        //     scrolling back.
+        //     The message embeds elapsed and expected wall-clock so users
+        //     can see "we're 30 % through, ~12 s of ~38 s expected"
+        //     without scrolling back.
         if total_actions > 0 {
             while next_decile <= 100
                 && event_idx as u64 * 100 >= next_decile as u64 * total_actions as u64
             {
                 info!(
-                    progress_pct = next_decile,
-                    events_done = event_idx,
-                    expanded_actions = total_actions,
-                    elapsed_ms = now.as_millis() as u64,
-                    expected_total_ms = expected_total.as_millis() as u64,
-                    "timeline progress"
+                    "progress {pct}% ({done}/{total} actions) ({elapsed:.1}s/{expected:.1}s expected)",
+                    pct = next_decile,
+                    done = event_idx,
+                    total = total_actions,
+                    elapsed = now.as_secs_f64(),
+                    expected = expected_total.as_secs_f64(),
                 );
                 next_decile += 10;
             }
