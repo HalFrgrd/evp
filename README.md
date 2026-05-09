@@ -128,6 +128,27 @@ $ ldd ./target/release/evp | grep ghostty || echo "statically linked"
 statically linked
 ```
 
+#### Reproducible static build via Docker
+
+If you'd rather not install Rust or Zig locally, the project ships a
+`docker buildx bake` recipe that produces the same fully-static
+`musl` binary that the GitHub release uses. One command:
+
+```bash
+docker buildx bake extract-binary
+# → ./docker/build/evp  (≈6 MiB, static-pie, stripped)
+```
+
+The `extract-binary` target writes the binary directly to the host
+filesystem via buildx's local output writer — no `docker create` /
+`docker cp` plumbing. Other targets in the same bake file:
+
+```bash
+docker buildx bake test       # workspace cargo test (CI parity)
+docker buildx bake runtime    # builds evp:local container image
+docker buildx bake builder    # intermediate builder image
+```
+
 ### As a library
 
 `evp` ships both a `[lib]` and a `[[bin]]`. The library exposes the full

@@ -1,3 +1,5 @@
 /target
 *.gif
 *.svg
+docker/build/
+*.code-workspace

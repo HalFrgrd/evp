@@ -163,3 +163,14 @@ COPY --from=builder /usr/local/bin/evp /usr/local/bin/evp
 
 WORKDIR /work
 ENTRYPOINT ["/usr/local/bin/evp"]
+
+# ---------------------------------------------------------------------------
+# Binary extraction (for `docker buildx bake extract-binary`)
+# ---------------------------------------------------------------------------
+# Empty scratch image whose entire filesystem is just the static evp
+# binary. Used by `docker-bake.hcl`'s `extract-binary` target with
+# `output = "type=local,dest=docker/build"` so the buildx output writer
+# drops the binary straight onto the host filesystem — no `docker
+# create` / `docker cp` dance required.
+FROM scratch AS binary
+COPY --from=builder /usr/local/bin/evp /evp

@@ -17,7 +17,7 @@ on:
       - "src/**"
       - "Cargo.toml"
       - "Cargo.lock"
-      - "Dockerfile"
+      - "docker/Dockerfile"
       - ".github/workflows/examples.yml"
   workflow_dispatch:
 

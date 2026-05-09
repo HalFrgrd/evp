@@ -49,32 +49,30 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build evp via Dockerfile (builder stage)
-        # `--target builder` stops at the stage that produces
-        # /usr/local/bin/evp. We then copy that file out via a throwaway
-        # container so we can package it as a release tarball.
-        uses: docker/build-push-action@v6
+      - name: Build evp binary via docker buildx bake
+        # `extract-binary` writes the static evp directly to
+        # docker/build/evp on the host filesystem — no `docker create`
+        # / `docker cp` plumbing needed. The bake target is the same
+        # one local users invoke for a one-shot build.
+        env:
+          BUILDX_BAKE_ENTITLEMENTS_FS: 0
+        uses: docker/bake-action@v5
         with:
-          context: .
-          file: ./Dockerfile
-          target: builder
+          files: ./docker-bake.hcl
+          targets: extract-binary
+          load: false
           push: false
-          load: true
-          tags: evp-builder:release
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          set: |
+            *.cache-from=type=gha
+            *.cache-to=type=gha,mode=max
 
-      - name: Extract evp binary from image
+      - name: Sanity check extracted binary
         run: |
           set -eux
-          mkdir -p out
-          id="$(docker create evp-builder:release /bin/true)"
-          docker cp "${id}:/usr/local/bin/evp" out/evp
-          docker rm "${id}" >/dev/null
-          chmod +x out/evp
-          file out/evp
-          (ldd out/evp 2>&1 || true)
-          out/evp --version
+          chmod +x docker/build/evp
+          file docker/build/evp
+          (ldd docker/build/evp 2>&1 || true)
+          docker/build/evp --version
 
       - name: Package tarball
         id: pkg
@@ -84,7 +82,7 @@ jobs:
           version="${tag#v}"
           stage="evp-${version}-${TARGET}"
           mkdir -p "dist/${stage}"
-          cp out/evp "dist/${stage}/"
+          cp docker/build/evp "dist/${stage}/"
           cp README.md LICENSE "dist/${stage}/" 2>/dev/null || true
           tar -C dist -czf "dist/${stage}.tar.gz" "${stage}"
           (cd dist && sha256sum "${stage}.tar.gz" > "${stage}.tar.gz.sha256")
