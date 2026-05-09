@@ -184,9 +184,8 @@ pub fn run_with_frame_tap(
     let mut wait_state: Option<WaitState> = None;
     let mut dropped_capture_frames: u64 = 0;
 
-    // Decile progress tracking: log every time `event_idx / timeline.len()`
-    // crosses a 10 % boundary (10, 20, …, 100). `next_decile` is the next
-    // unreported decile.
+    // Decile progress tracking based on elapsed wall-clock time vs expected
+    // timeline duration. We emit once when elapsed crosses each 10 % bucket.
     let total_actions = timeline.len();
     let mut next_decile: u32 = 10;
     info!(
@@ -243,21 +242,19 @@ pub fn run_with_frame_tap(
         }
 
         // 3b. Decile progress logging. Emits one info line each time
-        //     `event_idx / total_actions` crosses a multiple of 10 %.
-        //     The message embeds elapsed and expected wall-clock so users
-        //     can see "we're 30 % through, ~12 s of ~38 s expected"
-        //     without scrolling back.
-        if total_actions > 0 {
-            while next_decile <= 100
-                && event_idx as u64 * 100 >= next_decile as u64 * total_actions as u64
-            {
+        //     elapsed wall-clock crosses a multiple of 10 % of expected
+        //     wall-clock duration.
+        let expected_secs = expected_total.as_secs_f64();
+        if expected_secs > 0.0 {
+            let elapsed_pct = (now.as_secs_f64() * 100.0) / expected_secs;
+            while next_decile <= 100 && elapsed_pct >= next_decile as f64 {
                 info!(
-                    "progress {pct}% ({done}/{total} actions) ({elapsed:.1}s/{expected:.1}s expected)",
+                    "progress {pct}% ({elapsed:.1}s/{expected:.1}s expected, actions {done}/{total})",
                     pct = next_decile,
+                    elapsed = now.as_secs_f64(),
+                    expected = expected_secs,
                     done = event_idx,
                     total = total_actions,
-                    elapsed = now.as_secs_f64(),
-                    expected = expected_total.as_secs_f64(),
                 );
                 next_decile += 10;
             }

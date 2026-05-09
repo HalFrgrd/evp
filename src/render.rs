@@ -39,6 +39,8 @@ const EMBEDDED_NOTO_SANS_MONO_REGULAR_WOFF2: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/NotoSansMono-Regular.woff2"));
 const EMBEDDED_NOTO_SANS_SYMBOLS2_REGULAR_WOFF2: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/NotoSansSymbols2-Regular.woff2"));
+const EMBEDDED_NOTO_SANS_MONO_CJK_JP_SUBSET_WOFF2: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/NotoSansMonoCJKjp-Subset.woff2"));
 
 #[derive(Debug)]
 struct FontFamily {
@@ -483,7 +485,21 @@ fn load_default_fallback_faces() -> (Vec<FontArc>, Vec<String>) {
         }
     }
 
-    // 3) Embedded unifont_upper (U+10000 and above coverage).
+    // 3) Embedded Noto Sans Mono CJK JP subset (JP + half-width katakana).
+    match decode_embedded_face(
+        "NotoSansMonoCJKjp-Subset.woff2",
+        EMBEDDED_NOTO_SANS_MONO_CJK_JP_SUBSET_WOFF2,
+    ) {
+        Ok(font) => {
+            faces.push(font);
+            names.push("NotoSansMonoCJKjp-Subset (embedded)".to_string());
+        }
+        Err(err) => {
+            warn!(error = ?err, "failed to load embedded fallback font face");
+        }
+    }
+
+    // 4) Embedded unifont_upper (U+10000 and above coverage).
     match decode_embedded_face("unifont_upper-17.0.04.woff2", EMBEDDED_UNIFONT_UPPER_WOFF2) {
         Ok(font) => {
             faces.push(font);
@@ -494,7 +510,7 @@ fn load_default_fallback_faces() -> (Vec<FontArc>, Vec<String>) {
         }
     }
 
-    // 4) Embedded unifont_csur (CSUR/PUA coverage).
+    // 5) Embedded unifont_csur (CSUR/PUA coverage).
     match decode_embedded_face("unifont_csur-17.0.04.woff2", EMBEDDED_UNIFONT_CSUR_WOFF2) {
         Ok(font) => {
             faces.push(font);
