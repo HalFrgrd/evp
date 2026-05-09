@@ -115,5 +115,10 @@ fn normalized_env_var(name: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    Some(trimmed.replace(['\n', '\r'], " "))
+    let normalized = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
 }

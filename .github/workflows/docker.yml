@@ -79,7 +79,7 @@ jobs:
           commit_count="$(git rev-list --count "$sha")"
           author_name="$(git show -s --format=%an "$sha")"
           author_email="$(git show -s --format=%ae "$sha")"
-          commit_message="$(git show -s --format=%s "$sha")"
+          commit_message="$(git show -s --format=%B "$sha" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
           describe="$(git describe --always --dirty --tags "$sha" 2>/dev/null || git rev-parse --short "$sha")"
           dirty="false"
 
