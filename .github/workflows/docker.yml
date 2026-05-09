@@ -68,6 +68,34 @@ jobs:
             type=sha,format=short
             type=raw,value=latest,enable={{is_default_branch}}
 
+      - name: Compute git metadata for Docker build
+        id: gitmeta
+        run: |
+          set -euo pipefail
+          sha="${GITHUB_SHA}"
+          branch="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          commit_date="$(git show -s --format=%cs "$sha")"
+          commit_timestamp="$(git show -s --format=%cI "$sha")"
+          commit_count="$(git rev-list --count "$sha")"
+          author_name="$(git show -s --format=%an "$sha")"
+          author_email="$(git show -s --format=%ae "$sha")"
+          commit_message="$(git show -s --format=%B "$sha" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
+          describe="$(git describe --always --dirty --tags "$sha" 2>/dev/null || git rev-parse --short "$sha")"
+          dirty="false"
+
+          {
+            echo "sha=${sha}"
+            echo "branch=${branch}"
+            echo "commit_date=${commit_date}"
+            echo "commit_timestamp=${commit_timestamp}"
+            echo "commit_count=${commit_count}"
+            echo "author_name=${author_name}"
+            echo "author_email=${author_email}"
+            echo "commit_message=${commit_message}"
+            echo "describe=${describe}"
+            echo "dirty=${dirty}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -75,6 +103,17 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
+          build-args: |
+            VERGEN_GIT_SHA=${{ steps.gitmeta.outputs.sha }}
+            VERGEN_GIT_BRANCH=${{ steps.gitmeta.outputs.branch }}
+            VERGEN_GIT_COMMIT_DATE=${{ steps.gitmeta.outputs.commit_date }}
+            VERGEN_GIT_COMMIT_TIMESTAMP=${{ steps.gitmeta.outputs.commit_timestamp }}
+            VERGEN_GIT_COMMIT_COUNT=${{ steps.gitmeta.outputs.commit_count }}
+            VERGEN_GIT_COMMIT_AUTHOR_NAME=${{ steps.gitmeta.outputs.author_name }}
+            VERGEN_GIT_COMMIT_AUTHOR_EMAIL=${{ steps.gitmeta.outputs.author_email }}
+            VERGEN_GIT_COMMIT_MESSAGE=${{ steps.gitmeta.outputs.commit_message }}
+            VERGEN_GIT_DESCRIBE=${{ steps.gitmeta.outputs.describe }}
+            VERGEN_GIT_DIRTY=${{ steps.gitmeta.outputs.dirty }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
