@@ -152,6 +152,19 @@ pub fn run_with_frame_tap(
         .unwrap_or(Duration::ZERO)
         + frame_interval * 4;
 
+    // Expected wall-clock duration assuming `Wait` events resolve
+    // instantly (i.e. just the sum of `Sleep` + typing/key delays).
+    // This is exactly the largest scheduled `.at` in the timeline,
+    // because `build_timeline` advances `cursor` for `Sleep`/`Type`/
+    // `Key` but not for `Wait`. Used by the decile-progress log lines
+    // below so users can eyeball "we're 30 % through, ~12 s expected
+    // total" while a tape is rendering.
+    let expected_total = timeline
+        .iter()
+        .map(|s| s.at)
+        .max()
+        .unwrap_or(Duration::ZERO);
+
     let encoder = crate::encoder::spawn(
         EncoderConfig {
         cols: opts.cols,
@@ -179,6 +192,17 @@ pub fn run_with_frame_tap(
     // until the regex matches or the timeout elapses.
     let mut wait_state: Option<WaitState> = None;
     let mut dropped_capture_frames: u64 = 0;
+
+    // Decile progress tracking: log every time `event_idx / timeline.len()`
+    // crosses a 10 % boundary (10, 20, …, 100). `next_decile` is the next
+    // unreported decile.
+    let total_actions = timeline.len();
+    let mut next_decile: u32 = 10;
+    info!(
+        expanded_actions = total_actions,
+        expected_total_ms = expected_total.as_millis() as u64,
+        "script timeline built"
+    );
 
     loop {
         // 1. Drain everything currently available from the PTY.
@@ -226,6 +250,27 @@ pub fn run_with_frame_tap(
                 &mut wait_state,
                 start,
             )?;
+        }
+
+        // 3b. Decile progress logging. Emits one info line each time
+        //     `event_idx / total_actions` crosses a multiple of 10 %.
+        //     `expected_total_ms` is repeated on every line so users can
+        //     see "we're 30 % through, expected total ~12 s" without
+        //     scrolling back.
+        if total_actions > 0 {
+            while next_decile <= 100
+                && event_idx as u64 * 100 >= next_decile as u64 * total_actions as u64
+            {
+                info!(
+                    progress_pct = next_decile,
+                    events_done = event_idx,
+                    expanded_actions = total_actions,
+                    elapsed_ms = now.as_millis() as u64,
+                    expected_total_ms = expected_total.as_millis() as u64,
+                    "timeline progress"
+                );
+                next_decile += 10;
+            }
         }
 
         // 4. Capture frames whose deadline has passed.
