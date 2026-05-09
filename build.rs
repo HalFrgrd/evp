@@ -1,10 +1,15 @@
 use std::env;
 use std::error::Error;
+use std::fs;
+use std::path::Path;
 use std::process::Command;
 
+use woofwoof::compress;
 use vergen_gitcl::{Build, Cargo, Emitter, Gitcl, Rustc};
 
 fn main() -> Result<(), Box<dyn Error>> {
+    compress_embedded_fonts()?;
+
     // Emit build/cargo/git/rustc metadata as VERGEN_* env vars for runtime
     // logging and rich --version output.
     let build = Build::all_build();
@@ -25,6 +30,31 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     emitter.emit()?;
+
+    Ok(())
+}
+
+fn compress_embedded_fonts() -> Result<(), Box<dyn Error>> {
+    let out_dir = env::var("OUT_DIR")?;
+    let out_dir = Path::new(&out_dir);
+
+    // These are the four faces currently used by the GIF renderer.
+    let faces = [
+        "JetBrainsMono-Regular.ttf",
+        "JetBrainsMono-Bold.ttf",
+        "JetBrainsMono-Italic.ttf",
+        "JetBrainsMono-BoldItalic.ttf",
+    ];
+
+    for face in faces {
+        let src = Path::new("assets/fonts").join(face);
+        println!("cargo:rerun-if-changed={}", src.display());
+        let ttf = fs::read(&src)?;
+        let woff2 = compress(&ttf, "", 8, true)
+            .ok_or_else(|| format!("failed to compress font as WOFF2: {}", src.display()))?;
+        let out = out_dir.join(face.replace(".ttf", ".woff2"));
+        fs::write(out, woff2)?;
+    }
 
     Ok(())
 }

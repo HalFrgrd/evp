@@ -15,6 +15,7 @@ use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
 use gifski::{Settings, progress};
 use tracing::{info, warn};
+use woofwoof::decompress;
 
 use crate::recording::{RawFrame, Recording, style_flags};
 
@@ -22,37 +23,14 @@ use crate::recording::{RawFrame, Recording, style_flags};
 // bursts so the upstream pipeline usually stays lock-free.
 const RENDER_STREAM_CHANNEL_CAPACITY: usize = 4096;
 
-const EMBEDDED_JETBRAINS_MONO_REGULAR: &[u8] =
-    include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf");
-const EMBEDDED_JETBRAINS_MONO_BOLD: &[u8] = include_bytes!("../assets/fonts/JetBrainsMono-Bold.ttf");
-const EMBEDDED_JETBRAINS_MONO_ITALIC: &[u8] =
-    include_bytes!("../assets/fonts/JetBrainsMono-Italic.ttf");
-const EMBEDDED_JETBRAINS_MONO_BOLD_ITALIC: &[u8] =
-    include_bytes!("../assets/fonts/JetBrainsMono-BoldItalic.ttf");
-const _EMBEDDED_JETBRAINS_MONO_EXTRA_BOLD: &[u8] =
-    include_bytes!("../assets/fonts/JetBrainsMono-ExtraBold.ttf");
-const _EMBEDDED_JETBRAINS_MONO_EXTRA_BOLD_ITALIC: &[u8] =
-    include_bytes!("../assets/fonts/JetBrainsMono-ExtraBoldItalic.ttf");
-const _EMBEDDED_JETBRAINS_MONO_EXTRA_LIGHT: &[u8] =
-    include_bytes!("../assets/fonts/JetBrainsMono-ExtraLight.ttf");
-const _EMBEDDED_JETBRAINS_MONO_EXTRA_LIGHT_ITALIC: &[u8] =
-    include_bytes!("../assets/fonts/JetBrainsMono-ExtraLightItalic.ttf");
-const _EMBEDDED_JETBRAINS_MONO_LIGHT: &[u8] =
-    include_bytes!("../assets/fonts/JetBrainsMono-Light.ttf");
-const _EMBEDDED_JETBRAINS_MONO_LIGHT_ITALIC: &[u8] =
-    include_bytes!("../assets/fonts/JetBrainsMono-LightItalic.ttf");
-const _EMBEDDED_JETBRAINS_MONO_MEDIUM: &[u8] =
-    include_bytes!("../assets/fonts/JetBrainsMono-Medium.ttf");
-const _EMBEDDED_JETBRAINS_MONO_MEDIUM_ITALIC: &[u8] =
-    include_bytes!("../assets/fonts/JetBrainsMono-MediumItalic.ttf");
-const _EMBEDDED_JETBRAINS_MONO_SEMI_BOLD: &[u8] =
-    include_bytes!("../assets/fonts/JetBrainsMono-SemiBold.ttf");
-const _EMBEDDED_JETBRAINS_MONO_SEMI_BOLD_ITALIC: &[u8] =
-    include_bytes!("../assets/fonts/JetBrainsMono-SemiBoldItalic.ttf");
-const _EMBEDDED_JETBRAINS_MONO_THIN: &[u8] =
-    include_bytes!("../assets/fonts/JetBrainsMono-Thin.ttf");
-const _EMBEDDED_JETBRAINS_MONO_THIN_ITALIC: &[u8] =
-    include_bytes!("../assets/fonts/JetBrainsMono-ThinItalic.ttf");
+const EMBEDDED_JETBRAINS_MONO_REGULAR_WOFF2: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/JetBrainsMono-Regular.woff2"));
+const EMBEDDED_JETBRAINS_MONO_BOLD_WOFF2: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/JetBrainsMono-Bold.woff2"));
+const EMBEDDED_JETBRAINS_MONO_ITALIC_WOFF2: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/JetBrainsMono-Italic.woff2"));
+const EMBEDDED_JETBRAINS_MONO_BOLD_ITALIC_WOFF2: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/JetBrainsMono-BoldItalic.woff2"));
 
 #[derive(Debug)]
 struct FontFamily {
@@ -398,25 +376,40 @@ fn load_font_family(path: Option<&str>) -> Result<LoadedFontFamily> {
         });
     }
 
-    // Deterministic default for GIF rendering: use embedded JetBrains Mono.
+    // Deterministic default for GIF rendering: use embedded JetBrains Mono,
+    // compressed as WOFF2 at build time and decompressed at runtime.
     // License text is shipped in `licenses/JETBRAINSMONO-OFL-1.1.txt`.
     Ok(LoadedFontFamily {
         family: FontFamily {
-            regular: FontArc::try_from_slice(EMBEDDED_JETBRAINS_MONO_REGULAR)
-                .context("invalid embedded font: JetBrainsMono-Regular.ttf")?,
-            bold: try_embedded_face("JetBrainsMono-Bold.ttf", EMBEDDED_JETBRAINS_MONO_BOLD),
-            italic: try_embedded_face("JetBrainsMono-Italic.ttf", EMBEDDED_JETBRAINS_MONO_ITALIC),
+            regular: decode_embedded_face(
+                "JetBrainsMono-Regular.woff2",
+                EMBEDDED_JETBRAINS_MONO_REGULAR_WOFF2,
+            )?,
+            bold: try_embedded_face(
+                "JetBrainsMono-Bold.woff2",
+                EMBEDDED_JETBRAINS_MONO_BOLD_WOFF2,
+            ),
+            italic: try_embedded_face(
+                "JetBrainsMono-Italic.woff2",
+                EMBEDDED_JETBRAINS_MONO_ITALIC_WOFF2,
+            ),
             bold_italic: try_embedded_face(
-                "JetBrainsMono-BoldItalic.ttf",
-                EMBEDDED_JETBRAINS_MONO_BOLD_ITALIC,
+                "JetBrainsMono-BoldItalic.woff2",
+                EMBEDDED_JETBRAINS_MONO_BOLD_ITALIC_WOFF2,
             ),
         },
         description: "embedded default: JetBrainsMono family".to_string(),
     })
 }
 
+fn decode_embedded_face(name: &'static str, bytes: &'static [u8]) -> Result<FontArc> {
+    let ttf = decompress(bytes)
+        .with_context(|| format!("failed to decompress embedded WOFF2 face: {name}"))?;
+    FontArc::try_from_vec(ttf).with_context(|| format!("invalid embedded font face: {name}"))
+}
+
 fn try_embedded_face(name: &'static str, bytes: &'static [u8]) -> Option<FontArc> {
-    match FontArc::try_from_slice(bytes) {
+    match decode_embedded_face(name, bytes) {
         Ok(f) => Some(f),
         Err(err) => {
             warn!(face = name, error = ?err, "failed to load embedded face");
