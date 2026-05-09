@@ -100,8 +100,20 @@ fn tokenize(line: &str) -> Result<Vec<String>> {
                     closed = true;
                     break;
                 }
-                if c == '\\'
+                // Only `"…"` and `'…'` honour `\<quote>` as an escape so
+                // the user can embed the quote character itself. Other
+                // escape sequences (`\e`, `\n`, `\\`, …) are passed
+                // through verbatim and interpreted downstream by the
+                // event executor. Backticks are raw strings — `\` has no
+                // special meaning at all — which is what VHS does and is
+                // why tapes can write things like
+                //   Type `flyline … --fps 3 \`
+                // without the trailing `\` swallowing the closing
+                // backtick.
+                if quote != '`'
+                    && c == '\\'
                     && let Some(&next) = chars.peek()
+                    && next == quote
                 {
                     s.push(next);
                     chars.next();
