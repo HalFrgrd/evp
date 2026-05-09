@@ -8,11 +8,45 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, ValueEnum};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
+const VERSION_LONG: &str = concat!(
+    "version: ",
+    env!("CARGO_PKG_VERSION"),
+    "\n",
+    "git sha: ",
+    env!("VERGEN_GIT_SHA"),
+    "\n",
+    "git branch: ",
+    env!("VERGEN_GIT_BRANCH"),
+    "\n",
+    "git commit date: ",
+    env!("VERGEN_GIT_COMMIT_DATE"),
+    "\n",
+    "git dirty: ",
+    env!("VERGEN_GIT_DIRTY"),
+    "\n",
+    "build timestamp: ",
+    env!("VERGEN_BUILD_TIMESTAMP"),
+    "\n",
+    "rustc: ",
+    env!("VERGEN_RUSTC_SEMVER"),
+    "\n",
+    "target: ",
+    env!("VERGEN_CARGO_TARGET_TRIPLE"),
+    "\n",
+    "opt-level: ",
+    env!("VERGEN_CARGO_OPT_LEVEL")
+);
+
 #[derive(Parser, Debug)]
-#[command(name = "evp", about = "Run a VHS-format script and produce a GIF")]
+#[command(
+    name = "evp",
+    about = "Run a VHS-format script and produce a GIF",
+    version = env!("CARGO_PKG_VERSION"),
+    long_version = VERSION_LONG
+)]
 struct Cli {
     /// Path to the `.tape` script.
     script: PathBuf,
@@ -64,6 +98,7 @@ fn main() -> ExitCode {
 fn real_main() -> Result<()> {
     let cli = Cli::parse();
     init_tracing(&cli);
+    log_build_info_debug();
 
     let script = evp::parse_script_file(&cli.script)
         .with_context(|| format!("parsing {}", cli.script.display()))?;
@@ -116,8 +151,25 @@ fn init_tracing(cli: &Cli) {
         .unwrap_or_else(|| {
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))
         });
+    tracing_subscriber::fmt()
+        .with_env_filter(filter.clone())
+        .init();
     info!(%filter, "initialising tracing");
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+}
+
+fn log_build_info_debug() {
+    debug!(
+        version = env!("CARGO_PKG_VERSION"),
+        git_sha = env!("VERGEN_GIT_SHA"),
+        git_branch = env!("VERGEN_GIT_BRANCH"),
+        git_commit_date = env!("VERGEN_GIT_COMMIT_DATE"),
+        git_dirty = env!("VERGEN_GIT_DIRTY"),
+        build_timestamp = env!("VERGEN_BUILD_TIMESTAMP"),
+        rustc_semver = env!("VERGEN_RUSTC_SEMVER"),
+        target_triple = env!("VERGEN_CARGO_TARGET_TRIPLE"),
+        opt_level = env!("VERGEN_CARGO_OPT_LEVEL"),
+        "build information"
+    );
 }
 
 fn render_to(rec: &evp::Recording, opts: &evp::RenderOptions, cli: &Cli, out: &Path) -> Result<()> {

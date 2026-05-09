@@ -2,6 +2,7 @@
 name = "evp"
 version = "0.1.0"
 edition = "2024"
+build = "build.rs"
 
 [lib]
 name = "evp"
@@ -50,3 +51,6 @@ gif = "0.13"
 color_quant = "1"
 ab_glyph = "0.2"
 fontdb = "0.23"
+
+[build-dependencies]
+vergen-gitcl = { version = "10.0.0-beta.8", features = ["build", "cargo", "rustc"] }

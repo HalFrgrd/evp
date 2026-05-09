@@ -112,6 +112,7 @@ evp <script> [-o <output.gif>] [--font <path.ttf>] [--recording-json <path.json>
 | `--font` | Path to a TTF/OTF/TTC used by the GIF renderer. Defaults to embedded `JetBrains Mono` family files in `assets/fonts/`. |
 | `--recording-json` | Also dump the intermediate `Recording` to JSON for later re-rendering or inspection. |
 | `--log-level` | Explicit level override: `error`, `warn`, `info`, `debug`, `trace`. |
+| `--version` | Print extended build metadata (git SHA/branch/date/dirty flag, build timestamp, rustc, target triple, opt-level). |
 
 `--log-level` overrides the default `info` level. If it is not provided,
 `RUST_LOG` is still honored.
