@@ -109,14 +109,25 @@ evp <script> [-o <output.gif>] [--font <path.ttf>] [--recording-json <path.json>
 | --- | --- |
 | `<script>` | Path to a `.tape` file. |
 | `-o`, `--output` | Override the script's `Output` directive. Output extension picks the renderer (`.gif` or `.svg`). |
-| `--font` | Path to a TTF/OTF/TTC used by the GIF renderer. Defaults to an embedded `Iosevka Term` font (`assets/fonts/SGr-IosevkaTerm-Regular.ttc`). |
+| `--font` | Path to a TTF/OTF/TTC used by the GIF renderer. Defaults to embedded `JetBrains Mono` family files in `assets/fonts/`. |
 | `--recording-json` | Also dump the intermediate `Recording` to JSON for later re-rendering or inspection. |
 | `--log-level` | Explicit level override: `error`, `warn`, `info`, `debug`, `trace`. |
 
 `--log-level` overrides the default `info` level. If it is not provided,
 `RUST_LOG` is still honored.
 
-The embedded font is distributed under SIL OFL 1.1; see [licenses/IOSEVKA-OFL-1.1.txt](licenses/IOSEVKA-OFL-1.1.txt).
+The embedded font family is distributed under SIL OFL 1.1; see [licenses/JETBRAINSMONO-OFL-1.1.txt](licenses/JETBRAINSMONO-OFL-1.1.txt).
+
+GIF rendering uses style-specific JetBrains Mono faces when available:
+
+- regular: `JetBrainsMono-Regular.ttf`
+- bold: `JetBrainsMono-Bold.ttf`
+- italic: `JetBrainsMono-Italic.ttf`
+- bold italic: `JetBrainsMono-BoldItalic.ttf`
+
+Additional JetBrains Mono weights are also embedded under `assets/fonts/`.
+If a requested style face is unavailable, rendering logs a warning and
+falls back to the regular face.
 
 ## Using `evp` in GitHub Actions
 

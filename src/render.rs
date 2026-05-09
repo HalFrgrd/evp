@@ -5,18 +5,55 @@
 //! `gif` crate. Diff frames are reconstructed by [`Recording::reconstruct`]
 //! before being drawn.
 
-use std::{fs::File, path::Path};
+use std::{collections::HashSet, fs::File, path::Path};
 
 use ab_glyph::{Font, FontArc, Glyph, PxScale, ScaleFont};
 use anyhow::{Context, Result, anyhow};
 use color_quant::NeuQuant;
 use gif::{Encoder, Frame, Repeat};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::recording::{RawFrame, Recording, style_flags};
 
-const EMBEDDED_IOSEVKA_TERM_REGULAR: &[u8] =
-    include_bytes!("../assets/fonts/SGr-IosevkaTerm-Regular.ttc");
+const EMBEDDED_JETBRAINS_MONO_REGULAR: &[u8] =
+    include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf");
+const EMBEDDED_JETBRAINS_MONO_BOLD: &[u8] = include_bytes!("../assets/fonts/JetBrainsMono-Bold.ttf");
+const EMBEDDED_JETBRAINS_MONO_ITALIC: &[u8] =
+    include_bytes!("../assets/fonts/JetBrainsMono-Italic.ttf");
+const EMBEDDED_JETBRAINS_MONO_BOLD_ITALIC: &[u8] =
+    include_bytes!("../assets/fonts/JetBrainsMono-BoldItalic.ttf");
+const _EMBEDDED_JETBRAINS_MONO_EXTRA_BOLD: &[u8] =
+    include_bytes!("../assets/fonts/JetBrainsMono-ExtraBold.ttf");
+const _EMBEDDED_JETBRAINS_MONO_EXTRA_BOLD_ITALIC: &[u8] =
+    include_bytes!("../assets/fonts/JetBrainsMono-ExtraBoldItalic.ttf");
+const _EMBEDDED_JETBRAINS_MONO_EXTRA_LIGHT: &[u8] =
+    include_bytes!("../assets/fonts/JetBrainsMono-ExtraLight.ttf");
+const _EMBEDDED_JETBRAINS_MONO_EXTRA_LIGHT_ITALIC: &[u8] =
+    include_bytes!("../assets/fonts/JetBrainsMono-ExtraLightItalic.ttf");
+const _EMBEDDED_JETBRAINS_MONO_LIGHT: &[u8] =
+    include_bytes!("../assets/fonts/JetBrainsMono-Light.ttf");
+const _EMBEDDED_JETBRAINS_MONO_LIGHT_ITALIC: &[u8] =
+    include_bytes!("../assets/fonts/JetBrainsMono-LightItalic.ttf");
+const _EMBEDDED_JETBRAINS_MONO_MEDIUM: &[u8] =
+    include_bytes!("../assets/fonts/JetBrainsMono-Medium.ttf");
+const _EMBEDDED_JETBRAINS_MONO_MEDIUM_ITALIC: &[u8] =
+    include_bytes!("../assets/fonts/JetBrainsMono-MediumItalic.ttf");
+const _EMBEDDED_JETBRAINS_MONO_SEMI_BOLD: &[u8] =
+    include_bytes!("../assets/fonts/JetBrainsMono-SemiBold.ttf");
+const _EMBEDDED_JETBRAINS_MONO_SEMI_BOLD_ITALIC: &[u8] =
+    include_bytes!("../assets/fonts/JetBrainsMono-SemiBoldItalic.ttf");
+const _EMBEDDED_JETBRAINS_MONO_THIN: &[u8] =
+    include_bytes!("../assets/fonts/JetBrainsMono-Thin.ttf");
+const _EMBEDDED_JETBRAINS_MONO_THIN_ITALIC: &[u8] =
+    include_bytes!("../assets/fonts/JetBrainsMono-ThinItalic.ttf");
+
+#[derive(Debug)]
+struct FontFamily {
+    regular: FontArc,
+    bold: Option<FontArc>,
+    italic: Option<FontArc>,
+    bold_italic: Option<FontArc>,
+}
 
 pub struct RenderOptions {
     pub font_path: Option<String>,
@@ -25,16 +62,18 @@ pub struct RenderOptions {
 }
 
 pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<()> {
-    let loaded = load_font(opts.font_path.as_deref())?;
+    let loaded = load_font_family(opts.font_path.as_deref())?;
     info!(font = %loaded.description, "using font for gif rendering");
 
-    let font_data = loaded.bytes;
-    let font = FontArc::try_from_vec(font_data).context("invalid font file")?;
+    let family = loaded.family;
     let scale = PxScale::from(opts.font_size);
-    let scaled = font.as_scaled(scale);
+    let scaled = family.regular.as_scaled(scale);
 
     // Measure cell size from a representative monospace glyph.
-    let cell_w = scaled.h_advance(font.glyph_id('M')).ceil().max(1.0) as u32;
+    let cell_w = scaled
+        .h_advance(family.regular.glyph_id('M'))
+        .ceil()
+        .max(1.0) as u32;
     let cell_h = (scaled.height() + scaled.line_gap()).ceil().max(1.0) as u32;
     let baseline = scaled.ascent().ceil() as u32;
 
@@ -53,6 +92,7 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<(
     // timing.
     let mut prev_t_ms: u32 = 0;
     let mut prev_buf: Option<Vec<u8>> = None;
+    let mut warned_missing_faces: HashSet<&'static str> = HashSet::new();
 
     for i in 0..rec.frames.len() {
         let frame = rec
@@ -61,12 +101,13 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<(
 
         let buf = rasterize_frame(
             &frame,
-            &font,
+            &family,
             scale,
             cell_w,
             cell_h,
             baseline,
             opts.padding_px,
+            &mut warned_missing_faces,
         );
 
         // Skip frames that are visually identical to the previous one –
@@ -92,12 +133,13 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<(
 
 fn rasterize_frame(
     frame: &RawFrame,
-    font: &FontArc,
+    family: &FontFamily,
     scale: PxScale,
     cell_w: u32,
     cell_h: u32,
     baseline: u32,
     padding: u32,
+    warned_missing_faces: &mut HashSet<&'static str>,
 ) -> Vec<u8> {
     let canvas_w = frame.cols as u32 * cell_w + padding * 2;
     let canvas_h = frame.rows as u32 * cell_h + padding * 2;
@@ -114,7 +156,6 @@ fn rasterize_frame(
         frame.default_bg,
     );
 
-    let scaled = font.as_scaled(scale);
     for row in 0..frame.rows {
         for col in 0..frame.cols {
             let idx = row as usize * frame.cols as usize + col as usize;
@@ -138,6 +179,8 @@ fn rasterize_frame(
 
             // Draw each character of the cell. Most cells contain a single
             // grapheme but combining marks may produce more.
+            let font = select_font_for_cell(family, cell.flags, warned_missing_faces);
+            let scaled = font.as_scaled(scale);
             let mut pen_x = x as f32;
             for ch in cell.text.chars() {
                 let glyph_id = font.glyph_id(ch);
@@ -158,31 +201,6 @@ fn rasterize_frame(
                     });
                 }
                 pen_x += scaled.h_advance(glyph_id);
-            }
-
-            // Fake-bold: draw again shifted by 1px.
-            if cell.flags & style_flags::BOLD != 0 {
-                let mut pen_x = x as f32 + 1.0;
-                for ch in cell.text.chars() {
-                    let glyph_id = font.glyph_id(ch);
-                    let glyph: Glyph = glyph_id.with_scale(scale);
-                    if let Some(outline) = font.outline_glyph(glyph) {
-                        let bounds = outline.px_bounds();
-                        outline.draw(|gx, gy, coverage| {
-                            let px = pen_x as i32 + bounds.min.x as i32 + gx as i32;
-                            let py = y as i32 + baseline as i32 + bounds.min.y as i32 + gy as i32;
-                            if px < 0 || py < 0 {
-                                return;
-                            }
-                            let (px, py) = (px as u32, py as u32);
-                            if px >= canvas_w || py >= canvas_h {
-                                return;
-                            }
-                            blend_pixel(&mut buf, canvas_w, px, py, fg, coverage);
-                        });
-                    }
-                    pen_x += scaled.h_advance(glyph_id);
-                }
             }
 
             if cell.flags & style_flags::UNDERLINE != 0 {
@@ -247,56 +265,101 @@ fn blend_pixel(buf: &mut [u8], w: u32, x: u32, y: u32, color: [u8; 3], coverage:
     }
 }
 
-/// Load the requested font file as bytes. If `path` is provided we use it
-/// directly, otherwise we ask `fontdb` for any monospace family installed
-/// on the system. Returns an error if no usable font is found – there is
-/// no embedded fallback in `evp` (the user can pass `--font /path/to.ttf`).
+/// Load the requested font family. If `path` is provided we use that file as
+/// the regular face only. Otherwise we load embedded JetBrains Mono faces.
 #[derive(Debug)]
-struct LoadedFont {
-    bytes: Vec<u8>,
+struct LoadedFontFamily {
+    family: FontFamily,
     description: String,
 }
 
-fn load_font(path: Option<&str>) -> Result<LoadedFont> {
+fn load_font_family(path: Option<&str>) -> Result<LoadedFontFamily> {
     if let Some(p) = path {
-        return Ok(LoadedFont {
-            bytes: std::fs::read(p).with_context(|| format!("reading font {p}"))?,
+        let bytes = std::fs::read(p).with_context(|| format!("reading font {p}"))?;
+        let regular = FontArc::try_from_vec(bytes).context("invalid font file")?;
+        return Ok(LoadedFontFamily {
+            family: FontFamily {
+                regular,
+                bold: None,
+                italic: None,
+                bold_italic: None,
+            },
             description: format!("explicit path: {p}"),
         });
     }
 
-    // Deterministic default for GIF rendering: use embedded Iosevka Term.
-    // License text is shipped in `licenses/IOSEVKA-OFL-1.1.txt`.
-    Ok(LoadedFont {
-        bytes: EMBEDDED_IOSEVKA_TERM_REGULAR.to_vec(),
-        description: "embedded default: SGr-IosevkaTerm-Regular.ttc".to_string(),
+    // Deterministic default for GIF rendering: use embedded JetBrains Mono.
+    // License text is shipped in `licenses/JETBRAINSMONO-OFL-1.1.txt`.
+    Ok(LoadedFontFamily {
+        family: FontFamily {
+            regular: FontArc::try_from_slice(EMBEDDED_JETBRAINS_MONO_REGULAR)
+                .context("invalid embedded font: JetBrainsMono-Regular.ttf")?,
+            bold: try_embedded_face("JetBrainsMono-Bold.ttf", EMBEDDED_JETBRAINS_MONO_BOLD),
+            italic: try_embedded_face("JetBrainsMono-Italic.ttf", EMBEDDED_JETBRAINS_MONO_ITALIC),
+            bold_italic: try_embedded_face(
+                "JetBrainsMono-BoldItalic.ttf",
+                EMBEDDED_JETBRAINS_MONO_BOLD_ITALIC,
+            ),
+        },
+        description: "embedded default: JetBrainsMono family".to_string(),
     })
 }
 
-#[allow(dead_code)]
-fn _system_monospace_fallback() -> Result<LoadedFont> {
-    let mut db = fontdb::Database::new();
-    db.load_system_fonts();
-    let query = fontdb::Query {
-        families: &[fontdb::Family::Monospace],
-        ..Default::default()
-    };
-    let id = db
-        .query(&query)
-        .ok_or_else(|| anyhow!("no monospace font found on the system"))?;
-    let face = db.face(id).ok_or_else(|| anyhow!("font face not found"))?;
-    match &face.source {
-        fontdb::Source::File(path) => Ok(LoadedFont {
-            bytes: std::fs::read(path).with_context(|| format!("reading font {}", path.display()))?,
-            description: format!("system monospace file: {}", path.display()),
-        }),
-        fontdb::Source::SharedFile(path, data) => Ok(LoadedFont {
-            bytes: data.as_ref().as_ref().to_vec(),
-            description: format!("system monospace shared file: {}", path.display()),
-        }),
-        fontdb::Source::Binary(data) => Ok(LoadedFont {
-            bytes: data.as_ref().as_ref().to_vec(),
-            description: "system monospace binary source".to_string(),
-        }),
+fn try_embedded_face(name: &'static str, bytes: &'static [u8]) -> Option<FontArc> {
+    match FontArc::try_from_slice(bytes) {
+        Ok(f) => Some(f),
+        Err(err) => {
+            warn!(face = name, error = ?err, "failed to load embedded face");
+            None
+        }
+    }
+}
+
+fn select_font_for_cell<'a>(
+    family: &'a FontFamily,
+    flags: u8,
+    warned_missing_faces: &mut HashSet<&'static str>,
+) -> &'a FontArc {
+    let want_bold = flags & style_flags::BOLD != 0;
+    let want_italic = flags & style_flags::ITALIC != 0;
+
+    if want_bold && want_italic {
+        if let Some(font) = &family.bold_italic {
+            return font;
+        }
+        warn_missing_once(
+            warned_missing_faces,
+            "bold-italic",
+            "falling back to regular",
+        );
+        return &family.regular;
+    }
+
+    if want_bold {
+        if let Some(font) = &family.bold {
+            return font;
+        }
+        warn_missing_once(warned_missing_faces, "bold", "falling back to regular");
+        return &family.regular;
+    }
+
+    if want_italic {
+        if let Some(font) = &family.italic {
+            return font;
+        }
+        warn_missing_once(warned_missing_faces, "italic", "falling back to regular");
+        return &family.regular;
+    }
+
+    &family.regular
+}
+
+fn warn_missing_once(
+    warned_missing_faces: &mut HashSet<&'static str>,
+    style: &'static str,
+    fallback: &'static str,
+) {
+    if warned_missing_faces.insert(style) {
+        warn!(style, fallback, "requested font style face is unavailable");
     }
 }
