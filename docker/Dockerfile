@@ -143,6 +143,41 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
  && cargo test --workspace --tests -- --test-threads=1
 
 # ---------------------------------------------------------------------------
+# Torture
+# ---------------------------------------------------------------------------
+# Build environment for the torture benchmark + analysis tooling. Shares
+# the exact same Rust + Zig toolchain as the rest of the project so CI
+# never has to install Rust/Zig on a runner — `torture.yml` builds and
+# runs everything inside this image.
+#
+# Adds:
+#   - python3 / bash / coreutils / gawk : torture_program.py, the GIF
+#       analyzer, and torture_compare.sh (a bash + awk script).
+#   - The compiled `torture_benchmark` example, built for the host
+#       (glibc) target — we don't need musl portability here, and the
+#       glibc build is slightly faster.
+#   - The repo tree itself at /src, so the comparison shell script and
+#       Python helpers run with their original relative paths.
+FROM builder AS torture
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        bash \
+        coreutils \
+        gawk \
+        python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    cargo build --release --example torture_benchmark \
+ && cp /src/target/release/examples/torture_benchmark /usr/local/bin/torture_benchmark
+
+# Reset the builder ENTRYPOINT so `docker run` users can pick the
+# command (torture_benchmark, the comparison script, the analyzer, …).
+ENTRYPOINT []
+WORKDIR /src
+
+# ---------------------------------------------------------------------------
 # Runtime
 # ---------------------------------------------------------------------------
 FROM debian:${DEBIAN_VERSION}-slim AS runtime

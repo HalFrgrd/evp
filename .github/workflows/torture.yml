@@ -5,9 +5,14 @@ name: torture
 # equivalent VHS run. Both runs are pinned to a single physical CPU
 # core so the comparison is fair.
 #
+# The build environment is the project Dockerfile's `torture` stage —
+# same Rust + Zig toolchain as ci.yml / release.yml / docker.yml. The
+# runner never installs Rust, Zig, or any other build tooling; every
+# build and analysis step runs inside the image.
+#
 # Trigger: manual (workflow_dispatch) or any push that touches the
 # benchmark surface (the example, the tape, the torture program, the
-# library bits it exercises, or this workflow itself).
+# library bits it exercises, the Dockerfile, or this workflow itself).
 
 on:
   workflow_dispatch:
@@ -18,6 +23,7 @@ on:
       - "examples/torture.tape"
       - "scripts/torture_program.py"
       - "scripts/torture_compare.sh"
+      - "scripts/gif_frame_analyzer.py"
       - "src/runner.rs"
       - "src/encoder.rs"
       - "src/renderer.rs"
@@ -25,6 +31,7 @@ on:
       - "src/lib.rs"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "docker/Dockerfile"
       - ".github/workflows/torture.yml"
   pull_request:
     branches: [master]
@@ -33,6 +40,8 @@ on:
       - "examples/torture.tape"
       - "scripts/torture_program.py"
       - "scripts/torture_compare.sh"
+      - "scripts/gif_frame_analyzer.py"
+      - "docker/Dockerfile"
       - ".github/workflows/torture.yml"
 
 permissions:
@@ -47,60 +56,69 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      ZIG_VERSION: "0.15.2"
       RUST_LOG: "info"
+      # Must match `Set Framerate` in examples/torture.tape — used by
+      # gif_frame_analyzer.py via torture_compare.sh.
+      TORTURE_FPS: "60"
+      TORTURE_IMAGE: "evp-torture:ci"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Zig ${{ env.ZIG_VERSION }}
-        # libghostty-vt-sys's build.rs invokes `zig build`, so Zig has to
-        # be on PATH before any cargo build is attempted.
-        run: |
-          set -eux
-          curl -sSL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" -o /tmp/zig.tar.xz
-          mkdir -p "$HOME/.zig"
-          tar -xJf /tmp/zig.tar.xz -C "$HOME/.zig" --strip-components=1
-          echo "$HOME/.zig" >> "$GITHUB_PATH"
-          "$HOME/.zig/zig" version
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+      - name: Build torture image (Dockerfile `torture` stage)
+        # Builds Rust + Zig + the torture_benchmark example inside the
+        # shared project Dockerfile. Cache mounts inside the Dockerfile
+        # plus GHA cache make repeat runs cheap.
+        uses: docker/build-push-action@v6
         with:
-          shared-key: torture-${{ runner.os }}
-
-      - name: Build torture_benchmark example
-        run: cargo build --release --example torture_benchmark
+          context: .
+          file: ./docker/Dockerfile
+          target: torture
+          push: false
+          load: true
+          tags: ${{ env.TORTURE_IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Confirm CPU affinity tooling
         run: |
           set -eux
-          which taskset
           nproc
           # Show physical vs logical CPU layout so the report has context.
           lscpu | grep -E '^(CPU\(s\)|Core|Thread|Socket)' || true
 
       - name: Prepare output directory
-        run: mkdir -p torture-out
+        run: |
+          # Pre-create the output dir as the runner user so the
+          # container (running as root by default) writes files we can
+          # read back without `sudo chown` gymnastics.
+          mkdir -p torture-out
 
-      - name: Run evp torture benchmark (pinned to CPU 0)
+      - name: Run evp torture benchmark (Docker, pinned to CPU 0)
+        # `--cpus=1 --cpuset-cpus=0` is the docker equivalent of
+        # `taskset -c 0`: hard-cap the container to logical CPU 0.
+        # The benchmark records the resulting affinity from
+        # /proc/self/status (which reflects the cgroup constraint)
+        # into the report.
         run: |
           set -eux
-          # `taskset -c 0` restricts every thread of the spawned process
-          # to logical CPU 0. The benchmark itself records the resulting
-          # affinity via /proc/self/status into the report.
-          taskset -c 0 ./target/release/examples/torture_benchmark \
-              torture-out/evp.gif \
-              torture-out/evp.report.txt
+          docker run --rm \
+              --cpus=1 --cpuset-cpus=0 \
+              --user "$(id -u):$(id -g)" \
+              -v "$PWD/torture-out:/out" \
+              -e RUST_LOG \
+              "$TORTURE_IMAGE" \
+              /usr/local/bin/torture_benchmark \
+                  /out/evp.gif \
+                  /out/evp.report.txt
 
       - name: Run VHS torture benchmark (Docker, pinned to CPU 0)
-        # `--cpus=1 --cpuset-cpus=0` is the docker equivalent of
-        # `taskset -c 0`: hard-cap the container to a single logical
-        # CPU 0. We measure wall clock with `date +%s%N` since VHS
-        # itself doesn't surface a timing field.
+        # `--cpus=1 --cpuset-cpus=0` matches the evp run above. We
+        # measure wall clock with `date +%s%N` since VHS itself doesn't
+        # surface a timing field.
         #
         # `continue-on-error: true` is intentional — even if VHS fails
         # to render (the public image lags behind the latest spec), we
@@ -156,11 +174,10 @@ jobs:
           } > torture-out/vhs.report.txt
           cat torture-out/vhs.report.txt
 
-      - name: Build comparison report
-        env:
-          # Feeds gif_frame_analyzer.py via torture_compare.sh. Must
-          # match the framerate set in examples/torture.tape.
-          TORTURE_FPS: "60"
+      - name: Build comparison report (Docker, same image)
+        # Run torture_compare.sh + gif_frame_analyzer.py inside the
+        # torture image so this step also has zero host-side tooling
+        # requirements (no python3 install on the runner).
         run: |
           set -eux
           # Make sure the vhs side has *something* even if the docker
@@ -170,22 +187,31 @@ jobs:
               echo "wall_ms             = (failed)" >> torture-out/vhs.report.txt
               echo "cpu_affinity        = (n/a)" >> torture-out/vhs.report.txt
           fi
-          ./scripts/torture_compare.sh \
-              torture-out/evp.gif \
-              torture-out/evp.report.txt \
-              torture-out/vhs.gif \
-              torture-out/vhs.report.txt \
-              torture-out/comparison.md
-          # Also drop the raw analyzer output as standalone files so the
-          # artifact carries it without anyone having to re-run the tool.
-          if [[ -f torture-out/evp.gif ]]; then
-              python3 scripts/gif_frame_analyzer.py torture-out/evp.gif \
-                  --fps "$TORTURE_FPS" --json > torture-out/evp.gif.analysis.json
-          fi
-          if [[ -f torture-out/vhs.gif ]]; then
-              python3 scripts/gif_frame_analyzer.py torture-out/vhs.gif \
-                  --fps "$TORTURE_FPS" --json > torture-out/vhs.gif.analysis.json
-          fi
+          docker run --rm \
+              --user "$(id -u):$(id -g)" \
+              -v "$PWD/torture-out:/out" \
+              -e TORTURE_FPS \
+              -w /src \
+              "$TORTURE_IMAGE" \
+              bash -c '
+                set -eux
+                ./scripts/torture_compare.sh \
+                    /out/evp.gif \
+                    /out/evp.report.txt \
+                    /out/vhs.gif \
+                    /out/vhs.report.txt \
+                    /out/comparison.md
+                # Standalone analyzer outputs in the artifact, so
+                # consumers do not have to re-run the tool.
+                if [ -f /out/evp.gif ]; then
+                    python3 scripts/gif_frame_analyzer.py /out/evp.gif \
+                        --fps "$TORTURE_FPS" --json > /out/evp.gif.analysis.json
+                fi
+                if [ -f /out/vhs.gif ]; then
+                    python3 scripts/gif_frame_analyzer.py /out/vhs.gif \
+                        --fps "$TORTURE_FPS" --json > /out/vhs.gif.analysis.json
+                fi
+              '
           echo
           echo "=== comparison.md ==="
           cat torture-out/comparison.md
@@ -211,8 +237,7 @@ jobs:
         # The torture_benchmark binary already exits non-zero when more
         # than 5 % of expected frames were dropped, so this step is
         # primarily a belt-and-braces re-check using the persisted
-        # report (the run step above might have used `continue-on-error`
-        # in a future revision).
+        # report.
         run: |
           set -eu
           result=$(awk -F'=' '/^result/ { gsub(/[[:space:]]/,"",$2); print $2 }' torture-out/evp.report.txt)
