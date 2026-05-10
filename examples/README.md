@@ -74,3 +74,19 @@ docker run --rm --cpus=1 --cpuset-cpus=0 \
 The [`torture` workflow](../.github/workflows/torture.yml) runs both
 sides automatically and uploads the comparison + both GIFs as a job
 artifact.
+
+### Analyzing any GIF's frame timestamps
+
+[`scripts/gif_frame_analyzer.py`](../scripts/gif_frame_analyzer.py) is a
+stdlib-only Python tool that walks a GIF's per-frame `delay` metadata
+and reports how many frames look "long" given an expected framerate
+(i.e. effectively skipped). It works on any animated GIF, not just the
+torture output:
+
+```bash
+python3 scripts/gif_frame_analyzer.py path/to/anim.gif --fps 60
+python3 scripts/gif_frame_analyzer.py path/to/anim.gif --fps 30 --json
+```
+
+The torture workflow also runs it on both renderers' GIFs and embeds
+the results in `comparison.md`.

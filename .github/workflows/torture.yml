@@ -157,6 +157,10 @@ jobs:
           cat torture-out/vhs.report.txt
 
       - name: Build comparison report
+        env:
+          # Feeds gif_frame_analyzer.py via torture_compare.sh. Must
+          # match the framerate set in examples/torture.tape.
+          TORTURE_FPS: "60"
         run: |
           set -eux
           # Make sure the vhs side has *something* even if the docker
@@ -172,6 +176,16 @@ jobs:
               torture-out/vhs.gif \
               torture-out/vhs.report.txt \
               torture-out/comparison.md
+          # Also drop the raw analyzer output as standalone files so the
+          # artifact carries it without anyone having to re-run the tool.
+          if [[ -f torture-out/evp.gif ]]; then
+              python3 scripts/gif_frame_analyzer.py torture-out/evp.gif \
+                  --fps "$TORTURE_FPS" --json > torture-out/evp.gif.analysis.json
+          fi
+          if [[ -f torture-out/vhs.gif ]]; then
+              python3 scripts/gif_frame_analyzer.py torture-out/vhs.gif \
+                  --fps "$TORTURE_FPS" --json > torture-out/vhs.gif.analysis.json
+          fi
           echo
           echo "=== comparison.md ==="
           cat torture-out/comparison.md
@@ -188,6 +202,8 @@ jobs:
             torture-out/vhs.gif
             torture-out/evp.report.txt
             torture-out/vhs.report.txt
+            torture-out/evp.gif.analysis.json
+            torture-out/vhs.gif.analysis.json
             torture-out/comparison.md
           if-no-files-found: warn
 

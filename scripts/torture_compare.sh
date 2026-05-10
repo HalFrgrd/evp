@@ -78,15 +78,57 @@ if [[ "$vhs_wall" =~ ^[0-9]+$ && "$evp_wall" =~ ^[0-9]+$ && "$evp_wall" -gt 0 ]]
     ratio=$(awk -v v="$vhs_wall" -v e="$evp_wall" 'BEGIN { printf("%.2fx", v/e) }')
 fi
 
+# Run the GIF frame analyzer on each output. The analyzer is stdlib-only
+# Python so this works in any CI image with python3 installed. If the
+# analyzer can't run (missing gif, missing python) we still produce the
+# rest of the report.
+script_dir=$(cd "$(dirname "$0")" && pwd)
+analyzer="$script_dir/gif_frame_analyzer.py"
+# Expected fps for the comparison. Override by exporting TORTURE_FPS
+# before invoking this script. Defaults to 60, matching torture.tape.
+fps=${TORTURE_FPS:-60}
+
+run_analyzer() {
+    # run_analyzer <gif> <label>
+    local gif=$1
+    local label=$2
+    if [[ ! -f "$gif" ]]; then
+        echo "(no $label gif at $gif — analysis skipped)"
+        return
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "(python3 not available — $label gif analysis skipped)"
+        return
+    fi
+    python3 "$analyzer" "$gif" --fps "$fps" --label "$label" 2>&1 \
+        || echo "(analyzer failed for $label)"
+}
+
+evp_analysis=$(run_analyzer "$evp_gif" evp)
+vhs_analysis=$(run_analyzer "$vhs_gif" vhs)
+
+# Pull a couple of headline numbers out of each analysis for the
+# summary table. Falls back to "?" if the analysis didn't run.
+analysis_get() {
+    # analysis_get <analysis-text> <key>
+    awk -F'=' -v k="$2" '
+        $1 ~ "^[[:space:]]*"k"[[:space:]]*$" { sub(/^[[:space:]]+/, "", $2); print $2; exit }
+    ' <<<"$1"
+}
+evp_frames=$(analysis_get "$evp_analysis" "frame_count")
+evp_skipped=$(analysis_get "$evp_analysis" "skipped_frames_est")
+vhs_frames=$(analysis_get "$vhs_analysis" "frame_count")
+vhs_skipped=$(analysis_get "$vhs_analysis" "skipped_frames_est")
+
 cat >"$out_md" <<MD
 # evp vs VHS torture benchmark
 
 Both runs were pinned to a single CPU core (\`taskset -c 0\` for evp,
 \`--cpuset-cpus=0 --cpus=1\` for the VHS docker container) and rendered
 the same \`examples/torture.tape\` script: a 100×30 grid at 60 fps,
-typing at 100 chars/min for ~10 s, where every keystroke triggers a
-full-screen redraw with random ASCII + random fg/bg + random modifiers
-in every cell.
+typing at ~125 chars/sec (≥2 keystrokes per captured frame) for ~10 s,
+where every keystroke triggers a full-screen redraw with random ASCII
++ random fg/bg + random modifiers in every cell.
 
 ## Summary
 
@@ -95,6 +137,8 @@ in every cell.
 | wall time (ms) | ${evp_wall:-?} | ${vhs_wall:-?} |
 | gif size | $(human_bytes "$evp_bytes") ($evp_bytes B) | $(human_bytes "$vhs_bytes") ($vhs_bytes B) |
 | md5 | \`$evp_md5\` | \`$vhs_md5\` |
+| gif frames | ${evp_frames:-?} | ${vhs_frames:-?} |
+| skipped frames (est. @ ${fps} fps) | ${evp_skipped:-?} | ${vhs_skipped:-?} |
 | cpu affinity | $evp_cpu | $vhs_cpu |
 
 VHS wall-clock / evp wall-clock = **${ratio}** (>1 means evp is faster).
@@ -105,6 +149,18 @@ VHS wall-clock / evp wall-clock = **${ratio}** (>1 means evp is faster).
 - max runner→encoder queue: ${evp_max_q1:-?}
 - max encoder→renderer queue: ${evp_max_q2:-?}
 - pass/fail (>5 % missed = fail): **${evp_result:-?}**
+
+## evp gif frame analysis
+
+\`\`\`
+$evp_analysis
+\`\`\`
+
+## VHS gif frame analysis
+
+\`\`\`
+$vhs_analysis
+\`\`\`
 
 ## evp full report
 
