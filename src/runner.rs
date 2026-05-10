@@ -242,10 +242,11 @@ pub fn run_with_frame_tap(
 
             if !was_hidden && hidden {
                 hidden_started_at = Some(now);
-            } else if was_hidden && !hidden
-                && let Some(hidden_start) = hidden_started_at.take()
-            {
-                skipped_recording_time += now.saturating_sub(hidden_start);
+            }
+            if was_hidden && !hidden {
+                if let Some(hidden_start) = hidden_started_at.take() {
+                    skipped_recording_time += now.saturating_sub(hidden_start);
+                }
             }
         }
 
@@ -276,6 +277,8 @@ pub fn run_with_frame_tap(
                     &mut row_it,
                     &mut cell_it,
                     &mut terminal,
+                    // Compress timeline by subtracting wall-clock time spent
+                    // hidden so rendered output doesn't stall across Hide/Show.
                     next_frame_at.saturating_sub(skipped_recording_time),
                     opts.cols,
                     opts.rows,
