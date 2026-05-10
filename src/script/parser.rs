@@ -278,26 +278,110 @@ fn apply_set(rest: &[String], s: &mut Settings) -> Result<()> {
         .first()
         .ok_or_else(|| anyhow!("Set requires a key"))?
         .as_str();
-    let val = rest
-        .get(1)
-        .map(|t| unquote(t).to_string())
-        .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
     match key {
-        "Shell" => s.shell = Some(val),
-        "FontFamily" => s.font_family = Some(val),
-        "FontSize" => s.font_size = val.parse()?,
-        "Width" => s.width = val.parse()?,
-        "Height" => s.height = val.parse()?,
+        "Shell" => {
+            if rest.len() < 2 {
+                bail!("Set {key} requires a value");
+            }
+            let cmd = rest[1..]
+                .iter()
+                .map(|t| unquote(t))
+                .collect::<Vec<_>>()
+                .join(" ");
+            s.shell = Some(cmd);
+        }
+        "FontFamily" => {
+            let val = rest
+                .get(1)
+                .map(|t| unquote(t).to_string())
+                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            s.font_family = Some(val);
+        }
+        "FontSize" => {
+            let val = rest
+                .get(1)
+                .map(|t| unquote(t).to_string())
+                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            s.font_size = val.parse()?;
+        }
+        "Width" => {
+            let val = rest
+                .get(1)
+                .map(|t| unquote(t).to_string())
+                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            s.width = val.parse()?;
+        }
+        "Height" => {
+            let val = rest
+                .get(1)
+                .map(|t| unquote(t).to_string())
+                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            s.height = val.parse()?;
+        }
         // vhs has no native cell-grid setting; we expose them for convenience.
-        "Cols" | "Columns" => s.cols = Some(val.parse()?),
-        "Rows" => s.rows = Some(val.parse()?),
-        "Padding" => s.padding = val.parse()?,
-        "LineHeight" => s.line_height = val.parse()?,
-        "Framerate" | "FrameRate" | "FPS" => s.framerate = val.parse()?,
-        "PlaybackSpeed" => s.playback_speed = val.parse()?,
-        "TypingSpeed" => s.typing_speed = parse_duration(&val)?,
-        "WaitTimeout" => s.wait_timeout = parse_duration(&val)?,
-        "WaitPattern" => s.wait_pattern = val,
+        "Cols" | "Columns" => {
+            let val = rest
+                .get(1)
+                .map(|t| unquote(t).to_string())
+                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            s.cols = Some(val.parse()?);
+        }
+        "Rows" => {
+            let val = rest
+                .get(1)
+                .map(|t| unquote(t).to_string())
+                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            s.rows = Some(val.parse()?);
+        }
+        "Padding" => {
+            let val = rest
+                .get(1)
+                .map(|t| unquote(t).to_string())
+                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            s.padding = val.parse()?;
+        }
+        "LineHeight" => {
+            let val = rest
+                .get(1)
+                .map(|t| unquote(t).to_string())
+                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            s.line_height = val.parse()?;
+        }
+        "Framerate" | "FrameRate" | "FPS" => {
+            let val = rest
+                .get(1)
+                .map(|t| unquote(t).to_string())
+                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            s.framerate = val.parse()?;
+        }
+        "PlaybackSpeed" => {
+            let val = rest
+                .get(1)
+                .map(|t| unquote(t).to_string())
+                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            s.playback_speed = val.parse()?;
+        }
+        "TypingSpeed" => {
+            let val = rest
+                .get(1)
+                .map(|t| unquote(t).to_string())
+                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            s.typing_speed = parse_duration(&val)?;
+        }
+        "WaitTimeout" => {
+            let val = rest
+                .get(1)
+                .map(|t| unquote(t).to_string())
+                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            s.wait_timeout = parse_duration(&val)?;
+        }
+        "WaitPattern" => {
+            let val = rest
+                .get(1)
+                .map(|t| unquote(t).to_string())
+                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            s.wait_pattern = val;
+        }
         // VHS settings that evp does NOT yet implement. We bail loudly so a
         // tape author isn't misled into thinking these are taking effect.
         // See README ("VHS feature parity") for the up-to-date matrix.
@@ -629,6 +713,30 @@ mod tests {
         // the runner with full context. Make sure we kept the AST node.
         let s = parse("Output out.gif\nScreenshot shot.png\n").unwrap();
         assert!(matches!(&s.events[0], Event::Screenshot(p) if p == "shot.png"));
+    }
+
+    #[test]
+    fn set_shell_accepts_full_command_with_args() {
+        let s = parse(
+            r#"
+            Output out.gif
+            Set Shell bash --norc
+        "#,
+        )
+        .unwrap();
+        assert_eq!(s.settings.shell.as_deref(), Some("bash --norc"));
+
+        let s = parse(
+            r#"
+            Output out.gif
+            Set Shell /bin/bash --rcfile somefile.rc
+        "#,
+        )
+        .unwrap();
+        assert_eq!(
+            s.settings.shell.as_deref(),
+            Some("/bin/bash --rcfile somefile.rc")
+        );
     }
 
     /// Tiny self-cleaning tempdir helper so we don't pull in `tempfile`.

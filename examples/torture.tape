@@ -15,7 +15,7 @@
 
 Output torture.gif
 
-Set Shell /bin/sh
+Set Shell bash
 Set FontSize 14
 # Pixel geometry chosen so `evp::runner::derive_options` rounds to a
 # clean 100×30 grid: cell_w = round(14*0.6) = 8 → 100*8 = 800 wide;

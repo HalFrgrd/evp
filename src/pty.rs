@@ -7,6 +7,7 @@
 #![allow(unsafe_code)]
 
 use std::{
+    ffi::OsString,
     os::{
         fd::{AsRawFd, OwnedFd, RawFd},
         unix::process::CommandExt,
@@ -74,23 +75,44 @@ impl Pty {
         let ws = size.to_winsize();
         match unsafe { nix::pty::forkpty(&ws, None) }.map_err(|e| anyhow!("forkpty failed: {e}"))? {
             ForkptyResult::Child => {
-                let shell_path = match shell {
-                    Some(s) if !s.is_empty() => PathBuf::from(s),
-                    _ => match std::env::var_os("SHELL") {
-                        Some(s) if !s.is_empty() => PathBuf::from(s),
-                        _ => match unistd::User::from_uid(unistd::getuid()) {
-                            Ok(Some(user)) => user.shell,
-                            _ => PathBuf::from("/bin/sh"),
-                        },
-                    },
+                let mut cmd = match shell {
+                    Some(raw) if !raw.trim().is_empty() => {
+                        let parts = split_command_line(raw)?;
+                        if parts.is_empty() {
+                            let shell_path = default_shell_path();
+                            let mut c = Command::new(&shell_path);
+                            let arg0 = shell_path
+                                .file_name()
+                                .unwrap_or(shell_path.as_os_str())
+                                .to_owned();
+                            c.arg0(arg0);
+                            c
+                        } else {
+                            let program = &parts[0];
+                            let mut c = Command::new(program);
+                            if parts.len() > 1 {
+                                c.args(&parts[1..]);
+                            }
+                            let arg0 = PathBuf::from(program)
+                                .file_name()
+                                .map(|s| s.to_owned())
+                                .unwrap_or_else(|| OsString::from(program));
+                            c.arg0(arg0);
+                            c
+                        }
+                    }
+                    _ => {
+                        let shell_path = default_shell_path();
+                        let arg0 = shell_path
+                            .file_name()
+                            .unwrap_or(shell_path.as_os_str())
+                            .to_owned();
+                        let mut c = Command::new(&shell_path);
+                        c.arg0(arg0);
+                        c
+                    }
                 };
-                let arg0 = shell_path
-                    .file_name()
-                    .unwrap_or(shell_path.as_os_str())
-                    .to_owned();
-
-                let mut cmd = Command::new(&shell_path);
-                cmd.arg0(&arg0).env("TERM", "xterm-256color");
+                cmd.env("TERM", "xterm-256color");
                 for (k, v) in env {
                     cmd.env(k, v);
                 }
@@ -143,6 +165,113 @@ impl Pty {
         nix::ioctl_write_ptr_bad!(tiocswinsz, nix::libc::TIOCSWINSZ, Winsize);
         let ws = size.to_winsize();
         let _ = unsafe { tiocswinsz(self.0.as_raw_fd(), &ws) };
+    }
+}
+
+fn default_shell_path() -> PathBuf {
+    match std::env::var_os("SHELL") {
+        Some(s) if !s.is_empty() => PathBuf::from(s),
+        _ => match unistd::User::from_uid(unistd::getuid()) {
+            Ok(Some(user)) => user.shell,
+            _ => PathBuf::from("/bin/sh"),
+        },
+    }
+}
+
+fn split_command_line(input: &str) -> Result<Vec<String>> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut quote: Option<char> = None;
+    let mut token_started = false;
+    let mut chars = input.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match quote {
+            Some(q) => {
+                if c == q {
+                    quote = None;
+                    continue;
+                }
+                if q != '`' && c == '\\' {
+                    if let Some(next) = chars.next() {
+                        cur.push(next);
+                    } else {
+                        cur.push('\\');
+                    }
+                    continue;
+                }
+                cur.push(c);
+            }
+            None => {
+                if c.is_whitespace() {
+                    if token_started {
+                        out.push(std::mem::take(&mut cur));
+                        token_started = false;
+                    }
+                    continue;
+                }
+                if matches!(c, '"' | '\'' | '`') {
+                    quote = Some(c);
+                    token_started = true;
+                    continue;
+                }
+                if c == '\\' {
+                    if let Some(next) = chars.next() {
+                        cur.push(next);
+                        token_started = true;
+                    } else {
+                        cur.push('\\');
+                        token_started = true;
+                    }
+                    continue;
+                }
+                cur.push(c);
+                token_started = true;
+            }
+        }
+    }
+
+    if let Some(q) = quote {
+        return Err(anyhow!("unterminated quoted argument (missing closing `{q}`)"));
+    }
+    if token_started {
+        out.push(cur);
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_command_line;
+
+    #[test]
+    fn split_command_line_handles_shell_forms() {
+        assert_eq!(
+            split_command_line("bash").unwrap(),
+            vec!["bash".to_string()]
+        );
+        assert_eq!(
+            split_command_line("/bin/bash").unwrap(),
+            vec!["/bin/bash".to_string()]
+        );
+        assert_eq!(
+            split_command_line("bash --norc").unwrap(),
+            vec!["bash".to_string(), "--norc".to_string()]
+        );
+        assert_eq!(
+            split_command_line("bash --rcfile somefile.rc").unwrap(),
+            vec![
+                "bash".to_string(),
+                "--rcfile".to_string(),
+                "somefile.rc".to_string()
+            ]
+        );
+        assert_eq!(split_command_line("fish").unwrap(), vec!["fish".to_string()]);
+        assert_eq!(split_command_line("sh").unwrap(), vec!["sh".to_string()]);
+        assert_eq!(
+            split_command_line("/bin/sh").unwrap(),
+            vec!["/bin/sh".to_string()]
+        );
     }
 }
 

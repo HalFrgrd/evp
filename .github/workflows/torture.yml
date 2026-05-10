@@ -240,6 +240,8 @@ jobs:
         # report.
         run: |
           set -eu
+          test -s torture-out/evp.gif
+          test -s torture-out/vhs.gif
           result=$(awk -F'=' '/^result/ { gsub(/[[:space:]]/,"",$2); print $2 }' torture-out/evp.report.txt)
           echo "evp result: $result"
           test "$result" = "PASS"

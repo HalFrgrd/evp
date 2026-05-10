@@ -5,7 +5,7 @@
 
 Output colors.gif
 
-Set Shell /bin/sh
+Set Shell bash --norc
 Set Width 900
 Set Height 400
 Set FontSize 18
