@@ -45,7 +45,7 @@ use crossbeam_channel::{Receiver, Sender, bounded};
 use crate::{
     FrameStyle,
     recording::{RawFrame, Recording, style_flags},
-    style::rgb_hex,
+    style::{rgb_hex, window_bar_dot_metrics},
 };
 
 const SVG_STREAM_CHANNEL_CAPACITY: usize = 4096;
@@ -567,8 +567,7 @@ fn layout_metrics(
 }
 
 fn emit_window_bar(s: &mut String, layout: LayoutMetrics, style: crate::WindowBarStyle) {
-    let radius = (layout.bar_h / 5).max(4);
-    let gap = radius.max(6);
+    let (radius, gap) = window_bar_dot_metrics(layout.bar_h);
     let dots_w = radius * 2 * 3 + gap * 2;
     let start_x = if style.align_right() {
         layout.frame_x + layout.frame_w.saturating_sub(dots_w + gap)

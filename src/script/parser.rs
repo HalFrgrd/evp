@@ -216,8 +216,8 @@ fn parse_line(
                 .first()
                 .map(|t| unquote(t).to_string())
                 .ok_or_else(|| anyhow!("Screenshot needs a path"))?;
-            if !path.ends_with(".png") {
-                bail!("Screenshot expects a .png path");
+            if !path.to_ascii_lowercase().ends_with(".png") {
+                bail!("Screenshot path must end with .png (got `{path}`)");
             }
             script.events.push(Event::Screenshot(path));
         }

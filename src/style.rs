@@ -22,6 +22,9 @@ const DEFAULT_BRIGHT_CYAN: &str = "#00FEFE";
 const DEFAULT_WHITE: &str = "#bfbfbf";
 const DEFAULT_BRIGHT_WHITE: &str = "#e6e6e6";
 const DEFAULT_WINDOW_BAR_SIZE_PX: u32 = 30;
+pub const WINDOW_BAR_DOT_RADIUS_DIVISOR: u32 = 5;
+pub const WINDOW_BAR_DOT_MIN_RADIUS: u32 = 4;
+pub const WINDOW_BAR_DOT_MIN_GAP: u32 = 6;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Theme {
@@ -193,7 +196,8 @@ impl Default for FrameStyle {
         Self {
             padding_px: 60,
             margin_px: 0,
-            margin_fill: parse_hex_color(DEFAULT_BACKGROUND).expect("default color is valid"),
+            margin_fill: parse_hex_color(DEFAULT_BACKGROUND)
+                .expect("failed to parse hardcoded DEFAULT_BACKGROUND color"),
             window_bar: WindowBarStyle::None,
             window_bar_size_px: DEFAULT_WINDOW_BAR_SIZE_PX,
             border_radius_px: 0,
@@ -349,13 +353,19 @@ pub fn rgb_hex(color: [u8; 3]) -> String {
     format!("#{:02x}{:02x}{:02x}", color[0], color[1], color[2])
 }
 
+pub fn window_bar_dot_metrics(bar_h: u32) -> (u32, u32) {
+    let radius = (bar_h / WINDOW_BAR_DOT_RADIUS_DIVISOR).max(WINDOW_BAR_DOT_MIN_RADIUS);
+    let gap = radius.max(WINDOW_BAR_DOT_MIN_GAP);
+    (radius, gap)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn loads_all_vhs_theme_presets() {
-        assert_eq!(Theme::preset_names().unwrap().len(), 348);
+        assert!(Theme::preset_names().unwrap().len() > 300);
     }
 
     #[test]

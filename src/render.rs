@@ -20,6 +20,7 @@ use woff2_patched::convert_woff2_to_ttf;
 use crate::{
     FrameStyle,
     recording::{RawFrame, Recording, style_flags},
+    style::window_bar_dot_metrics,
 };
 
 // Rendering can briefly lag behind capture on busy systems; this queue absorbs
@@ -453,8 +454,7 @@ fn layout_metrics(
 
 fn draw_window_bar(buf: &mut [u8], w: u32, layout: LayoutMetrics, style: crate::WindowBarStyle) {
     let bar_h = layout.bar_h;
-    let radius = (bar_h / 5).max(4);
-    let gap = radius.max(6);
+    let (radius, gap) = window_bar_dot_metrics(bar_h);
     let dots_w = radius * 2 * 3 + gap * 2;
     let start_x = if style.align_right() {
         layout.frame_x + layout.frame_w.saturating_sub(dots_w + gap)
@@ -529,6 +529,7 @@ fn mask_outside_rounded_rect(
     radius: u32,
     fill: [u8; 3],
 ) {
+    let radius = radius.min(layout.frame_w / 2).min(layout.frame_h / 2) as i64;
     for y in layout.frame_y..layout.frame_y + layout.frame_h {
         for x in layout.frame_x..layout.frame_x + layout.frame_w {
             if !inside_rounded_rect(x, y, layout, radius) {
@@ -543,8 +544,7 @@ fn mask_outside_rounded_rect(
     }
 }
 
-fn inside_rounded_rect(x: u32, y: u32, layout: LayoutMetrics, radius: u32) -> bool {
-    let radius = radius.min(layout.frame_w / 2).min(layout.frame_h / 2) as i64;
+fn inside_rounded_rect(x: u32, y: u32, layout: LayoutMetrics, radius: i64) -> bool {
     if radius == 0 {
         return true;
     }

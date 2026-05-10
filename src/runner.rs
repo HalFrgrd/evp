@@ -638,7 +638,7 @@ fn execute_event(
             });
         }
         Event::Screenshot(path) => {
-            pending_screenshots.push(resolve_output_path(path, script));
+            pending_screenshots.push(resolve_output_path(path));
         }
         Event::Copy(text) => *clipboard = text.clone(),
         Event::Paste => pty.write(clipboard.as_bytes()),
@@ -648,7 +648,7 @@ fn execute_event(
     Ok(())
 }
 
-fn resolve_output_path(path: &str, _script: &Script) -> PathBuf {
+fn resolve_output_path(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
@@ -790,7 +790,7 @@ fn capture<'a>(
 
     let cursor = if snap.cursor_visible()? {
         if let Some(vp) = snap.cursor_viewport()? {
-            if !cursor_blink || cursor_is_on(at) {
+            if !cursor_blink || cursor_visible_at(at) {
                 Some((vp.x, vp.y))
             } else {
                 None
@@ -813,8 +813,9 @@ fn capture<'a>(
     })
 }
 
-fn cursor_is_on(at: Duration) -> bool {
+fn cursor_visible_at(at: Duration) -> bool {
     const CURSOR_BLINK_HALF_PERIOD_MS: u128 = 300;
+    // Match a simple block cursor blink: 300ms visible, 300ms hidden.
     (at.as_millis() / CURSOR_BLINK_HALF_PERIOD_MS) % 2 == 0
 }
 
