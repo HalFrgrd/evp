@@ -158,6 +158,7 @@ pub fn run_with_frame_tap(
     script: &Script,
     frame_tap: Option<Sender<RawFrame>>,
 ) -> Result<RunOutput> {
+    enforce_require(&script.require)?;
     let opts = derive_options(&script.settings);
     let pty_size = PtySize {
         cols: opts.cols,
@@ -417,6 +418,52 @@ pub fn run_with_frame_tap(
     Ok(RunOutput { recording, stats })
 }
 
+// ---------------------------------------------------------------------------
+// `Require` enforcement
+// ---------------------------------------------------------------------------
+
+/// Verify each `Require <prog>` directive resolves on `$PATH`. Bails with a
+/// clear, actionable error listing every program that's missing. Mirrors
+/// VHS's behaviour of failing fast before recording starts.
+fn enforce_require(required: &[String]) -> Result<()> {
+    if required.is_empty() {
+        return Ok(());
+    }
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let dirs: Vec<std::path::PathBuf> = std::env::split_paths(&path).collect();
+    let mut missing: Vec<&str> = Vec::new();
+    for prog in required {
+        if !is_program_on_path(prog, &dirs) {
+            missing.push(prog.as_str());
+        }
+    }
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "the following `Require`d program(s) were not found on $PATH: {}. \
+             Install them or remove the `Require` directive(s) from the tape.",
+            missing.join(", ")
+        );
+    }
+    info!(programs = ?required, "all `Require`d programs are present on PATH");
+    Ok(())
+}
+
+fn is_program_on_path(prog: &str, dirs: &[std::path::PathBuf]) -> bool {
+    // Treat anything containing a path separator as a literal path. Use
+    // `std::path::is_separator` so both `/` and `\` count on Windows.
+    let candidate = std::path::Path::new(prog);
+    if candidate.is_absolute() || prog.chars().any(std::path::is_separator) {
+        return std::fs::metadata(candidate).is_ok_and(|m| m.is_file());
+    }
+    for dir in dirs {
+        let p = dir.join(prog);
+        if std::fs::metadata(&p).is_ok_and(|m| m.is_file()) {
+            return true;
+        }
+    }
+    false
+}
+
 fn apply_default_palette(terminal: &mut Terminal<'_, '_>) {
     // OSC 4 controls indexed palette entries, OSC 10/11/12 control
     // foreground/background/cursor color. Using ST terminator keeps the
@@ -569,10 +616,14 @@ fn execute_event(
             });
         }
         Event::Screenshot(path) => {
-            // Screenshots are taken from the recording afterwards. We only
-            // log a marker here; later we could store the timestamp in the
-            // recording so the renderer can emit a still PNG.
-            warn!(path = %path, "Screenshot is not yet implemented");
+            // Bail loudly: VHS exports a PNG of the current frame here.
+            // evp captures every frame into the recording but doesn't yet
+            // emit per-event PNG snapshots. Failing rather than silently
+            // dropping the directive avoids mystery-empty-file confusion.
+            anyhow::bail!(
+                "`Screenshot {path}` is a VHS feature evp does not implement yet \
+                 (see README \"VHS feature parity\")."
+            );
         }
         Event::Hide => *hidden = true,
         Event::Show => *hidden = false,

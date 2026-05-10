@@ -282,12 +282,122 @@ is needed.
 
 | Feature | State |
 | --- | --- |
-| `.tape` parsing (Set / Type / Sleep / Wait / Hide / Show / Ctrl+X / Output / Env) | working |
+| `.tape` parsing (`Set` / `Type` / `Sleep` / `Wait` / `Hide` / `Show` / `Ctrl+X` / `Output` / `Env` / `Source` / `Require`) | working |
 | PTY-backed shell, libghostty VT, diff-encoded `Recording` | working |
 | GIF renderer | working |
 | JSON serialisation of `Recording` | working |
 | Animated SVG renderer | working (selectable text, ~10× smaller than GIF) |
-| `Screenshot` PNG export | TODO |
-| Theme support, `Source`, `Copy` / `Paste` | parsed, no-op |
+| `Screenshot`, `Copy` / `Paste`, `Set Theme`, `Set Margin*`, `Set WindowBar`, `Set BorderRadius`, `Set LetterSpacing`, `Set CursorBlink`, `Set LoopOffset`, multiple `Output`, `.mp4` / `.webm` / `.txt` / `.ascii` / PNG-frames outputs | **not implemented — tape will fail loudly with a clear error** |
 
 See [architecture.md](architecture.md) for the design rationale.
+See the next section for the full VHS-vs-evp parity matrix.
+
+## VHS feature parity
+
+`evp` consumes the same `.tape` script format as
+[charmbracelet/vhs](https://github.com/charmbracelet/vhs), but it is a
+much smaller project — it only implements the subset of VHS that maps
+cleanly onto an embedded libghostty + Rust renderer. Anything not in
+that subset **fails loudly at parse or run time** rather than silently
+no-op'ing, so a tape that produces a GIF on `evp` is guaranteed to have
+exercised every directive it contains.
+
+### Supported (matches VHS semantics)
+
+| VHS directive | evp |
+| --- | --- |
+| `Output <path>` (single `.gif` / `.svg`) | ✅ |
+| `Set Shell <shell>` | ✅ |
+| `Set FontFamily <path-or-name>` (path to a TTF/OTF/TTC) | ⚠️ accepts a font *file path*; VHS resolves font *family names* via fontconfig. Pass `--font /path/to/font.ttf` on the CLI for the same effect. |
+| `Set FontSize <n>` | ✅ |
+| `Set Width <px>` / `Set Height <px>` | ✅ |
+| `Set Padding <px>` | ✅ |
+| `Set LineHeight <f>` | ✅ |
+| `Set Framerate <n>` (also `FrameRate`, `FPS`) | ✅ |
+| `Set PlaybackSpeed <f>` | ✅ |
+| `Set TypingSpeed <duration>` | ✅ |
+| `Set WaitTimeout <duration>` | ✅ |
+| `Set WaitPattern /regex/` | ✅ |
+| `Type[@<duration>] "text" ...` (single + double quotes + raw backticks) | ✅ |
+| `Sleep <duration>` | ✅ |
+| `Wait[+Screen|+Line][@<duration>] [/regex/]` | ✅ |
+| `Hide` / `Show` | ✅ |
+| `Backspace`, `Delete`, `Insert`, `Enter`, `Tab`, `Space`, `Escape` (with optional `@<duration> <count>`) | ✅ |
+| `Up` / `Down` / `Left` / `Right` / `PageUp` / `PageDown` / `Home` / `End` | ✅ |
+| `ScrollUp` / `ScrollDown` (modelled as keys; see "Differences" below) | ⚠️ |
+| `Ctrl[+Alt][+Shift]+<char>` | ✅ |
+| `Env <KEY> <VALUE>` | ✅ |
+| `Require <program>` (checked against `$PATH`; missing programs abort the run) | ✅ |
+| `Source <path>` (recursive, cycle-detected) | ✅ |
+| Comments (`#` to end-of-line) | ✅ |
+| evp extras: `Set Cols <n>` / `Set Rows <n>` (explicit cell-grid override) | ✅ (no VHS equivalent) |
+
+### Not implemented — tape fails loudly
+
+If a tape uses any of the following, evp aborts with an error pointing
+back to this section, instead of silently dropping the directive on the
+floor:
+
+| VHS directive | evp behaviour |
+| --- | --- |
+| `Set Theme <name|json>` | parse-time error (default Snazzy palette is used; no theme registry) |
+| `Set LetterSpacing <px>` | parse-time error |
+| `Set CursorBlink <bool>` | parse-time error (cursor block is currently always rendered as VHS would render `CursorBlink false`) |
+| `Set LoopOffset <pct>` | parse-time error |
+| `Set Margin <px>` / `Set MarginFill <color>` | parse-time error |
+| `Set WindowBar <style>` / `Set WindowBarSize <px>` | parse-time error |
+| `Set BorderRadius <px>` | parse-time error |
+| `Screenshot <path>` | run-time error |
+| `Copy "..."` / `Paste` | parse-time error |
+| Multiple `Output` directives in one tape | parse-time error (use a separate tape per output) |
+| `Output out.mp4` / `.webm` / `.txt` / `.ascii` / PNG frames directory | parse-time error (only `.gif` and `.svg` are written) |
+
+### CLI / tooling not implemented
+
+VHS ships several subcommands that evp does not provide:
+
+- `vhs new <file>` — tape scaffolder
+- `vhs record` — interactive ttyd recorder that writes a `.tape`
+- `vhs publish <file>` — uploads a GIF to `vhs.charm.sh`
+- `vhs serve` — SSH server that renders tapes for remote clients
+- `vhs themes` — list bundled themes
+- `vhs validate <file>` — parse-only check
+- `vhs manual` — built-in command reference
+
+For evp the only entry point is `evp <script>`; see [CLI](#cli) above.
+
+### Differences that aren't bugs
+
+These behaviours match VHS's documented semantics but rely on a
+different implementation, so the visual or runtime output may not be
+byte-identical:
+
+- **Renderer.** VHS records ttyd in a headless browser and re-encodes
+  with ffmpeg/gifski. evp drives an embedded libghostty VT and rasterises
+  cell-by-cell with `ab_glyph` + `gifski`. Antialiasing, glyph metrics,
+  and dithering will differ slightly from a VHS recording of the same
+  tape — the *content* is the same, the pixels may not be.
+- **Font resolution.** VHS uses the system font stack via the browser /
+  fontconfig. evp ships JetBrains Mono embedded into the binary and
+  treats `Set FontFamily` as a *file path* (or accepts `--font
+  path/to/font.ttf` on the CLI). Passing a bare family name like
+  `"JetBrains Mono"` will fall back to the embedded faces with a warning.
+- **Default palette.** VHS defaults to a built-in dark theme; evp
+  applies the Snazzy palette via OSC 4/10/11/12 at startup. Because
+  `Set Theme` is rejected, a tape that omits it gets the same colours
+  on every run — at the cost of not being able to switch themes.
+- **`ScrollUp` / `ScrollDown`.** VHS implements these as smooth
+  multi-frame mouse-wheel scrolls. evp models them as discrete key
+  presses fed to the PTY; programs that respond to mouse wheel events
+  in mouse-tracking mode (e.g. `less`) won't react to them.
+- **Single output.** VHS allows multiple `Output` directives in one
+  tape and renders each. evp restricts a tape to one output — split
+  into separate tapes for multi-format renders.
+- **GitHub Action.** VHS has
+  [`charmbracelet/vhs-action`](https://github.com/charmbracelet/vhs-action);
+  evp ships its own composite action — see
+  [Using `evp` in GitHub Actions](#using-evp-in-github-actions). Their
+  inputs are not interchangeable.
+- **Zero runtime dependencies.** VHS requires `ttyd` and `ffmpeg` on
+  `$PATH`. evp's release binary is statically linked and needs neither.
+

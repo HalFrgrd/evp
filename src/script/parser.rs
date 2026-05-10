@@ -157,6 +157,34 @@ fn parse_line(
                 .first()
                 .map(|t| unquote(t).to_string())
                 .ok_or_else(|| anyhow!("Output requires a path"))?;
+            if !script.outputs.is_empty() {
+                bail!(
+                    "evp only supports a single `Output` directive per tape (got `{}` after `{}`). \
+                     VHS allows multiple outputs; this is tracked under \"VHS feature parity\" in the README.",
+                    path,
+                    script.outputs[0]
+                );
+            }
+            // Restrict output extensions up-front so users see the failure
+            // as soon as the tape is parsed rather than at render time.
+            let ext = std::path::Path::new(&path)
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|s| s.to_ascii_lowercase());
+            match ext.as_deref() {
+                Some("gif") | Some("svg") => {}
+                Some(other) => bail!(
+                    "Output `{path}` has unsupported extension `.{other}`. \
+                     evp currently writes `.gif` or `.svg` only. \
+                     `.mp4`, `.webm`, `.png` (frame directory), `.txt`, and `.ascii` outputs \
+                     are VHS features evp does not implement yet \
+                     (see README \"VHS feature parity\")."
+                ),
+                None => bail!(
+                    "Output `{path}` has no extension. evp picks the renderer from the extension; \
+                     use `.gif` or `.svg`."
+                ),
+            }
             script.outputs.push(path);
         }
         "Set" => apply_set(rest, &mut script.settings)?,
@@ -216,7 +244,10 @@ fn parse_line(
             visited.remove(&canonical);
             res?;
         }
-        "Copy" | "Paste" => bail!("clipboard commands are not supported yet"),
+        "Copy" | "Paste" => bail!(
+            "`Copy` / `Paste` are VHS clipboard commands that evp does not implement yet \
+             (see README \"VHS feature parity\")."
+        ),
         // `Type[@duration] "text" ["text" ...]`
         h if h == "Type" || h.starts_with("Type@") => {
             let delay = parse_at_duration(h, "Type", script.settings.typing_speed)?;
@@ -262,23 +293,37 @@ fn apply_set(rest: &[String], s: &mut Settings) -> Result<()> {
         "Rows" => s.rows = Some(val.parse()?),
         "Padding" => s.padding = val.parse()?,
         "LineHeight" => s.line_height = val.parse()?,
-        "LetterSpacing" => s.letter_spacing = val.parse()?,
         "Framerate" | "FrameRate" | "FPS" => s.framerate = val.parse()?,
         "PlaybackSpeed" => s.playback_speed = val.parse()?,
         "TypingSpeed" => s.typing_speed = parse_duration(&val)?,
-        "Theme" => s.theme = Some(val),
-        "CursorBlink" => s.cursor_blink = parse_bool(&val)?,
         "WaitTimeout" => s.wait_timeout = parse_duration(&val)?,
         "WaitPattern" => s.wait_pattern = val,
-        "LoopOffset" => {
-            let trimmed = val.trim_end_matches('%');
-            s.loop_offset_pct = trimmed.parse()?;
-        }
-        // Cosmetic settings we accept but don't act on yet.
-        "MarginFill" | "Margin" | "WindowBar" | "WindowBarSize" | "BorderRadius" => {}
+        // VHS settings that evp does NOT yet implement. We bail loudly so a
+        // tape author isn't misled into thinking these are taking effect.
+        // See README ("VHS feature parity") for the up-to-date matrix.
+        "Theme" => bail!(unsupported_set_msg("Theme")),
+        "LetterSpacing" => bail!(unsupported_set_msg("LetterSpacing")),
+        "CursorBlink" => bail!(unsupported_set_msg("CursorBlink")),
+        "LoopOffset" => bail!(unsupported_set_msg("LoopOffset")),
+        "Margin" => bail!(unsupported_set_msg("Margin")),
+        "MarginFill" => bail!(unsupported_set_msg("MarginFill")),
+        "WindowBar" => bail!(unsupported_set_msg("WindowBar")),
+        "WindowBarSize" => bail!(unsupported_set_msg("WindowBarSize")),
+        "BorderRadius" => bail!(unsupported_set_msg("BorderRadius")),
         other => bail!("unknown Set key: {other}"),
     }
     Ok(())
+}
+
+/// Build a consistent error message for `Set` keys VHS understands but evp
+/// does not implement yet. Surfaced both in the parser error and in the
+/// README's "VHS feature parity" table.
+fn unsupported_set_msg(key: &str) -> String {
+    format!(
+        "`Set {key}` is a VHS feature that evp does not implement yet. \
+         See the README's \"VHS feature parity\" section. \
+         Remove the directive or run the tape with vhs instead."
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -412,14 +457,6 @@ pub fn parse_duration(s: &str) -> Result<Duration> {
     Ok(Duration::from_secs_f64(secs))
 }
 
-fn parse_bool(s: &str) -> Result<bool> {
-    match s.to_ascii_lowercase().as_str() {
-        "true" | "yes" | "1" | "on" => Ok(true),
-        "false" | "no" | "0" | "off" => Ok(false),
-        _ => bail!("invalid boolean `{s}`"),
-    }
-}
-
 /// Strip surrounding quotes if present (no escape processing).
 fn unquote(s: &str) -> &str {
     let bytes = s.as_bytes();
@@ -525,6 +562,73 @@ mod tests {
             format!("{err:#}").contains("cycle"),
             "expected cycle error, got: {err:#}"
         );
+    }
+
+    /// VHS settings that evp does not implement should fail loudly so a
+    /// tape author isn't misled into thinking they're taking effect.
+    #[test]
+    fn unsupported_set_keys_bail() {
+        for key in [
+            "Theme",
+            "LetterSpacing",
+            "CursorBlink",
+            "LoopOffset",
+            "Margin",
+            "MarginFill",
+            "WindowBar",
+            "WindowBarSize",
+            "BorderRadius",
+        ] {
+            let src = format!("Output out.gif\nSet {key} something\n");
+            let err = parse(&src).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(
+                msg.contains(key) && msg.contains("VHS feature"),
+                "expected `{key}` to bail with parity error, got: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn copy_paste_bail() {
+        for cmd in ["Copy \"hello\"", "Paste"] {
+            let err = parse(&format!("Output out.gif\n{cmd}\n")).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(
+                msg.contains("Copy") || msg.contains("Paste"),
+                "expected clipboard parity error, got: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn multiple_outputs_bail() {
+        let err = parse("Output a.gif\nOutput b.gif\n").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("single `Output`"),
+            "expected single-output error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn unsupported_output_extensions_bail() {
+        for ext in ["mp4", "webm", "txt", "ascii", "png"] {
+            let err = parse(&format!("Output out.{ext}\n")).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(
+                msg.contains(ext),
+                "expected `.{ext}` to bail, got: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn screenshot_parses_but_runtime_will_fail() {
+        // Parser still accepts `Screenshot` so error messages can come from
+        // the runner with full context. Make sure we kept the AST node.
+        let s = parse("Output out.gif\nScreenshot shot.png\n").unwrap();
+        assert!(matches!(&s.events[0], Event::Screenshot(p) if p == "shot.png"));
     }
 
     /// Tiny self-cleaning tempdir helper so we don't pull in `tempfile`.
