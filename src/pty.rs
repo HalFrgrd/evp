@@ -16,7 +16,7 @@ use std::{
     process::Command,
 };
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use libghostty_vt::Terminal;
 use nix::{
     errno::Errno,
@@ -73,7 +73,7 @@ impl Pty {
         size: PtySize,
     ) -> Result<(Self, Child)> {
         let ws = size.to_winsize();
-        match unsafe { nix::pty::forkpty(&ws, None) }.map_err(|e| anyhow!("forkpty failed: {e}"))? {
+        match unsafe { nix::pty::forkpty(&ws, None) }.context("forkpty failed")? {
             ForkptyResult::Child => {
                 let mut cmd = match shell {
                     Some(raw) if !raw.trim().is_empty() => {
