@@ -1,0 +1,263 @@
+//! Torture-test benchmark for the evp PTY → encoder → renderer pipeline.
+//!
+//! Drives `examples/torture.tape` (100×30 grid, 60 fps, ~10 s, types at
+//! 100 chars/min) which in turn runs `scripts/torture_program.py`. The
+//! torture program redraws *every cell* with random ASCII + random
+//! fg/bg + random modifiers on every keystroke, producing the
+//! worst-case "every cell changed" frame the renderer can be asked to
+//! handle.
+//!
+//! The bench reports:
+//!
+//!   * total wall-clock time spent
+//!   * frames the runner intended to capture vs. how many landed in
+//!     the recording
+//!   * dropped (= "missed") frames at each pipeline stage
+//!   * high-water marks for both inter-thread queues
+//!
+//! Exits with a non-zero status if more than 5 % of expected capture
+//! frames were dropped — that's the explicit pass/fail signal the GHA
+//! workflow looks at.
+//!
+//! Pinning to a single physical core is the caller's responsibility:
+//! invoke this binary under `taskset -c 0 …` (Linux) or equivalent.
+//! The benchmark records the CPU set it observes via
+//! `sched_getaffinity` so the report makes the constraint visible.
+
+use std::{fs, path::PathBuf, process::ExitCode, time::Instant};
+
+use anyhow::{Context, Result};
+use evp::{RenderOptions, RunStats};
+
+/// Hard pass/fail threshold: > 5 % missed capture frames is a failure.
+const MAX_MISSED_FRACTION: f64 = 0.05;
+
+fn main() -> ExitCode {
+    // Make sure tracing output from evp ends up on stderr so the bench
+    // numbers on stdout stay easy to grep.
+    let _ = tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .try_init();
+
+    match run() {
+        Ok(passed) => {
+            if passed {
+                ExitCode::SUCCESS
+            } else {
+                eprintln!(
+                    "TORTURE BENCH FAILED: missed-frame fraction exceeded {:.0}%",
+                    MAX_MISSED_FRACTION * 100.0
+                );
+                ExitCode::from(1)
+            }
+        }
+        Err(e) => {
+            eprintln!("TORTURE BENCH ERROR: {e:?}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn run() -> Result<bool> {
+    let out_gif = std::env::args()
+        .nth(1)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp/evp-torture.gif"));
+    let report_path = std::env::args()
+        .nth(2)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp/evp-torture-report.txt"));
+
+    let tape_path = locate_tape()?;
+    let torture_path = locate_torture_program()?;
+    install_torture_program(&torture_path)?;
+
+    let tape_src = fs::read_to_string(&tape_path)
+        .with_context(|| format!("reading tape {}", tape_path.display()))?;
+    let mut script = evp::parse_script(&tape_src).context("parsing torture tape")?;
+    // Drop any `Output` directive in the tape; the binary controls the
+    // output path itself.
+    script.outputs.clear();
+
+    let render_opts = RenderOptions {
+        font_path: None,
+        font_size: script.settings.font_size,
+        padding_px: script.settings.padding,
+    };
+
+    let cpu_set = current_cpu_affinity().unwrap_or_else(|| "(unknown)".to_string());
+    eprintln!("torture: starting (cpu_affinity={cpu_set})");
+
+    let started = Instant::now();
+    let out =
+        evp::run_and_render_gif(&script, render_opts, out_gif.clone()).context("evp run")?;
+    let wall_ms = started.elapsed().as_millis();
+
+    let stats = out.stats;
+    let recording_frames = out.recording.frames.len();
+    let gif_bytes = fs::metadata(&out_gif).map(|m| m.len()).unwrap_or(0);
+
+    let missed_pct = stats.missed_capture_fraction() * 100.0;
+    let tap_drop_pct = if stats.expected_frames == 0 {
+        0.0
+    } else {
+        (stats.tap_dropped_frames as f64 / stats.expected_frames as f64) * 100.0
+    };
+
+    let report = format_report(
+        &cpu_set,
+        wall_ms,
+        gif_bytes,
+        recording_frames,
+        &stats,
+        missed_pct,
+        tap_drop_pct,
+        &out_gif,
+    );
+
+    print!("{report}");
+    if let Some(parent) = report_path.parent() {
+        fs::create_dir_all(parent).ok();
+    }
+    fs::write(&report_path, &report)
+        .with_context(|| format!("writing report {}", report_path.display()))?;
+    eprintln!("torture: report written to {}", report_path.display());
+
+    Ok(missed_pct <= MAX_MISSED_FRACTION * 100.0)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn format_report(
+    cpu_set: &str,
+    wall_ms: u128,
+    gif_bytes: u64,
+    recording_frames: usize,
+    stats: &RunStats,
+    missed_pct: f64,
+    tap_drop_pct: f64,
+    out_gif: &PathBuf,
+) -> String {
+    let mut s = String::new();
+    s.push_str("=== evp torture benchmark ===\n");
+    s.push_str("renderer            = evp\n");
+    s.push_str(&format!("output_gif          = {}\n", out_gif.display()));
+    s.push_str(&format!("output_gif_bytes    = {gif_bytes}\n"));
+    s.push_str(&format!("wall_ms             = {wall_ms}\n"));
+    s.push_str(&format!("cpu_affinity        = {cpu_set}\n"));
+    s.push_str(&format!("expected_frames     = {}\n", stats.expected_frames));
+    s.push_str(&format!("captured_frames     = {}\n", stats.captured_frames));
+    s.push_str(&format!("recording_frames    = {recording_frames}\n"));
+    s.push_str(&format!(
+        "encoder_received    = {}\n",
+        stats.encoder_frames_received
+    ));
+    s.push_str(&format!(
+        "dropped_capture     = {} ({missed_pct:.2}%)\n",
+        stats.dropped_capture_frames
+    ));
+    s.push_str(&format!(
+        "dropped_renderer    = {} ({tap_drop_pct:.2}%)\n",
+        stats.tap_dropped_frames
+    ));
+    s.push_str(&format!(
+        "max_capture_queue   = {} / 4096\n",
+        stats.max_capture_queue_len
+    ));
+    s.push_str(&format!(
+        "max_renderer_queue  = {} / 4096\n",
+        stats.max_renderer_queue_len
+    ));
+    s.push_str(&format!(
+        "missed_threshold    = {:.0}%\n",
+        MAX_MISSED_FRACTION * 100.0
+    ));
+    s.push_str(&format!(
+        "result              = {}\n",
+        if missed_pct <= MAX_MISSED_FRACTION * 100.0 {
+            "PASS"
+        } else {
+            "FAIL"
+        }
+    ));
+    s
+}
+
+fn locate_tape() -> Result<PathBuf> {
+    if let Ok(p) = std::env::var("EVP_TORTURE_TAPE") {
+        return Ok(PathBuf::from(p));
+    }
+    // Look up from CWD a few levels.
+    let candidates = [
+        PathBuf::from("examples/torture.tape"),
+        PathBuf::from("../examples/torture.tape"),
+        PathBuf::from("/work/examples/torture.tape"),
+    ];
+    for c in &candidates {
+        if c.exists() {
+            return Ok(c.clone());
+        }
+    }
+    anyhow::bail!(
+        "couldn't find examples/torture.tape; set EVP_TORTURE_TAPE to its path"
+    );
+}
+
+fn locate_torture_program() -> Result<PathBuf> {
+    if let Ok(p) = std::env::var("EVP_TORTURE_PROGRAM") {
+        return Ok(PathBuf::from(p));
+    }
+    let candidates = [
+        PathBuf::from("scripts/torture_program.py"),
+        PathBuf::from("../scripts/torture_program.py"),
+        PathBuf::from("/work/scripts/torture_program.py"),
+    ];
+    for c in &candidates {
+        if c.exists() {
+            return Ok(c.clone());
+        }
+    }
+    anyhow::bail!(
+        "couldn't find scripts/torture_program.py; set EVP_TORTURE_PROGRAM to its path"
+    );
+}
+
+/// The tape hard-codes `/tmp/torture_program.py` so the same file works
+/// for both the evp run (this binary) and the VHS run (separate Docker
+/// container). Copy the program into place so the spawned shell can
+/// find it.
+fn install_torture_program(src: &PathBuf) -> Result<()> {
+    let dst = PathBuf::from("/tmp/torture_program.py");
+    let bytes = fs::read(src).with_context(|| format!("reading {}", src.display()))?;
+    fs::write(&dst, &bytes).with_context(|| format!("writing {}", dst.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = fs::metadata(&dst) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            let _ = fs::set_permissions(&dst, perms);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn current_cpu_affinity() -> Option<String> {
+    // /proc/self/status -> "Cpus_allowed_list:\t0-3" style line.
+    let status = fs::read_to_string("/proc/self/status").ok()?;
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("Cpus_allowed_list:") {
+            return Some(rest.trim().to_string());
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "linux"))]
+fn current_cpu_affinity() -> Option<String> {
+    None
+}
