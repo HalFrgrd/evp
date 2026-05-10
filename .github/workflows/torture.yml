@@ -5,14 +5,14 @@ name: torture
 # equivalent VHS run. Both runs are pinned to a single physical CPU
 # core so the comparison is fair.
 #
-# The build environment is the project Dockerfile's `torture` stage —
-# same Rust + Zig toolchain as ci.yml / release.yml / docker.yml. The
+# The build environment is the bake `torture` target wired from split
+# Dockerfiles, with the same Rust + Zig toolchain as ci.yml / release.yml / docker.yml. The
 # runner never installs Rust, Zig, or any other build tooling; every
 # build and analysis step runs inside the image.
 #
 # Trigger: manual (workflow_dispatch) or any push that touches the
 # benchmark surface (the example, the tape, the torture program, the
-# library bits it exercises, the Dockerfile, or this workflow itself).
+# library bits it exercises, the Dockerfiles/bake wiring, or this workflow itself).
 
 on:
   workflow_dispatch:
@@ -31,7 +31,8 @@ on:
       - "src/lib.rs"
       - "Cargo.toml"
       - "Cargo.lock"
-      - "docker/Dockerfile"
+      - "docker/*.Dockerfile"
+      - "docker-bake.hcl"
       - ".github/workflows/torture.yml"
   pull_request:
     branches: [master]
@@ -41,7 +42,8 @@ on:
       - "scripts/torture_program.py"
       - "scripts/torture_compare.sh"
       - "scripts/gif_frame_analyzer.py"
-      - "docker/Dockerfile"
+      - "docker/*.Dockerfile"
+      - "docker-bake.hcl"
       - ".github/workflows/torture.yml"
 
 permissions:
@@ -68,20 +70,19 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build torture image (Dockerfile `torture` stage)
-        # Builds Rust + Zig + the torture_benchmark example inside the
-        # shared project Dockerfile. Cache mounts inside the Dockerfile
-        # plus GHA cache make repeat runs cheap.
-        uses: docker/build-push-action@v6
+      - name: Build torture image (bake `torture` target)
+        # Builds Rust + Zig + the torture_benchmark example via bake's
+        # split Dockerfiles and target contexts.
+        uses: docker/bake-action@v5
         with:
-          context: .
-          file: ./docker/Dockerfile
-          target: torture
-          push: false
+          files: ./docker-bake.hcl
+          targets: torture
           load: true
-          tags: ${{ env.TORTURE_IMAGE }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          push: false
+          set: |
+            torture.tags=${{ env.TORTURE_IMAGE }}
+            *.cache-from=type=gha
+            *.cache-to=type=gha,mode=max
 
       - name: Confirm CPU affinity tooling
         run: |

@@ -140,17 +140,20 @@ If you'd rather not install Rust or Zig locally, the project ships a
 
 ```bash
 docker buildx bake extract-binary
-# → ./docker/build/evp  (≈6 MiB, static-pie, stripped)
+# → /tmp/evp-build/evp  (≈6 MiB, static-pie, stripped)
 ```
 
-The `extract-binary` target writes the binary directly to the host
-filesystem via buildx's local output writer — no `docker create` /
+The `extract-binary` target writes the binary directly to `/tmp/evp-build`
+on the host via buildx's local output writer — no `docker create` /
 `docker cp` plumbing. Other targets in the same bake file:
 
 ```bash
 docker buildx bake test       # workspace cargo test (CI parity)
 docker buildx bake runtime    # builds evp:local container image
-docker buildx bake builder    # intermediate builder image
+docker buildx bake build-env   # Rust+Zig base image
+docker buildx bake builder     # intermediate builder image
+# If ziglang.org is blocked, reuse a published build-env image:
+docker buildx bake test --set builder.args.BUILD_ENV_IMAGE=ghcr.io/<owner>/evp-build-env:latest
 ```
 
 ### As a library

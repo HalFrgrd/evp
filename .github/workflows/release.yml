@@ -4,7 +4,7 @@ name: release
 # the GitHub Release. The accompanying `action.yml` at the repo root
 # downloads this artifact in user workflows.
 #
-# The build runs through the project Dockerfile so the toolchain stays
+# The build runs through docker-bake's split Dockerfiles so the toolchain stays
 # identical to ci.yml and docker.yml: Rust + Zig 0.15.x targeting
 # `x86_64-unknown-linux-musl`. The result is a fully static binary
 # with mimalloc bundled in — no glibc version compat issues.
@@ -51,7 +51,7 @@ jobs:
 
       - name: Build evp binary via docker buildx bake
         # `extract-binary` writes the static evp directly to
-        # docker/build/evp on the host filesystem — no `docker create`
+        # /tmp/evp-build/evp on the host filesystem — no `docker create`
         # / `docker cp` plumbing needed. The bake target is the same
         # one local users invoke for a one-shot build.
         env:
@@ -63,16 +63,17 @@ jobs:
           load: false
           push: false
           set: |
+            extract-binary.output=type=local,dest=/tmp/evp-build
             *.cache-from=type=gha
             *.cache-to=type=gha,mode=max
 
       - name: Sanity check extracted binary
         run: |
           set -eux
-          chmod +x docker/build/evp
-          file docker/build/evp
-          (ldd docker/build/evp 2>&1 || true)
-          docker/build/evp --version
+          chmod +x /tmp/evp-build/evp
+          file /tmp/evp-build/evp
+          (ldd /tmp/evp-build/evp 2>&1 || true)
+          /tmp/evp-build/evp --version
 
       - name: Package tarball
         id: pkg
@@ -82,7 +83,7 @@ jobs:
           version="${tag#v}"
           stage="evp-${version}-${TARGET}"
           mkdir -p "dist/${stage}"
-          cp docker/build/evp "dist/${stage}/"
+          cp /tmp/evp-build/evp "dist/${stage}/"
           cp README.md LICENSE "dist/${stage}/" 2>/dev/null || true
           tar -C dist -czf "dist/${stage}.tar.gz" "${stage}"
           (cd dist && sha256sum "${stage}.tar.gz" > "${stage}.tar.gz.sha256")
