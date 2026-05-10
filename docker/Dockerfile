@@ -139,7 +139,8 @@ FROM builder AS test
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo build --workspace \
- && cargo test --workspace -- --test-threads=1
+ && cargo test --workspace --lib --bins -- --test-threads=1 \
+ && cargo test --workspace --tests -- --test-threads=1
 
 # ---------------------------------------------------------------------------
 # Runtime
