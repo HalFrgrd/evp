@@ -16,7 +16,7 @@ use std::{
     process::Command,
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{Context, Result, anyhow};
 use libghostty_vt::Terminal;
 use nix::{
     errno::Errno,
@@ -77,7 +77,7 @@ impl Pty {
             ForkptyResult::Child => {
                 let mut cmd = match shell {
                     Some(raw) if !raw.trim().is_empty() => {
-                        let parts = split_command_line(raw)?;
+                        let parts = parse_shell_command(raw)?;
                         if parts.is_empty() {
                             let shell_path = default_shell_path();
                             let mut c = Command::new(&shell_path);
@@ -173,92 +173,30 @@ fn command_arg0(program: impl AsRef<std::ffi::OsStr>) -> OsString {
         .unwrap_or_else(|| program.as_ref().to_owned())
 }
 
-fn split_command_line(input: &str) -> Result<Vec<String>> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    let mut quote: Option<char> = None;
-    let mut token_started = false;
-    let mut chars = input.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        match quote {
-            Some(q) => {
-                if c == q {
-                    quote = None;
-                    continue;
-                }
-                // Backtick-quoted strings are treated as raw in the tape parser
-                // too: escapes are not processed inside `...`.
-                if q != '`' && c == '\\' {
-                    if let Some(next) = chars.next() {
-                        cur.push(next);
-                    } else {
-                        cur.push('\\');
-                    }
-                    continue;
-                }
-                cur.push(c);
-            }
-            None => {
-                if c.is_whitespace() {
-                    if token_started {
-                        out.push(std::mem::take(&mut cur));
-                        token_started = false;
-                    }
-                    continue;
-                }
-                if matches!(c, '"' | '\'' | '`') {
-                    quote = Some(c);
-                    token_started = true;
-                    continue;
-                }
-                if c == '\\' {
-                    if let Some(next) = chars.next() {
-                        cur.push(next);
-                        token_started = true;
-                    } else {
-                        cur.push('\\');
-                        token_started = true;
-                    }
-                    continue;
-                }
-                cur.push(c);
-                token_started = true;
-            }
-        }
-    }
-
-    if let Some(q) = quote {
-        return Err(anyhow!(
-            "unterminated quoted argument (missing closing `{q}`)"
-        ));
-    }
-    if token_started {
-        out.push(cur);
-    }
-    Ok(out)
+fn parse_shell_command(input: &str) -> Result<Vec<String>> {
+    shell_words::split(input).with_context(|| format!("invalid shell command: `{input}`"))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::split_command_line;
+    use super::parse_shell_command;
 
     #[test]
-    fn split_command_line_handles_shell_forms() {
+    fn parse_shell_command_handles_shell_forms() {
         assert_eq!(
-            split_command_line("bash").unwrap(),
+            parse_shell_command("bash").unwrap(),
             vec!["bash".to_string()]
         );
         assert_eq!(
-            split_command_line("/bin/bash").unwrap(),
+            parse_shell_command("/bin/bash").unwrap(),
             vec!["/bin/bash".to_string()]
         );
         assert_eq!(
-            split_command_line("bash --norc").unwrap(),
+            parse_shell_command("bash --norc").unwrap(),
             vec!["bash".to_string(), "--norc".to_string()]
         );
         assert_eq!(
-            split_command_line("bash --rcfile somefile.rc").unwrap(),
+            parse_shell_command("bash --rcfile somefile.rc").unwrap(),
             vec![
                 "bash".to_string(),
                 "--rcfile".to_string(),
@@ -266,12 +204,12 @@ mod tests {
             ]
         );
         assert_eq!(
-            split_command_line("fish").unwrap(),
+            parse_shell_command("fish").unwrap(),
             vec!["fish".to_string()]
         );
-        assert_eq!(split_command_line("sh").unwrap(), vec!["sh".to_string()]);
+        assert_eq!(parse_shell_command("sh").unwrap(), vec!["sh".to_string()]);
         assert_eq!(
-            split_command_line("/bin/sh").unwrap(),
+            parse_shell_command("/bin/sh").unwrap(),
             vec!["/bin/sh".to_string()]
         );
     }
