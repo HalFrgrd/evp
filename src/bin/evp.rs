@@ -1,10 +1,11 @@
 //! `evp` binary entry point. All real work lives in the library crate
 //! (`evp::*`); this file is the thinnest possible CLI shim around it.
 
-use std::{path::PathBuf, process::ExitCode};
+use std::{io, path::PathBuf, process::ExitCode};
 
 use anyhow::{Context, Result, bail};
-use clap::{Parser, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::{Shell as CompletionShell, generate};
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
@@ -57,8 +58,10 @@ const VERSION_LONG: &str = concat!(
     long_version = VERSION_LONG
 )]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
     /// Path to the `.tape` script. Optional when `--run-test-script` is set.
-    #[arg(required_unless_present = "run_test_script")]
+    #[arg(required_unless_present_any = ["run_test_script", "command"])]
     script: Option<PathBuf>,
     /// Run the built-in demo tape embedded in the binary. Writes to
     /// `./evp-test.gif` in the current directory unless `--output` is
@@ -79,6 +82,16 @@ struct Cli {
     /// Explicit log level override.
     #[arg(long, value_enum)]
     log_level: Option<LogLevel>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Print the bundled VHS theme preset names.
+    Themes,
+    /// Parse a tape and exit without running it.
+    Validate { script: PathBuf },
+    /// Print a shell completion script to stdout.
+    Completion { shell: CompletionShell },
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -113,6 +126,11 @@ fn main() -> ExitCode {
 
 fn real_main() -> Result<()> {
     let cli = Cli::parse();
+
+    if let Some(command) = cli.command {
+        return run_subcommand(command);
+    }
+
     init_tracing(&cli);
     log_build_info_debug();
 
@@ -147,7 +165,14 @@ fn real_main() -> Result<()> {
     let render_opts = evp::RenderOptions {
         font_path: cli.font.clone().or(script.settings.font_family.clone()),
         font_size: script.settings.font_size,
-        padding_px: script.settings.padding,
+        frame_style: evp::FrameStyle {
+            padding_px: script.settings.padding,
+            margin_px: script.settings.margin,
+            margin_fill: script.settings.margin_fill,
+            window_bar: script.settings.window_bar,
+            window_bar_size_px: script.settings.window_bar_size,
+            border_radius_px: script.settings.border_radius,
+        },
     };
 
     info!(events = script.events.len(), "script loaded");
@@ -184,6 +209,28 @@ fn real_main() -> Result<()> {
     Ok(())
 }
 
+fn run_subcommand(command: Commands) -> Result<()> {
+    match command {
+        Commands::Themes => {
+            for name in evp::Theme::preset_names()? {
+                println!("{name}");
+            }
+            Ok(())
+        }
+        Commands::Validate { script } => {
+            evp::parse_script_file(&script)
+                .with_context(|| format!("parsing {}", script.display()))?;
+            println!("{}: ok", script.display());
+            Ok(())
+        }
+        Commands::Completion { shell } => {
+            let mut cmd = Cli::command();
+            generate(shell, &mut cmd, "evp", &mut io::stdout());
+            Ok(())
+        }
+    }
+}
+
 fn init_tracing(cli: &Cli) {
     let filter = cli
         .log_level
@@ -211,4 +258,29 @@ fn log_build_info_debug() {
         opt_level = env!("VERGEN_CARGO_OPT_LEVEL"),
         "build information"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_validate_subcommand() {
+        let cli = Cli::try_parse_from(["evp", "validate", "demo.tape"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Validate { script }) if script == PathBuf::from("demo.tape")
+        ));
+    }
+
+    #[test]
+    fn parses_completion_subcommand() {
+        let cli = Cli::try_parse_from(["evp", "completion", "bash"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Completion {
+                shell: CompletionShell::Bash
+            })
+        ));
+    }
 }

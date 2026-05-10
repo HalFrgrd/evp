@@ -9,6 +9,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::FrameStyle;
+
 /// A single colored cell.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CellSnap {
@@ -114,7 +116,7 @@ pub struct Recording {
     pub framerate: u32,
     pub cell_width_px: u32,
     pub cell_height_px: u32,
-    pub padding_px: u32,
+    pub frame_style: FrameStyle,
     pub frames: Vec<Frame>,
 }
 

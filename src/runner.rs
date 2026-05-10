@@ -15,6 +15,7 @@
 //! (event or frame) using `poll(2)` on the PTY fd so any incoming output
 //! also wakes us early.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -31,35 +32,13 @@ use regex::Regex;
 use tracing::{debug, info, warn};
 
 use crate::{
+    FrameStyle,
     encoder::{EncoderConfig, EncoderStats},
     keys::KeyTranslator,
     pty::{Pty, PtyError, PtySize},
     recording::{CellSnap, RawFrame, style_flags},
     script::{Event, NamedKey, Script, Settings, WaitScope},
 };
-
-// Default terminal colors from `/usr/share/ghostty/themes/Snazzy`.
-const SNAZZY_PALETTE_16: [[u8; 3]; 16] = [
-    [0x00, 0x00, 0x00],
-    [0xfc, 0x43, 0x46],
-    [0x50, 0xfb, 0x7c],
-    [0xf0, 0xfb, 0x8c],
-    [0x49, 0xba, 0xff],
-    [0xfc, 0x4c, 0xb4],
-    [0x8b, 0xe9, 0xfe],
-    [0xed, 0xed, 0xec],
-    [0x55, 0x55, 0x55],
-    [0xfc, 0x43, 0x46],
-    [0x50, 0xfb, 0x7c],
-    [0xf0, 0xfb, 0x8c],
-    [0x49, 0xba, 0xff],
-    [0xfc, 0x4c, 0xb4],
-    [0x8b, 0xe9, 0xfe],
-    [0xed, 0xed, 0xec],
-];
-const SNAZZY_BACKGROUND: [u8; 3] = [0x1e, 0x1f, 0x29];
-const SNAZZY_FOREGROUND: [u8; 3] = [0xeb, 0xec, 0xe6];
-const SNAZZY_CURSOR: [u8; 3] = [0xe4, 0xe4, 0xe4];
 
 /// Output of [`run`].
 pub struct RunOutput {
@@ -119,7 +98,7 @@ pub struct RunOptions {
     /// libghostty so that pixel‑based queries don't divide by zero).
     pub cell_w_px: u32,
     pub cell_h_px: u32,
-    pub padding_px: u32,
+    pub frame_style: FrameStyle,
 }
 
 pub fn derive_options(s: &Settings) -> RunOptions {
@@ -128,8 +107,25 @@ pub fn derive_options(s: &Settings) -> RunOptions {
     // libghostty's resize call.
     let cell_w_px = (s.font_size * 0.6).round().max(1.0) as u32;
     let cell_h_px = (s.font_size * s.line_height).round().max(1.0) as u32;
-    let inner_w = s.width.saturating_sub(s.padding * 2);
-    let inner_h = s.height.saturating_sub(s.padding * 2);
+    let frame_style = FrameStyle {
+        padding_px: s.padding,
+        margin_px: s.margin,
+        margin_fill: s.margin_fill,
+        window_bar: s.window_bar,
+        window_bar_size_px: s.window_bar_size,
+        border_radius_px: s.border_radius,
+    };
+    let inner_w = s
+        .width
+        .saturating_sub((frame_style.padding_px + frame_style.margin_px) * 2);
+    let inner_h = s
+        .height
+        .saturating_sub((frame_style.padding_px + frame_style.margin_px) * 2)
+        .saturating_sub(if frame_style.window_bar.enabled() {
+            frame_style.window_bar_size_px
+        } else {
+            0
+        });
     let cols = s
         .cols
         .unwrap_or_else(|| (inner_w / cell_w_px).max(20) as u16);
@@ -141,7 +137,7 @@ pub fn derive_options(s: &Settings) -> RunOptions {
         rows,
         cell_w_px,
         cell_h_px,
-        padding_px: s.padding,
+        frame_style,
     }
 }
 
@@ -182,7 +178,7 @@ pub fn run_with_frame_tap(
     // waiting for a response.
     terminal.on_pty_write(|_t, data| pty.write(data))?;
 
-    apply_default_palette(&mut terminal);
+    apply_theme(&mut terminal, &script.settings.theme)?;
 
     let mut translator = KeyTranslator::new()?;
 
@@ -209,7 +205,7 @@ pub fn run_with_frame_tap(
             framerate: script.settings.framerate,
             cell_width_px: opts.cell_w_px,
             cell_height_px: opts.cell_h_px,
-            padding_px: opts.padding_px,
+            frame_style: opts.frame_style,
             keyframe_interval: script.settings.framerate * 5,
         },
         frame_tap,
@@ -227,6 +223,8 @@ pub fn run_with_frame_tap(
     let mut hidden = false;
     let mut hidden_started_at: Option<Duration> = None;
     let mut skipped_recording_time = Duration::ZERO;
+    let mut clipboard = String::new();
+    let mut pending_screenshots: Vec<PathBuf> = Vec::new();
 
     // Wait‑for state. When we're inside a `Wait`, all later events stall
     // until the regex matches or the timeout elapses.
@@ -287,7 +285,10 @@ pub fn run_with_frame_tap(
                 &terminal,
                 &mut hidden,
                 &mut wait_state,
+                &mut clipboard,
+                &mut pending_screenshots,
                 start,
+                script,
             )?;
 
             if !was_hidden && hidden {
@@ -321,7 +322,7 @@ pub fn run_with_frame_tap(
 
         // 4. Capture frames whose deadline has passed.
         while next_frame_at <= now && next_frame_at <= total_duration {
-            if !hidden {
+            if !hidden || !pending_screenshots.is_empty() {
                 let frame = capture(
                     &mut render_state,
                     &mut row_it,
@@ -332,7 +333,18 @@ pub fn run_with_frame_tap(
                     next_frame_at.saturating_sub(skipped_recording_time),
                     opts.cols,
                     opts.rows,
+                    script.settings.cursor_blink,
                 )?;
+                if !pending_screenshots.is_empty() {
+                    let shots = std::mem::take(&mut pending_screenshots);
+                    for path in shots {
+                        write_screenshot(&frame, script, &path)?;
+                    }
+                }
+                if hidden {
+                    next_frame_at += frame_interval;
+                    continue;
+                }
                 expected_frames += 1;
                 // Sample the queue depth before sending so we capture
                 // the high-water mark when the encoder is most behind.
@@ -464,11 +476,11 @@ fn is_program_on_path(prog: &str, dirs: &[std::path::PathBuf]) -> bool {
     false
 }
 
-fn apply_default_palette(terminal: &mut Terminal<'_, '_>) {
+fn apply_theme(terminal: &mut Terminal<'_, '_>, theme: &crate::Theme) -> Result<()> {
     // OSC 4 controls indexed palette entries, OSC 10/11/12 control
     // foreground/background/cursor color. Using ST terminator keeps the
     // sequences unambiguous for the VT parser.
-    for (idx, rgb) in SNAZZY_PALETTE_16.iter().enumerate() {
+    for (idx, rgb) in theme.palette_rgb()?.iter().enumerate() {
         let seq = format!(
             "\x1b]4;{idx};rgb:{:02x}/{:02x}/{:02x}\x1b\\",
             rgb[0], rgb[1], rgb[2]
@@ -476,25 +488,29 @@ fn apply_default_palette(terminal: &mut Terminal<'_, '_>) {
         terminal.vt_write(seq.as_bytes());
     }
 
+    let fg_rgb = theme.foreground_rgb()?;
     let fg = format!(
         "\x1b]10;rgb:{:02x}/{:02x}/{:02x}\x1b\\",
-        SNAZZY_FOREGROUND[0], SNAZZY_FOREGROUND[1], SNAZZY_FOREGROUND[2]
+        fg_rgb[0], fg_rgb[1], fg_rgb[2]
     );
     terminal.vt_write(fg.as_bytes());
 
+    let bg_rgb = theme.background_rgb()?;
     let bg = format!(
         "\x1b]11;rgb:{:02x}/{:02x}/{:02x}\x1b\\",
-        SNAZZY_BACKGROUND[0], SNAZZY_BACKGROUND[1], SNAZZY_BACKGROUND[2]
+        bg_rgb[0], bg_rgb[1], bg_rgb[2]
     );
     terminal.vt_write(bg.as_bytes());
 
+    let cursor_rgb = theme.cursor_rgb()?;
     let cursor = format!(
         "\x1b]12;rgb:{:02x}/{:02x}/{:02x}\x1b\\",
-        SNAZZY_CURSOR[0], SNAZZY_CURSOR[1], SNAZZY_CURSOR[2]
+        cursor_rgb[0], cursor_rgb[1], cursor_rgb[2]
     );
     terminal.vt_write(cursor.as_bytes());
 
-    info!("applied default Snazzy color palette");
+    info!(theme = ?theme.name, "applied terminal theme");
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -550,12 +566,15 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Dur
                     });
                 }
             }
-            Event::Wait { .. } | Event::Screenshot(_) | Event::Hide | Event::Show => {
-                out.push(Scheduled {
-                    at: cursor,
-                    event: ev.clone(),
-                })
-            }
+            Event::Wait { .. }
+            | Event::Screenshot(_)
+            | Event::Copy(_)
+            | Event::Paste
+            | Event::Hide
+            | Event::Show => out.push(Scheduled {
+                at: cursor,
+                event: ev.clone(),
+            }),
         }
     }
     (out, cursor)
@@ -579,7 +598,10 @@ fn execute_event(
     terminal: &Terminal<'_, '_>,
     hidden: &mut bool,
     wait_state: &mut Option<WaitState>,
+    clipboard: &mut String,
+    pending_screenshots: &mut Vec<PathBuf>,
     start: Instant,
+    script: &Script,
 ) -> Result<()> {
     match event {
         Event::Type { text, .. } => {
@@ -616,19 +638,41 @@ fn execute_event(
             });
         }
         Event::Screenshot(path) => {
-            // Bail loudly: VHS exports a PNG of the current frame here.
-            // evp captures every frame into the recording but doesn't yet
-            // emit per-event PNG snapshots. Failing rather than silently
-            // dropping the directive avoids mystery-empty-file confusion.
-            anyhow::bail!(
-                "`Screenshot {path}` is a VHS feature evp does not implement yet \
-                 (see README \"VHS feature parity\")."
-            );
+            pending_screenshots.push(resolve_output_path(path, script));
         }
+        Event::Copy(text) => *clipboard = text.clone(),
+        Event::Paste => pty.write(clipboard.as_bytes()),
         Event::Hide => *hidden = true,
         Event::Show => *hidden = false,
     }
     Ok(())
+}
+
+fn resolve_output_path(path: &str, _script: &Script) -> PathBuf {
+    PathBuf::from(path)
+}
+
+fn write_screenshot(frame: &RawFrame, script: &Script, path: &std::path::Path) -> Result<()> {
+    let render_opts = crate::RenderOptions {
+        font_path: script.settings.font_family.clone(),
+        font_size: script.settings.font_size,
+        frame_style: FrameStyle {
+            padding_px: script.settings.padding,
+            margin_px: script.settings.margin,
+            margin_fill: script.settings.margin_fill,
+            window_bar: script.settings.window_bar,
+            window_bar_size_px: script.settings.window_bar_size,
+            border_radius_px: script.settings.border_radius,
+        },
+    };
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating screenshot directory {}", parent.display()))?;
+    }
+    crate::render::render_png_frame(frame, &render_opts, path)
+        .with_context(|| format!("writing screenshot {}", path.display()))
 }
 
 fn matches_wait(term: &mut Terminal<'_, '_>, w: &WaitState) -> Result<bool> {
@@ -682,6 +726,7 @@ fn capture<'a>(
     at: Duration,
     cols: u16,
     rows: u16,
+    cursor_blink: bool,
 ) -> Result<RawFrame> {
     let snap = render_state.update(terminal)?;
     let colors = snap.colors()?;
@@ -743,10 +788,16 @@ fn capture<'a>(
         row += 1;
     }
 
-    let cursor = if snap.cursor_visible()?
-        && let Some(vp) = snap.cursor_viewport()?
-    {
-        Some((vp.x, vp.y))
+    let cursor = if snap.cursor_visible()? {
+        if let Some(vp) = snap.cursor_viewport()? {
+            if !cursor_blink || cursor_is_on(at) {
+                Some((vp.x, vp.y))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -760,6 +811,11 @@ fn capture<'a>(
         default_fg,
         default_bg,
     })
+}
+
+fn cursor_is_on(at: Duration) -> bool {
+    const CURSOR_BLINK_HALF_PERIOD_MS: u128 = 300;
+    (at.as_millis() / CURSOR_BLINK_HALF_PERIOD_MS) % 2 == 0
 }
 
 fn rgb_to_arr(c: RgbColor) -> [u8; 3] {

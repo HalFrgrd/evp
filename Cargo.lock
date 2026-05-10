@@ -237,6 +237,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap_complete"
+version = "4.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3e962dae2b1e5007fe9e3db363ddc43a8bf25546d279f7a8a4401204690e80c"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "clap_derive"
 version = "4.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -374,11 +383,13 @@ dependencies = [
  "ab_glyph",
  "anyhow",
  "clap",
+ "clap_complete",
  "crossbeam-channel",
  "fontdb",
  "gifski",
  "imgref",
  "libghostty-vt",
+ "lodepng",
  "mimalloc",
  "nix",
  "regex",

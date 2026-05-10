@@ -29,6 +29,7 @@ libghostty-vt = { git = "https://github.com/uzaaft/libghostty-rs", rev = "5ac47e
 anyhow = "1"
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4.6.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
@@ -53,6 +54,7 @@ imgref = "1.10"
 ab_glyph = "0.2"
 fontdb = "0.23"
 woff2-patched = "0.4"
+lodepng = "3.12.2"
 
 # Allocator. We build the release binary against musl libc (see
 # Dockerfile + .github/workflows/release.yml), and musl's default
