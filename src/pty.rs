@@ -16,7 +16,7 @@ use std::{
     process::Command,
 };
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use libghostty_vt::Terminal;
 use nix::{
     errno::Errno,
@@ -232,7 +232,9 @@ fn split_command_line(input: &str) -> Result<Vec<String>> {
     }
 
     if let Some(q) = quote {
-        return Err(anyhow!("unterminated quoted argument (missing closing `{q}`)"));
+        return Err(anyhow!(
+            "unterminated quoted argument (missing closing `{q}`)"
+        ));
     }
     if token_started {
         out.push(cur);
@@ -266,7 +268,10 @@ mod tests {
                 "somefile.rc".to_string()
             ]
         );
-        assert_eq!(split_command_line("fish").unwrap(), vec!["fish".to_string()]);
+        assert_eq!(
+            split_command_line("fish").unwrap(),
+            vec!["fish".to_string()]
+        );
         assert_eq!(split_command_line("sh").unwrap(), vec!["sh".to_string()]);
         assert_eq!(
             split_command_line("/bin/sh").unwrap(),
