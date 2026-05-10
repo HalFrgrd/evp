@@ -23,6 +23,10 @@ These GIFs are produced by the [`examples`](.github/workflows/examples.yml)
 workflow on every push to `master` and uploaded as assets on the rolling
 [`assets` release](https://github.com/HalFrgrd/evp/releases/tag/assets).
 
+### `evp_demo` — running evp on the command line
+
+[![evp_demo.gif](https://github.com/HalFrgrd/evp/releases/download/assets/evp_demo.gif)](examples/evp_demo.tape)
+
 ### `hello` — bare-minimum recording
 
 [![hello.gif](https://github.com/HalFrgrd/evp/releases/download/assets/hello.gif)](examples/hello.tape)
