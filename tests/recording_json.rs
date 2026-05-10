@@ -13,6 +13,7 @@
 //! its JSON round-trip.
 
 use evp::{Frame, Recording};
+use serde_json::Value;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -233,4 +234,68 @@ Sleep 200ms
         assert_eq!(a.cursor, b.cursor, "frame {i} cursor mismatch");
         assert_eq!(a.cells, b.cells, "frame {i} cells mismatch");
     }
+}
+
+/// `Hide`/`Show` should pause and resume frame recording without pausing
+/// script execution. Hidden wall-clock time must not appear as a large
+/// timestamp gap in the JSON intermediate format.
+#[test]
+fn hide_show_skips_hidden_time_in_json_recording() {
+    let tape = r#"
+Output out.gif
+Set Width 800
+Set Height 300
+Set FontSize 20
+Set TypingSpeed 20ms
+Set Framerate 30
+Set Shell /bin/sh
+Sleep 300ms
+Type "echo before-visible"
+Enter
+Sleep 300ms
+Hide
+Sleep 2s
+Type "echo hidden-ran"
+Enter
+Sleep 300ms
+Show
+Sleep 300ms
+Type "echo after-visible"
+Enter
+Sleep 300ms
+"#;
+
+    let rec = record(tape);
+    let haystack = full_haystack(&rec);
+    assert!(
+        haystack.contains("before-visible"),
+        "expected visible pre-hide output to be recorded"
+    );
+    assert!(
+        haystack.contains("hidden-ran"),
+        "expected hidden commands to execute and their final state to appear after Show"
+    );
+    assert!(
+        haystack.contains("after-visible"),
+        "expected visible post-show output to be recorded"
+    );
+
+    let bytes = evp::recording_to_json(&rec).expect("serialise recording");
+    let json: Value = serde_json::from_slice(&bytes).expect("parse recording json");
+    let frames = json["frames"].as_array().expect("frames is array");
+    assert!(!frames.is_empty(), "expected at least one frame");
+
+    let t_values: Vec<u32> = frames
+        .iter()
+        .map(|f| f["t_ms"].as_u64().expect("frame has t_ms") as u32)
+        .collect();
+    let max_gap = t_values
+        .windows(2)
+        .map(|w| w[1] - w[0])
+        .max()
+        .unwrap_or(0);
+    assert!(
+        max_gap < 1_000,
+        "hidden section leaked into recording timeline; max frame gap was {max_gap}ms"
+    );
 }

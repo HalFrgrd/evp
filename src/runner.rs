@@ -178,6 +178,8 @@ pub fn run_with_frame_tap(
     let mut next_frame_at = Duration::ZERO;
     let mut event_idx = 0usize;
     let mut hidden = false;
+    let mut hidden_started_at: Option<Duration> = None;
+    let mut skipped_recording_time = Duration::ZERO;
 
     // Wait‑for state. When we're inside a `Wait`, all later events stall
     // until the regex matches or the timeout elapses.
@@ -220,9 +222,6 @@ pub fn run_with_frame_tap(
         while wait_state.is_none() && event_idx < timeline.len() && timeline[event_idx].at <= now {
             let scheduled = &timeline[event_idx];
             event_idx += 1;
-            if hidden && !matches!(scheduled.event, Event::Show) {
-                continue;
-            }
             debug!(
                 event_idx,
                 at_ms = scheduled.at.as_millis(),
@@ -230,6 +229,7 @@ pub fn run_with_frame_tap(
                 event = ?scheduled.event,
                 "dispatching scheduled event"
             );
+            let was_hidden = hidden;
             execute_event(
                 &scheduled.event,
                 &pty,
@@ -239,6 +239,14 @@ pub fn run_with_frame_tap(
                 &mut wait_state,
                 start,
             )?;
+
+            if !was_hidden && hidden {
+                hidden_started_at = Some(now);
+            } else if was_hidden && !hidden
+                && let Some(hidden_start) = hidden_started_at.take()
+            {
+                skipped_recording_time += now.saturating_sub(hidden_start);
+            }
         }
 
         // 3b. Decile progress logging. Emits one info line each time
@@ -262,26 +270,28 @@ pub fn run_with_frame_tap(
 
         // 4. Capture frames whose deadline has passed.
         while next_frame_at <= now && next_frame_at <= total_duration {
-            let frame = capture(
-                &mut render_state,
-                &mut row_it,
-                &mut cell_it,
-                &mut terminal,
-                next_frame_at,
-                opts.cols,
-                opts.rows,
-            )?;
-            // Never block the terminal-driving thread: if the queue is full,
-            // we drop this frame and continue. This preserves input/output
-            // responsiveness under sustained encode pressure.
-            match encoder.tx.try_send(frame) {
-                Ok(()) => {}
-                Err(TrySendError::Full(_)) => {
-                    dropped_capture_frames += 1;
-                }
-                Err(TrySendError::Disconnected(_)) => {
-                    debug!("encoder channel closed early");
-                    break;
+            if !hidden {
+                let frame = capture(
+                    &mut render_state,
+                    &mut row_it,
+                    &mut cell_it,
+                    &mut terminal,
+                    next_frame_at.saturating_sub(skipped_recording_time),
+                    opts.cols,
+                    opts.rows,
+                )?;
+                // Never block the terminal-driving thread: if the queue is full,
+                // we drop this frame and continue. This preserves input/output
+                // responsiveness under sustained encode pressure.
+                match encoder.tx.try_send(frame) {
+                    Ok(()) => {}
+                    Err(TrySendError::Full(_)) => {
+                        dropped_capture_frames += 1;
+                    }
+                    Err(TrySendError::Disconnected(_)) => {
+                        debug!("encoder channel closed early");
+                        break;
+                    }
                 }
             }
             next_frame_at += frame_interval;
