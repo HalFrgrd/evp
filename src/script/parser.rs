@@ -291,95 +291,56 @@ fn apply_set(rest: &[String], s: &mut Settings) -> Result<()> {
             s.shell = Some(cmd);
         }
         "FontFamily" => {
-            let val = rest
-                .get(1)
-                .map(|t| unquote(t).to_string())
-                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            let val = get_set_value(rest, key)?;
             s.font_family = Some(val);
         }
         "FontSize" => {
-            let val = rest
-                .get(1)
-                .map(|t| unquote(t).to_string())
-                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            let val = get_set_value(rest, key)?;
             s.font_size = val.parse()?;
         }
         "Width" => {
-            let val = rest
-                .get(1)
-                .map(|t| unquote(t).to_string())
-                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            let val = get_set_value(rest, key)?;
             s.width = val.parse()?;
         }
         "Height" => {
-            let val = rest
-                .get(1)
-                .map(|t| unquote(t).to_string())
-                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            let val = get_set_value(rest, key)?;
             s.height = val.parse()?;
         }
         // vhs has no native cell-grid setting; we expose them for convenience.
         "Cols" | "Columns" => {
-            let val = rest
-                .get(1)
-                .map(|t| unquote(t).to_string())
-                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            let val = get_set_value(rest, key)?;
             s.cols = Some(val.parse()?);
         }
         "Rows" => {
-            let val = rest
-                .get(1)
-                .map(|t| unquote(t).to_string())
-                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            let val = get_set_value(rest, key)?;
             s.rows = Some(val.parse()?);
         }
         "Padding" => {
-            let val = rest
-                .get(1)
-                .map(|t| unquote(t).to_string())
-                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            let val = get_set_value(rest, key)?;
             s.padding = val.parse()?;
         }
         "LineHeight" => {
-            let val = rest
-                .get(1)
-                .map(|t| unquote(t).to_string())
-                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            let val = get_set_value(rest, key)?;
             s.line_height = val.parse()?;
         }
         "Framerate" | "FrameRate" | "FPS" => {
-            let val = rest
-                .get(1)
-                .map(|t| unquote(t).to_string())
-                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            let val = get_set_value(rest, key)?;
             s.framerate = val.parse()?;
         }
         "PlaybackSpeed" => {
-            let val = rest
-                .get(1)
-                .map(|t| unquote(t).to_string())
-                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            let val = get_set_value(rest, key)?;
             s.playback_speed = val.parse()?;
         }
         "TypingSpeed" => {
-            let val = rest
-                .get(1)
-                .map(|t| unquote(t).to_string())
-                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            let val = get_set_value(rest, key)?;
             s.typing_speed = parse_duration(&val)?;
         }
         "WaitTimeout" => {
-            let val = rest
-                .get(1)
-                .map(|t| unquote(t).to_string())
-                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            let val = get_set_value(rest, key)?;
             s.wait_timeout = parse_duration(&val)?;
         }
         "WaitPattern" => {
-            let val = rest
-                .get(1)
-                .map(|t| unquote(t).to_string())
-                .ok_or_else(|| anyhow!("Set {key} requires a value"))?;
+            let val = get_set_value(rest, key)?;
             s.wait_pattern = val;
         }
         // VHS settings that evp does NOT yet implement. We bail loudly so a
@@ -397,6 +358,12 @@ fn apply_set(rest: &[String], s: &mut Settings) -> Result<()> {
         other => bail!("unknown Set key: {other}"),
     }
     Ok(())
+}
+
+fn get_set_value(rest: &[String], key: &str) -> Result<String> {
+    rest.get(1)
+        .map(|t| unquote(t).to_string())
+        .ok_or_else(|| anyhow!("Set {key} requires a value"))
 }
 
 /// Build a consistent error message for `Set` keys VHS understands but evp

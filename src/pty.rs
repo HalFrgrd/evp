@@ -81,11 +81,7 @@ impl Pty {
                         if parts.is_empty() {
                             let shell_path = default_shell_path();
                             let mut c = Command::new(&shell_path);
-                            let arg0 = shell_path
-                                .file_name()
-                                .unwrap_or(shell_path.as_os_str())
-                                .to_owned();
-                            c.arg0(arg0);
+                            c.arg0(command_arg0(shell_path.as_os_str()));
                             c
                         } else {
                             let program = &parts[0];
@@ -93,22 +89,14 @@ impl Pty {
                             if parts.len() > 1 {
                                 c.args(&parts[1..]);
                             }
-                            let arg0 = PathBuf::from(program)
-                                .file_name()
-                                .map(|s| s.to_owned())
-                                .unwrap_or_else(|| OsString::from(program));
-                            c.arg0(arg0);
+                            c.arg0(command_arg0(program));
                             c
                         }
                     }
                     _ => {
                         let shell_path = default_shell_path();
-                        let arg0 = shell_path
-                            .file_name()
-                            .unwrap_or(shell_path.as_os_str())
-                            .to_owned();
                         let mut c = Command::new(&shell_path);
-                        c.arg0(arg0);
+                        c.arg0(command_arg0(shell_path.as_os_str()));
                         c
                     }
                 };
@@ -178,6 +166,13 @@ fn default_shell_path() -> PathBuf {
     }
 }
 
+fn command_arg0(program: impl AsRef<std::ffi::OsStr>) -> OsString {
+    PathBuf::from(program.as_ref())
+        .file_name()
+        .map(|s| s.to_owned())
+        .unwrap_or_else(|| program.as_ref().to_owned())
+}
+
 fn split_command_line(input: &str) -> Result<Vec<String>> {
     let mut out = Vec::new();
     let mut cur = String::new();
@@ -192,6 +187,8 @@ fn split_command_line(input: &str) -> Result<Vec<String>> {
                     quote = None;
                     continue;
                 }
+                // Backtick-quoted strings are treated as raw in the tape parser
+                // too: escapes are not processed inside `...`.
                 if q != '`' && c == '\\' {
                     if let Some(next) = chars.next() {
                         cur.push(next);
