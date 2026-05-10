@@ -40,7 +40,7 @@ use anyhow::{Context, Result};
 pub use recording::{CellChange, CellSnap, Frame, RawFrame, Recording};
 pub use render::RenderOptions;
 pub use render_svg::SvgOptions;
-pub use runner::{RunOptions, RunOutput};
+pub use runner::{RunOptions, RunOutput, RunStats};
 pub use script::{Event, KeySpec, ModSet, NamedKey, Script, Settings, WaitScope};
 
 /// Parse a `.tape` script source string into an AST.
