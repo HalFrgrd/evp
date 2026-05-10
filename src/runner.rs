@@ -373,9 +373,10 @@ fn enforce_require(required: &[String]) -> Result<()> {
 }
 
 fn is_program_on_path(prog: &str, dirs: &[std::path::PathBuf]) -> bool {
-    // Treat anything containing a path separator as a literal path.
+    // Treat anything containing a path separator as a literal path. Use
+    // `std::path::is_separator` so both `/` and `\` count on Windows.
     let candidate = std::path::Path::new(prog);
-    if candidate.is_absolute() || prog.contains(std::path::MAIN_SEPARATOR) {
+    if candidate.is_absolute() || prog.chars().any(std::path::is_separator) {
         return std::fs::metadata(candidate).is_ok_and(|m| m.is_file());
     }
     for dir in dirs {

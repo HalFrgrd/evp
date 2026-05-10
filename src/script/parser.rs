@@ -457,15 +457,6 @@ pub fn parse_duration(s: &str) -> Result<Duration> {
     Ok(Duration::from_secs_f64(secs))
 }
 
-#[allow(dead_code)]
-fn parse_bool(s: &str) -> Result<bool> {
-    match s.to_ascii_lowercase().as_str() {
-        "true" | "yes" | "1" | "on" => Ok(true),
-        "false" | "no" | "0" | "off" => Ok(false),
-        _ => bail!("invalid boolean `{s}`"),
-    }
-}
-
 /// Strip surrounding quotes if present (no escape processing).
 fn unquote(s: &str) -> &str {
     let bytes = s.as_bytes();
