@@ -19,7 +19,7 @@ Configurable via env vars:
 
     TORTURE_COLS    grid width  (default 100)
     TORTURE_ROWS    grid height (default 30)
-    TORTURE_SEED    PRNG seed   (default 0xEVA — deterministic output)
+    TORTURE_SEED    PRNG seed   (default 0xEEA — deterministic output)
 
 Writes a final newline + cursor-show on EOF / SIGINT so the host shell
 isn't left in a weird state.
