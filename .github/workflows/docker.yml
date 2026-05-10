@@ -1,13 +1,5 @@
 name: docker
 
-# Builds and publishes the evp container image to GitHub Container Registry.
-#
-# - On every push to `master` and on tag pushes, amd64 images are built
-#   and pushed under `ghcr.io/<owner>/evp` with sensible tags (sha,
-#   branch, semver).
-# - Pull requests get a build-only run (no push) so we never poison the
-#   public registry from forks.
-
 on:
   push:
     branches: [master]
@@ -16,8 +8,6 @@ on:
     branches: [master]
   workflow_dispatch:
 
-# Required for the GitHub-issued OIDC token used by `docker/login-action`
-# to push to ghcr.io.
 permissions:
   contents: read
   packages: write
@@ -36,9 +26,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Compute image name
-        # Container references must be lowercase. `github.repository_owner`
-        # preserves original GitHub casing (e.g. `HalFrgrd`), so normalise
-        # before feeding it to docker / metadata-action.
         id: img
         run: |
           owner_lc="${GITHUB_REPOSITORY_OWNER,,}"
@@ -68,6 +55,13 @@ jobs:
             type=sha,format=short
             type=raw,value=latest,enable={{is_default_branch}}
 
+      - name: Normalize tags for bake
+        id: tags
+        run: |
+          set -euo pipefail
+          tags_csv="$(printf '%s\n' '${{ steps.meta.outputs.tags }}' | paste -sd, -)"
+          echo "csv=${tags_csv}" >> "$GITHUB_OUTPUT"
+
       - name: Compute git metadata for Docker build
         id: gitmeta
         run: |
@@ -96,25 +90,23 @@ jobs:
             echo "dirty=${dirty}"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
+      - name: Build and push runtime image
+        uses: docker/bake-action@v5
         with:
-          context: .
-          file: ./docker/Dockerfile
-          platforms: linux/amd64
+          files: ./docker-bake.hcl
+          targets: runtime
           push: ${{ github.event_name != 'pull_request' }}
-          build-args: |
-            VERGEN_GIT_SHA=${{ steps.gitmeta.outputs.sha }}
-            VERGEN_GIT_BRANCH=${{ steps.gitmeta.outputs.branch }}
-            VERGEN_GIT_COMMIT_DATE=${{ steps.gitmeta.outputs.commit_date }}
-            VERGEN_GIT_COMMIT_TIMESTAMP=${{ steps.gitmeta.outputs.commit_timestamp }}
-            VERGEN_GIT_COMMIT_COUNT=${{ steps.gitmeta.outputs.commit_count }}
-            VERGEN_GIT_COMMIT_AUTHOR_NAME=${{ steps.gitmeta.outputs.author_name }}
-            VERGEN_GIT_COMMIT_AUTHOR_EMAIL=${{ steps.gitmeta.outputs.author_email }}
-            VERGEN_GIT_COMMIT_MESSAGE=${{ steps.gitmeta.outputs.commit_message }}
-            VERGEN_GIT_DESCRIBE=${{ steps.gitmeta.outputs.describe }}
-            VERGEN_GIT_DIRTY=${{ steps.gitmeta.outputs.dirty }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          set: |
+            runtime.tags=${{ steps.tags.outputs.csv }}
+            *.cache-from=type=gha
+            *.cache-to=type=gha,mode=max
+            *.args.VERGEN_GIT_SHA=${{ steps.gitmeta.outputs.sha }}
+            *.args.VERGEN_GIT_BRANCH=${{ steps.gitmeta.outputs.branch }}
+            *.args.VERGEN_GIT_COMMIT_DATE=${{ steps.gitmeta.outputs.commit_date }}
+            *.args.VERGEN_GIT_COMMIT_TIMESTAMP=${{ steps.gitmeta.outputs.commit_timestamp }}
+            *.args.VERGEN_GIT_COMMIT_COUNT=${{ steps.gitmeta.outputs.commit_count }}
+            *.args.VERGEN_GIT_COMMIT_AUTHOR_NAME=${{ steps.gitmeta.outputs.author_name }}
+            *.args.VERGEN_GIT_COMMIT_AUTHOR_EMAIL=${{ steps.gitmeta.outputs.author_email }}
+            *.args.VERGEN_GIT_COMMIT_MESSAGE=${{ steps.gitmeta.outputs.commit_message }}
+            *.args.VERGEN_GIT_DESCRIBE=${{ steps.gitmeta.outputs.describe }}
+            *.args.VERGEN_GIT_DIRTY=${{ steps.gitmeta.outputs.dirty }}

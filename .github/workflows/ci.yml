@@ -1,16 +1,5 @@
 name: ci
 
-# Sanity-check builds and tests on every push / PR.
-#
-# Everything runs inside the project Dockerfile so the build environment
-# stays identical to the one used by `release.yml` and `docker.yml`:
-# Rust + Zig 0.15.x + cargo-zigbuild, targeting glibc 2.17 for max
-# portability.
-#
-# The Dockerfile's `test` stage runs `cargo build --workspace` and
-# `cargo test --workspace`. If that stage builds successfully, the
-# whole workspace compiles and all tests pass. No further steps needed.
-
 on:
   push:
     branches: [master]
@@ -35,18 +24,13 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build + test (Dockerfile `test` stage)
-        # `--target test` runs the workspace test suite as part of the
-        # docker build — cache mounts inside the Dockerfile speed up
-        # subsequent runs. We don't push anything; the image stays on
-        # the runner and is discarded.
-        uses: docker/build-push-action@v6
+      - name: Build + test (bake `test` target)
+        uses: docker/bake-action@v5
         with:
-          context: .
-          file: ./docker/Dockerfile
-          target: test
-          push: false
+          files: ./docker-bake.hcl
+          targets: test
           load: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
+          push: false
+          set: |
+            *.cache-from=type=gha
+            *.cache-to=type=gha,mode=max

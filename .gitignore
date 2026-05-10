@@ -1,5 +1,6 @@
 /target
 *.gif
 *.svg
+# buildx local-output extraction directory (kept ignored if recreated)
 docker/build/
 *.code-workspace

@@ -149,3 +149,13 @@ section.
   visible in the output and is not a stuck loop.
 - Pass 1 of `benchmark_render` is consistently slower than passes 2-4.
   Font loading + allocator warmup. That's why we average across 4 passes.
+
+## Docker build environment image
+
+- Dockerfiles are split under `docker/` and connected via `docker-bake.hcl`
+  `contexts` (`build-env -> builder -> test/runtime/torture/extract-binary`).
+- The reusable Rust+Zig image is `docker/build-env.Dockerfile` and is published
+  by `.github/workflows/build-env.yml` to `ghcr.io/<owner>/evp-build-env`.
+- If an environment cannot resolve `ziglang.org`, point bake at the published
+  image instead of rebuilding Zig:
+  `docker buildx bake test --set builder.args.BUILD_ENV_IMAGE=ghcr.io/<owner>/evp-build-env:latest`.
