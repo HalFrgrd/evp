@@ -7,6 +7,7 @@
 #![allow(unsafe_code)]
 
 use std::{
+    ffi::OsString,
     os::{
         fd::{AsRawFd, OwnedFd, RawFd},
         unix::process::CommandExt,
@@ -15,7 +16,7 @@ use std::{
     process::Command,
 };
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result};
 use libghostty_vt::Terminal;
 use nix::{
     errno::Errno,
@@ -72,25 +73,34 @@ impl Pty {
         size: PtySize,
     ) -> Result<(Self, Child)> {
         let ws = size.to_winsize();
-        match unsafe { nix::pty::forkpty(&ws, None) }.map_err(|e| anyhow!("forkpty failed: {e}"))? {
+        match unsafe { nix::pty::forkpty(&ws, None) }.context("forkpty failed")? {
             ForkptyResult::Child => {
-                let shell_path = match shell {
-                    Some(s) if !s.is_empty() => PathBuf::from(s),
-                    _ => match std::env::var_os("SHELL") {
-                        Some(s) if !s.is_empty() => PathBuf::from(s),
-                        _ => match unistd::User::from_uid(unistd::getuid()) {
-                            Ok(Some(user)) => user.shell,
-                            _ => PathBuf::from("/bin/sh"),
-                        },
-                    },
+                let mut cmd = match shell {
+                    Some(raw) if !raw.trim().is_empty() => {
+                        let parts = parse_shell_command(raw)?;
+                        if parts.is_empty() {
+                            let shell_path = default_shell_path();
+                            let mut c = Command::new(&shell_path);
+                            c.arg0(command_arg0(shell_path.as_os_str()));
+                            c
+                        } else {
+                            let program = &parts[0];
+                            let mut c = Command::new(program);
+                            if parts.len() > 1 {
+                                c.args(&parts[1..]);
+                            }
+                            c.arg0(command_arg0(program));
+                            c
+                        }
+                    }
+                    _ => {
+                        let shell_path = default_shell_path();
+                        let mut c = Command::new(&shell_path);
+                        c.arg0(command_arg0(shell_path.as_os_str()));
+                        c
+                    }
                 };
-                let arg0 = shell_path
-                    .file_name()
-                    .unwrap_or(shell_path.as_os_str())
-                    .to_owned();
-
-                let mut cmd = Command::new(&shell_path);
-                cmd.arg0(&arg0).env("TERM", "xterm-256color");
+                cmd.env("TERM", "xterm-256color");
                 for (k, v) in env {
                     cmd.env(k, v);
                 }
@@ -143,6 +153,65 @@ impl Pty {
         nix::ioctl_write_ptr_bad!(tiocswinsz, nix::libc::TIOCSWINSZ, Winsize);
         let ws = size.to_winsize();
         let _ = unsafe { tiocswinsz(self.0.as_raw_fd(), &ws) };
+    }
+}
+
+fn default_shell_path() -> PathBuf {
+    match std::env::var_os("SHELL") {
+        Some(s) if !s.is_empty() => PathBuf::from(s),
+        _ => match unistd::User::from_uid(unistd::getuid()) {
+            Ok(Some(user)) => user.shell,
+            _ => PathBuf::from("/bin/sh"),
+        },
+    }
+}
+
+fn command_arg0(program: impl AsRef<std::ffi::OsStr>) -> OsString {
+    PathBuf::from(program.as_ref())
+        .file_name()
+        .map(|s| s.to_owned())
+        .unwrap_or_else(|| program.as_ref().to_owned())
+}
+
+fn parse_shell_command(input: &str) -> Result<Vec<String>> {
+    shell_words::split(input).with_context(|| format!("invalid shell command: `{input}`"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_shell_command;
+
+    #[test]
+    fn parse_shell_command_handles_shell_forms() {
+        assert_eq!(
+            parse_shell_command("bash").unwrap(),
+            vec!["bash".to_string()]
+        );
+        assert_eq!(
+            parse_shell_command("/bin/bash").unwrap(),
+            vec!["/bin/bash".to_string()]
+        );
+        assert_eq!(
+            parse_shell_command("bash --norc").unwrap(),
+            vec!["bash".to_string(), "--norc".to_string()]
+        );
+        assert_eq!(
+            parse_shell_command("bash --rcfile somefile.rc").unwrap(),
+            vec![
+                "bash".to_string(),
+                "--rcfile".to_string(),
+                "somefile.rc".to_string()
+            ]
+        );
+        assert_eq!(
+            parse_shell_command("fish").unwrap(),
+            vec!["fish".to_string()]
+        );
+        assert_eq!(parse_shell_command("sh").unwrap(), vec!["sh".to_string()]);
+        assert_eq!(
+            parse_shell_command("/bin/sh").unwrap(),
+            vec!["/bin/sh".to_string()]
+        );
     }
 }
 

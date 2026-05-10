@@ -5,7 +5,7 @@
 
 Output embedded-font-demo.gif
 
-Set Shell /bin/sh
+Set Shell bash --norc
 Set Width 1100
 Set Height 420
 Set FontSize 24

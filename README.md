@@ -307,7 +307,7 @@ exercised every directive it contains.
 | VHS directive | evp |
 | --- | --- |
 | `Output <path>` (single `.gif` / `.svg`) | ✅ |
-| `Set Shell <shell>` | ✅ |
+| `Set Shell <command...>` | ✅ accepts a full command line (e.g. `bash`, `/bin/bash`, `bash --norc`, `bash --rcfile my.rc`) |
 | `Set FontFamily <path-or-name>` (path to a TTF/OTF/TTC) | ⚠️ accepts a font *file path*; VHS resolves font *family names* via fontconfig. Pass `--font /path/to/font.ttf` on the CLI for the same effect. |
 | `Set FontSize <n>` | ✅ |
 | `Set Width <px>` / `Set Height <px>` | ✅ |
@@ -400,4 +400,3 @@ byte-identical:
   inputs are not interchangeable.
 - **Zero runtime dependencies.** VHS requires `ttyd` and `ffmpeg` on
   `$PATH`. evp's release binary is statically linked and needs neither.
-

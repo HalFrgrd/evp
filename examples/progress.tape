@@ -4,7 +4,7 @@
 
 Output progress.gif
 
-Set Shell /bin/sh
+Set Shell bash --norc
 Set Width 900
 Set Height 250
 Set FontSize 20

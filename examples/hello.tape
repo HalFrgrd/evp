@@ -5,7 +5,7 @@
 
 Output hello.gif
 
-Set Shell /bin/sh
+Set Shell bash --norc
 Set Width 800
 Set Height 300
 Set FontSize 20

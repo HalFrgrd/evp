@@ -25,6 +25,15 @@ vhs_gif=$3
 vhs_report=$4
 out_md=$5
 
+if [[ ! -s "$evp_gif" ]]; then
+    echo "missing or empty evp gif: $evp_gif" >&2
+    exit 66
+fi
+if [[ ! -s "$vhs_gif" ]]; then
+    echo "missing or empty vhs gif: $vhs_gif" >&2
+    exit 66
+fi
+
 human_bytes() {
     local b=$1
     awk -v b="$b" 'BEGIN {
