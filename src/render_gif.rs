@@ -5,12 +5,12 @@
 //! concurrently with recording, reducing peak memory and latency.
 
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     path::{Path, PathBuf},
     thread::{self, JoinHandle},
 };
 
-use ab_glyph::{Font, FontArc, Glyph, PxScale, ScaleFont};
+use ab_glyph::{Font, FontArc, Glyph, GlyphId, PxScale, ScaleFont};
 use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
 use gifski::{Settings, progress};
@@ -51,14 +51,96 @@ const EMBEDDED_NOTO_SANS_SYMBOLS2_REGULAR_WOFF2: &[u8] =
 const EMBEDDED_NOTO_SANS_MONO_CJK_JP_SUBSET_WOFF2: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/NotoSansMonoCJKjp-Subset.woff2"));
 
+/// A collection of font faces organised by text style.
+///
+/// Each style variant holds an ordered list of indices into `fonts`.  When
+/// rendering a character the list is walked in order and the first face that
+/// contains a glyph for that character wins.  The primary face is at index 0
+/// of each per-style list; everything after it is a fallback.  There is no
+/// distinction between "primary" and "fallback" — they are all just entries
+/// in a `Vec` to be tried in sequence.
 #[derive(Debug)]
-struct FontFamily {
-    regular: FontArc,
-    bold: Option<FontArc>,
-    italic: Option<FontArc>,
-    bold_italic: Option<FontArc>,
-    fallback_regular: Vec<FontArc>,
+struct FontSet {
+    /// All loaded font faces, indexed.
+    fonts: Vec<FontArc>,
+    /// Font indices (into `fonts`) to try for regular text, in priority order.
+    regular: Vec<usize>,
+    /// Font indices to try for bold text.
+    bold: Vec<usize>,
+    /// Font indices to try for italic text.
+    italic: Vec<usize>,
+    /// Font indices to try for bold-italic text.
+    bold_italic: Vec<usize>,
 }
+
+impl FontSet {
+    /// Returns the ordered font-index slice appropriate for `flags`.
+    ///
+    /// If the style-specific list is empty (e.g. no bold face was loaded) the
+    /// regular list is returned as a fallback.
+    fn indices_for_flags(&self, flags: u8) -> &[usize] {
+        let want_bold = flags & style_flags::BOLD != 0;
+        let want_italic = flags & style_flags::ITALIC != 0;
+        let list = match (want_bold, want_italic) {
+            (true, true) => &self.bold_italic,
+            (true, false) => &self.bold,
+            (false, true) => &self.italic,
+            (false, false) => &self.regular,
+        };
+        if list.is_empty() { &self.regular } else { list }
+    }
+
+    /// Select the best `(font_index, &FontArc)` for `ch` given cell `flags`.
+    ///
+    /// Tries each face in the appropriate style list in order; returns the
+    /// first that has a glyph for `ch`.  Falls back to the first face in the
+    /// list if none do.
+    fn select_for_char(&self, flags: u8, ch: char) -> (usize, &FontArc) {
+        let indices = self.indices_for_flags(flags);
+        for &idx in indices {
+            if has_glyph(&self.fonts[idx], ch) {
+                return (idx, &self.fonts[idx]);
+            }
+        }
+        let idx = indices[0];
+        (idx, &self.fonts[idx])
+    }
+}
+
+/// Cache key identifying a rasterised glyph outline.
+#[derive(Hash, Eq, PartialEq)]
+struct GlyphCacheKey {
+    /// Index into [`FontSet::fonts`].
+    font_idx: u16,
+    /// ab_glyph glyph identifier within the face.
+    glyph_id: u16,
+    /// Uniform px-scale as `f32` bits (we only use uniform scales).
+    scale_bits: u32,
+}
+
+/// Colour-independent coverage mask for one rasterised glyph.
+///
+/// Storing coverage separately from colour lets the same cached bitmap be
+/// blended with any foreground colour without re-rasterising.
+struct GlyphBitmap {
+    /// Horizontal pixel offset from the pen position to the bitmap's left
+    /// edge (equal to `px_bounds().min.x` rounded to integer).
+    offset_x: i32,
+    /// Vertical pixel offset from the baseline to the bitmap's top edge
+    /// (equal to `px_bounds().min.y` rounded to integer).
+    offset_y: i32,
+    width: u32,
+    height: u32,
+    /// Per-pixel coverage in row-major order [height × width].
+    pixels: Vec<f32>,
+}
+
+/// Per-session glyph rasterisation cache.
+///
+/// Maps a `(font_idx, glyph_id, scale)` key to either `None` (the glyph has
+/// no visible outline — e.g. space) or `Some(bitmap)` with coverage data that
+/// can be blended with any foreground colour.
+type GlyphCache = HashMap<GlyphCacheKey, Option<GlyphBitmap>>;
 
 pub struct GifStreamConfig {
     pub cols: u16,
@@ -98,11 +180,12 @@ pub fn spawn_gif_stream(
     let loaded = load_font_family(opts.font_path.as_deref())?;
     debug!(font = %loaded.description, "using font for gif streaming");
 
-    let family = loaded.family;
+    let font_set = loaded.font_set;
     let scale = PxScale::from(opts.font_size);
-    let scaled = family.regular.as_scaled(scale);
+    let primary = &font_set.fonts[font_set.regular[0]];
+    let scaled = primary.as_scaled(scale);
     let cell_w = scaled
-        .h_advance(family.regular.glyph_id('M'))
+        .h_advance(primary.glyph_id('M'))
         .ceil()
         .max(1.0) as u32;
     let cell_h = (scaled.height() + scaled.line_gap()).ceil().max(1.0) as u32;
@@ -117,7 +200,7 @@ pub fn spawn_gif_stream(
             run_gif_stream_worker(
                 rx,
                 output,
-                family,
+                font_set,
                 scale,
                 cell_w,
                 cell_h,
@@ -159,25 +242,26 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<(
 
 pub fn render_png_frame(frame: &RawFrame, opts: &RenderOptions, out: &Path) -> Result<()> {
     let loaded = load_font_family(opts.font_path.as_deref())?;
-    let family = loaded.family;
+    let font_set = loaded.font_set;
     let scale = PxScale::from(opts.font_size);
-    let scaled = family.regular.as_scaled(scale);
+    let primary = &font_set.fonts[font_set.regular[0]];
+    let scaled = primary.as_scaled(scale);
     let cell_w = scaled
-        .h_advance(family.regular.glyph_id('M'))
+        .h_advance(primary.glyph_id('M'))
         .ceil()
         .max(1.0) as u32;
     let cell_h = (scaled.height() + scaled.line_gap()).ceil().max(1.0) as u32;
     let baseline = scaled.ascent().ceil() as u32;
-    let mut warned_missing_faces = HashSet::new();
+    let mut glyph_cache = GlyphCache::new();
     let buf = rasterize_raw_frame(
         frame,
-        &family,
+        &font_set,
         scale,
         cell_w,
         cell_h,
         baseline,
         opts.frame_style,
-        &mut warned_missing_faces,
+        &mut glyph_cache,
     );
     let layout = layout_metrics(frame.cols, frame.rows, cell_w, cell_h, opts.frame_style);
     lodepng::encode24_file(
@@ -207,7 +291,7 @@ fn rgb_to_rgba(rgb: &[u8]) -> Vec<rgb::RGBA<u8>> {
 fn run_gif_stream_worker(
     rx: Receiver<RawFrame>,
     out: PathBuf,
-    family: FontFamily,
+    font_set: FontSet,
     scale: PxScale,
     cell_w: u32,
     cell_h: u32,
@@ -224,7 +308,7 @@ fn run_gif_stream_worker(
     })
     .context("initialize gifski encoder")?;
 
-    let mut warned_missing_faces: HashSet<&'static str> = HashSet::new();
+    let mut glyph_cache = GlyphCache::new();
     let mut last_seen_t_ms = 0u32;
     let mut last_emitted_t_ms = 0u32;
     let mut prev_buf: Option<Vec<u8>> = None;
@@ -250,13 +334,13 @@ fn run_gif_stream_worker(
     while let Ok(frame) = rx.recv() {
         let buf = rasterize_raw_frame(
             &frame,
-            &family,
+            &font_set,
             scale,
             cell_w,
             cell_h,
             baseline,
             frame_style,
-            &mut warned_missing_faces,
+            &mut glyph_cache,
         );
 
         last_seen_t_ms = frame.t_ms;
@@ -317,13 +401,13 @@ fn run_gif_stream_worker(
 
 fn rasterize_raw_frame(
     frame: &RawFrame,
-    family: &FontFamily,
+    font_set: &FontSet,
     scale: PxScale,
     cell_w: u32,
     cell_h: u32,
     baseline: u32,
     frame_style: FrameStyle,
-    warned_missing_faces: &mut HashSet<&'static str>,
+    glyph_cache: &mut GlyphCache,
 ) -> Vec<u8> {
     let layout = layout_metrics(frame.cols, frame.rows, cell_w, cell_h, frame_style);
     let mut buf = vec![0u8; (layout.canvas_w * layout.canvas_h * 3) as usize];
@@ -370,28 +454,71 @@ fn rasterize_raw_frame(
                 continue;
             }
 
-            let primary_font =
-                select_primary_font_for_cell(family, cell.flags, warned_missing_faces);
             let mut pen_x = x as f32;
+            let pen_y_baseline = y as i32 + baseline as i32;
             for ch in cell.text.chars() {
-                let font = select_font_for_char(primary_font, &family.fallback_regular, ch);
-                let glyph_id = font.glyph_id(ch);
-                let glyph: Glyph = glyph_id.with_scale(scale);
-                if let Some(outline) = font.outline_glyph(glyph) {
-                    let bounds = outline.px_bounds();
-                    outline.draw(|gx, gy, coverage| {
-                        let px = pen_x as i32 + bounds.min.x as i32 + gx as i32;
-                        let py = y as i32 + baseline as i32 + bounds.min.y as i32 + gy as i32;
-                        if px < 0 || py < 0 {
-                            return;
+                let (font_idx, font) = font_set.select_for_char(cell.flags, ch);
+                let glyph_id: GlyphId = font.glyph_id(ch);
+
+                // Populate the cache on first encounter of this
+                // (font, glyph, scale) combination.
+                //
+                // font_idx is the index into FontSet::fonts; the total
+                // number of faces is small (< 10 for the default set) so
+                // u16 is always sufficient.
+                debug_assert!(
+                    font_idx <= u16::MAX as usize,
+                    "font_idx {font_idx} exceeds u16 range"
+                );
+                let cache_key = GlyphCacheKey {
+                    font_idx: font_idx as u16,
+                    glyph_id: glyph_id.0,
+                    scale_bits: scale.x.to_bits(),
+                };
+                let bitmap = glyph_cache.entry(cache_key).or_insert_with(|| {
+                    let glyph: Glyph = glyph_id.with_scale(scale);
+                    font.outline_glyph(glyph).map(|outline| {
+                        let bounds = outline.px_bounds();
+                        let w = (bounds.max.x - bounds.min.x).ceil() as u32;
+                        let h = (bounds.max.y - bounds.min.y).ceil() as u32;
+                        let mut pixels = vec![0.0f32; (w * h) as usize];
+                        outline.draw(|gx, gy, coverage| {
+                            let i = (gy * w + gx) as usize;
+                            if i < pixels.len() {
+                                pixels[i] = coverage;
+                            }
+                        });
+                        GlyphBitmap {
+                            offset_x: bounds.min.x as i32,
+                            offset_y: bounds.min.y as i32,
+                            width: w,
+                            height: h,
+                            pixels,
                         }
-                        let (px, py) = (px as u32, py as u32);
-                        if px >= layout.canvas_w || py >= layout.canvas_h {
-                            return;
+                    })
+                });
+
+                if let Some(bm) = bitmap.as_ref() {
+                    for gy in 0..bm.height {
+                        for gx in 0..bm.width {
+                            let coverage = bm.pixels[(gy * bm.width + gx) as usize];
+                            if coverage <= 0.0 {
+                                continue;
+                            }
+                            let px = pen_x as i32 + bm.offset_x + gx as i32;
+                            let py = pen_y_baseline + bm.offset_y + gy as i32;
+                            if px < 0 || py < 0 {
+                                continue;
+                            }
+                            let (px, py) = (px as u32, py as u32);
+                            if px >= layout.canvas_w || py >= layout.canvas_h {
+                                continue;
+                            }
+                            blend_pixel(&mut buf, layout.canvas_w, px, py, fg, coverage);
                         }
-                        blend_pixel(&mut buf, layout.canvas_w, px, py, fg, coverage);
-                    });
+                    }
                 }
+
                 let scaled = font.as_scaled(scale);
                 pen_x += scaled.h_advance(glyph_id);
             }
@@ -608,64 +735,116 @@ fn blend_pixel(buf: &mut [u8], w: u32, x: u32, y: u32, color: [u8; 3], coverage:
     }
 }
 
-/// Load the requested font family. If `path` is provided we use that file as
-/// the regular face only. Otherwise we load embedded JetBrains Mono faces.
+/// Load the requested font set. If `path` is provided it is used as the sole
+/// face for all text styles. Otherwise the embedded JetBrains Mono Nerd Font
+/// faces are loaded as primaries with embedded fallback faces appended.
 #[derive(Debug)]
 struct LoadedFontFamily {
-    family: FontFamily,
+    font_set: FontSet,
     description: String,
 }
 
 fn load_font_family(path: Option<&str>) -> Result<LoadedFontFamily> {
     if let Some(p) = path {
         let bytes = std::fs::read(p).with_context(|| format!("reading font {p}"))?;
-        let regular = FontArc::try_from_vec(bytes).context("invalid font file")?;
+        let face = FontArc::try_from_vec(bytes).context("invalid font file")?;
+        // Use the same face for all styles; no fallbacks for custom fonts.
+        let font_set = FontSet {
+            fonts: vec![face],
+            regular: vec![0],
+            bold: vec![0],
+            italic: vec![0],
+            bold_italic: vec![0],
+        };
         return Ok(LoadedFontFamily {
-            family: FontFamily {
-                regular,
-                bold: None,
-                italic: None,
-                bold_italic: None,
-                fallback_regular: Vec::new(),
-            },
+            font_set,
             description: format!("explicit path: {p}"),
         });
     }
 
-    let (fallback_regular, fallback_names) = load_default_fallback_faces();
-
-    // Deterministic default for GIF rendering: use embedded JetBrains Mono
-    // Nerd Font (Mono variant),
+    // Deterministic default: embedded JetBrains Mono Nerd Font (Mono variant)
     // compressed as WOFF2 at build time and decompressed at runtime.
     // License text is shipped in `licenses/JETBRAINSMONO-OFL-1.1.txt`.
+    let jb_regular = decode_embedded_face(
+        "JetBrainsMonoNerdFontMono-Regular.woff2",
+        EMBEDDED_JETBRAINS_NERD_MONO_REGULAR_WOFF2,
+    )?;
+    let jb_bold = try_embedded_face(
+        "JetBrainsMonoNerdFontMono-Bold.woff2",
+        EMBEDDED_JETBRAINS_NERD_MONO_BOLD_WOFF2,
+    );
+    let jb_italic = try_embedded_face(
+        "JetBrainsMonoNerdFontMono-Italic.woff2",
+        EMBEDDED_JETBRAINS_NERD_MONO_ITALIC_WOFF2,
+    );
+    let jb_bold_italic = try_embedded_face(
+        "JetBrainsMonoNerdFontMono-BoldItalic.woff2",
+        EMBEDDED_JETBRAINS_NERD_MONO_BOLD_ITALIC_WOFF2,
+    );
+
+    let (fallback_faces, fallback_names) = load_default_fallback_faces();
+
+    // Build the flat font list and per-style index vectors.
+    //
+    // Layout:
+    //   0  = JetBrains Regular
+    //   1  = JetBrains Bold       (if loaded)
+    //   2  = JetBrains Italic     (if loaded)
+    //   3  = JetBrains BoldItalic (if loaded)
+    //   4+ = fallback faces (NotoSansMono, NotoSansSymbols2, etc.)
+    let mut fonts: Vec<FontArc> = Vec::new();
+    fonts.push(jb_regular);
+    let idx_bold = jb_bold.map(|f| {
+        let i = fonts.len();
+        fonts.push(f);
+        i
+    });
+    let idx_italic = jb_italic.map(|f| {
+        let i = fonts.len();
+        fonts.push(f);
+        i
+    });
+    let idx_bold_italic = jb_bold_italic.map(|f| {
+        let i = fonts.len();
+        fonts.push(f);
+        i
+    });
+
+    let fallback_start = fonts.len();
+    fonts.extend(fallback_faces);
+    let fallback_indices: Vec<usize> = (fallback_start..fonts.len()).collect();
+
+    // Each style list: the style-specific primary (if available) followed by
+    // all fallback faces in order.  When a style face was not loaded its list
+    // falls back to the regular list via `indices_for_flags`.
+    let regular: Vec<usize> = std::iter::once(0)
+        .chain(fallback_indices.iter().copied())
+        .collect();
+    let bold: Vec<usize> = idx_bold
+        .into_iter()
+        .chain(fallback_indices.iter().copied())
+        .collect();
+    let italic: Vec<usize> = idx_italic
+        .into_iter()
+        .chain(fallback_indices.iter().copied())
+        .collect();
+    let bold_italic: Vec<usize> = idx_bold_italic
+        .into_iter()
+        .chain(fallback_indices.iter().copied())
+        .collect();
+
+    let description = if fallback_names.is_empty() {
+        "embedded default: JetBrainsMono Nerd Font Mono family".to_string()
+    } else {
+        format!(
+            "embedded default: JetBrainsMono Nerd Font Mono family + fallbacks [{}]",
+            fallback_names.join(" -> ")
+        )
+    };
+
     Ok(LoadedFontFamily {
-        family: FontFamily {
-            regular: decode_embedded_face(
-                "JetBrainsMonoNerdFontMono-Regular.woff2",
-                EMBEDDED_JETBRAINS_NERD_MONO_REGULAR_WOFF2,
-            )?,
-            bold: try_embedded_face(
-                "JetBrainsMonoNerdFontMono-Bold.woff2",
-                EMBEDDED_JETBRAINS_NERD_MONO_BOLD_WOFF2,
-            ),
-            italic: try_embedded_face(
-                "JetBrainsMonoNerdFontMono-Italic.woff2",
-                EMBEDDED_JETBRAINS_NERD_MONO_ITALIC_WOFF2,
-            ),
-            bold_italic: try_embedded_face(
-                "JetBrainsMonoNerdFontMono-BoldItalic.woff2",
-                EMBEDDED_JETBRAINS_NERD_MONO_BOLD_ITALIC_WOFF2,
-            ),
-            fallback_regular,
-        },
-        description: if fallback_names.is_empty() {
-            "embedded default: JetBrainsMono Nerd Font Mono family".to_string()
-        } else {
-            format!(
-                "embedded default: JetBrainsMono Nerd Font Mono family + fallbacks [{}]",
-                fallback_names.join(" -> ")
-            )
-        },
+        font_set: FontSet { fonts, regular, bold, italic, bold_italic },
+        description,
     })
 }
 
@@ -756,73 +935,6 @@ fn try_embedded_face(name: &'static str, bytes: &'static [u8]) -> Option<FontArc
     }
 }
 
-fn select_primary_font_for_cell<'a>(
-    family: &'a FontFamily,
-    flags: u8,
-    warned_missing_faces: &mut HashSet<&'static str>,
-) -> &'a FontArc {
-    let want_bold = flags & style_flags::BOLD != 0;
-    let want_italic = flags & style_flags::ITALIC != 0;
-
-    if want_bold && want_italic {
-        if let Some(font) = &family.bold_italic {
-            return font;
-        }
-        warn_missing_once(
-            warned_missing_faces,
-            "bold-italic",
-            "falling back to regular",
-        );
-        return &family.regular;
-    }
-
-    if want_bold {
-        if let Some(font) = &family.bold {
-            return font;
-        }
-        warn_missing_once(warned_missing_faces, "bold", "falling back to regular");
-        return &family.regular;
-    }
-
-    if want_italic {
-        if let Some(font) = &family.italic {
-            return font;
-        }
-        warn_missing_once(warned_missing_faces, "italic", "falling back to regular");
-        return &family.regular;
-    }
-
-    &family.regular
-}
-
-fn select_font_for_char<'a>(
-    primary: &'a FontArc,
-    fallback: &'a [FontArc],
-    ch: char,
-) -> &'a FontArc {
-    if has_glyph(primary, ch) {
-        return primary;
-    }
-
-    for font in fallback {
-        if has_glyph(font, ch) {
-            return font;
-        }
-    }
-
-    primary
-}
-
 fn has_glyph(font: &FontArc, ch: char) -> bool {
     font.glyph_id(ch).0 != 0
-}
-
-fn warn_missing_once(
-    warned_missing_faces: &mut HashSet<&'static str>,
-    style: &'static str,
-    fallback: &'static str,
-) {
-    if warned_missing_faces.insert(style) {
-        warn!(style, fallback, "requested font style face is unavailable");
-    }
 }
