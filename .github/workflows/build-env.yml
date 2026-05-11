@@ -64,13 +64,8 @@ jobs:
         id: tags
         run: |
           set -euo pipefail
-          {
-            echo "set<<EOF"
-            while IFS= read -r tag; do
-              [ -n "${tag}" ] && echo "build-env.tags=${tag}"
-            done <<< '${{ steps.meta.outputs.tags }}'
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          tags_json=$(jq -R . <<< "${{ steps.meta.outputs.tags }}" | jq -s .)
+          echo "set=build-env.tags=${tags_json}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push build-env image
         uses: docker/bake-action@v5
