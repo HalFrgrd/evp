@@ -5,7 +5,7 @@
 //! beyond what individual tests opt into. The pipeline under test is:
 //!
 //! ```text
-//! parse_script -> run -> Recording -> recording_to_json -> recording_from_json
+//! parse_script -> run_and_return_recording -> Recording -> recording_to_json -> recording_from_json
 //! ```
 //!
 //! Each test parses a tape source, runs it against a real `/bin/sh` in a
@@ -24,7 +24,7 @@ use serde_json::Value;
 /// the returned recording's contents.
 fn record(tape: &str) -> Recording {
     let script = evp::parse_script(tape).expect("parse tape");
-    let out = evp::run(&script).expect("run script");
+    let out = evp::run_and_return_recording(&script).expect("run script");
     out.recording
 }
 

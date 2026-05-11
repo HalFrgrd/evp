@@ -1,5 +1,5 @@
 //! Main loop: drive libghostty + the PTY, schedule events, and ship
-//! captured frames to renderer threads.
+//! captured frames to raw-frame consumer threads.
 //!
 //! ## Threading model
 //!
@@ -7,8 +7,8 @@
 //!   It drains the PTY into the terminal each iteration, executes the next
 //!   scripted event when its scheduled time arrives, and grabs a screen
 //!   snapshot at every framerate tick.
-//! - **Renderer threads** (see [`crate::renderer`]): optionally receive the
-//!   same dense raw frames directly from the runner.
+//! - **Raw-frame consumer threads**: optionally receive the same dense raw
+//!   frames directly from the runner.
 //!
 //! Time is computed up‑front: each event in the parsed script gets an
 //! absolute deadline. The loop sleeps until the next interesting deadline
@@ -33,11 +33,11 @@ use crate::{
     FrameStyle,
     keys::KeyTranslator,
     pty::{Pty, PtyError, PtySize},
-    recording::{CellSnap, RawFrame, RecordingBuilder, RecordingConfig, style_flags},
+    recording::{CellSnap, RawFrame, style_flags},
     script::{Event, NamedKey, Script, Settings, WaitScope},
 };
 
-/// Output of [`run`].
+/// Output of [`crate::run_and_return_recording`].
 pub struct RunOutput {
     pub recording: crate::recording::Recording,
     /// Pipeline-health counters captured during the run.
@@ -52,25 +52,38 @@ pub struct RunStats {
     /// Number of frames the runner intended to capture (one per frame
     /// deadline, including any that were ultimately dropped).
     pub expected_frames: u64,
-    /// Number of frames folded into the returned [`crate::Recording`].
-    pub recorded_frames: u64,
-    /// Highest observed `len()` of any runner → renderer queue.
-    /// Zero when no renderer was attached.
-    pub max_renderer_queue_len: usize,
-    /// Number of frames the runner couldn't forward to renderers because
-    /// renderer queues were full.
-    pub renderer_dropped_frames: u64,
+    /// Number of frames captured by the runner.
+    pub captured_frames: u64,
+    /// Number of raw-frame consumer channels attached to the run.
+    pub raw_frame_consumer_count: usize,
+    /// Highest observed `len()` of any runner → raw-frame consumer queue.
+    /// Zero when no consumer was attached.
+    pub max_raw_frame_consumer_queue_len: usize,
+    /// Number of frames the runner couldn't forward to raw-frame consumers
+    /// because consumer queues were full.
+    pub raw_frame_consumer_dropped_frames: u64,
 }
 
 impl RunStats {
-    /// Fraction of expected frames that were not recorded. Returns 0.0 when no
+    /// Fraction of expected frames that were not captured. Returns 0.0 when no
     /// frames were expected.
     pub fn missed_capture_fraction(&self) -> f64 {
         if self.expected_frames == 0 {
             0.0
         } else {
-            self.expected_frames.saturating_sub(self.recorded_frames) as f64
+            self.expected_frames.saturating_sub(self.captured_frames) as f64
                 / self.expected_frames as f64
+        }
+    }
+
+    /// Fraction of raw-frame consumer sends that were dropped. Returns 0.0 when
+    /// no consumer frames were expected.
+    pub fn dropped_consumer_fraction(&self) -> f64 {
+        let expected_consumer_frames = self.expected_frames * self.raw_frame_consumer_count as u64;
+        if expected_consumer_frames == 0 {
+            0.0
+        } else {
+            self.raw_frame_consumer_dropped_frames as f64 / expected_consumer_frames as f64
         }
     }
 }
@@ -128,30 +141,30 @@ pub fn derive_options(s: &Settings) -> RunOptions {
     }
 }
 
-/// Run the script end‑to‑end. Returns the completed recording.
-pub fn run(script: &Script) -> Result<RunOutput> {
-    run_with_frame_taps(script, Vec::new())
+/// Run the script end-to-end. Returns only pipeline stats.
+pub fn run(script: &Script) -> Result<RunStats> {
+    run_with_raw_frame_consumers(script, Vec::new())
 }
 
-/// Run the script and optionally mirror dense raw frames into `render_tap`.
+/// Run the script and optionally mirror dense raw frames into a raw-frame consumer.
 ///
-/// The tap is attached directly to the terminal-driving thread. Sends are
-/// non-blocking, so a slow renderer cannot stall the PTY loop.
-pub fn run_with_frame_tap(
+/// The consumer is attached directly to the terminal-driving thread. Sends are
+/// non-blocking, so a slow consumer cannot stall the PTY loop.
+pub fn run_with_raw_frame_consumer(
     script: &Script,
-    render_tap: Option<Sender<RawFrame>>,
-) -> Result<RunOutput> {
-    run_with_frame_taps(script, render_tap.into_iter().collect())
+    raw_frame_consumer: Option<Sender<RawFrame>>,
+) -> Result<RunStats> {
+    run_with_raw_frame_consumers(script, raw_frame_consumer.into_iter().collect())
 }
 
-/// Run the script and mirror dense raw frames into zero or more renderer taps.
+/// Run the script and mirror dense raw frames into zero or more raw-frame consumers.
 ///
-/// Each tap receives frames directly from the terminal-driving thread via
-/// `try_send`; full or disconnected renderer queues do not block capture.
-pub fn run_with_frame_taps(
+/// Each consumer receives frames directly from the terminal-driving thread via
+/// `try_send`; full or disconnected consumer queues do not block capture.
+pub fn run_with_raw_frame_consumers(
     script: &Script,
-    render_taps: Vec<Sender<RawFrame>>,
-) -> Result<RunOutput> {
+    raw_frame_consumers: Vec<Sender<RawFrame>>,
+) -> Result<RunStats> {
     enforce_require(&script.require)?;
     let opts = derive_options(&script.settings);
     let pty_size = PtySize {
@@ -196,16 +209,6 @@ pub fn run_with_frame_taps(
     // total" while a tape is rendering.
     let expected_total = timeline_end;
 
-    let mut recording = RecordingBuilder::new(RecordingConfig {
-        cols: opts.cols,
-        rows: opts.rows,
-        framerate: script.settings.framerate,
-        cell_width_px: opts.cell_w_px,
-        cell_height_px: opts.cell_h_px,
-        frame_style: opts.frame_style,
-        keyframe_interval: script.settings.framerate * 5,
-    });
-
     // Snapshot scratch state.
     let mut render_state = RenderState::new()?;
     let mut row_it = RowIterator::new()?;
@@ -224,9 +227,9 @@ pub fn run_with_frame_taps(
     // until the regex matches or the timeout elapses.
     let mut wait_state: Option<WaitState> = None;
     let mut expected_frames: u64 = 0;
-    let mut recorded_frames: u64 = 0;
-    let mut max_renderer_queue_len: usize = 0;
-    let mut renderer_dropped_frames: u64 = 0;
+    let mut captured_frames: u64 = 0;
+    let mut max_raw_frame_consumer_queue_len: usize = 0;
+    let mut raw_frame_consumer_dropped_frames: u64 = 0;
 
     // Decile progress tracking based on elapsed wall-clock time vs expected
     // timeline duration. We emit once when elapsed crosses each 10 % bucket.
@@ -339,21 +342,20 @@ pub fn run_with_frame_taps(
                     continue;
                 }
                 expected_frames += 1;
-                for tap in &render_taps {
-                    let tap_len = tap.len();
-                    if tap_len > max_renderer_queue_len {
-                        max_renderer_queue_len = tap_len;
+                captured_frames += 1;
+                for consumer in &raw_frame_consumers {
+                    let consumer_len = consumer.len();
+                    if consumer_len > max_raw_frame_consumer_queue_len {
+                        max_raw_frame_consumer_queue_len = consumer_len;
                     }
-                    match tap.try_send(frame.clone()) {
+                    match consumer.try_send(frame.clone()) {
                         Ok(()) => {}
                         Err(TrySendError::Full(_)) => {
-                            renderer_dropped_frames += 1;
+                            raw_frame_consumer_dropped_frames += 1;
                         }
                         Err(TrySendError::Disconnected(_)) => {}
                     }
                 }
-                recording.push_raw(frame);
-                recorded_frames += 1;
             }
             next_frame_at += frame_interval;
         }
@@ -383,28 +385,30 @@ pub fn run_with_frame_taps(
         }
     }
 
-    drop(render_taps);
-    let recording = recording.finish();
+    let raw_frame_consumer_count = raw_frame_consumers.len();
+    drop(raw_frame_consumers);
     let stats = RunStats {
         expected_frames,
-        recorded_frames,
-        max_renderer_queue_len,
-        renderer_dropped_frames,
+        captured_frames,
+        raw_frame_consumer_count,
+        max_raw_frame_consumer_queue_len,
+        raw_frame_consumer_dropped_frames,
     };
-    if renderer_dropped_frames > 0 {
+    if raw_frame_consumer_dropped_frames > 0 {
         warn!(
-            renderer_dropped_frames,
-            "renderer queue was full; dropped frames to keep terminal loop non-blocking"
+            raw_frame_consumer_dropped_frames,
+            "raw-frame consumer queue was full; dropped frames to keep terminal loop non-blocking"
         );
     }
     info!(
         expected_frames,
-        recorded_frames,
-        max_renderer_queue_len = stats.max_renderer_queue_len,
-        renderer_dropped_frames = stats.renderer_dropped_frames,
+        captured_frames,
+        raw_frame_consumer_count,
+        max_raw_frame_consumer_queue_len = stats.max_raw_frame_consumer_queue_len,
+        raw_frame_consumer_dropped_frames = stats.raw_frame_consumer_dropped_frames,
         "pipeline stats"
     );
-    Ok(RunOutput { recording, stats })
+    Ok(stats)
 }
 
 // ---------------------------------------------------------------------------

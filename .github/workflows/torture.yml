@@ -1,8 +1,8 @@
 name: torture
 
-# Runs the torture-test benchmark for the evp PTY → renderer pipeline and
-# compares the resulting GIF (and timing) against an equivalent VHS run. Both
-# runs are pinned to a single physical CPU core so the comparison is fair.
+# Runs the torture-test benchmark for the evp PTY → raw-frame-consumer pipeline
+# and compares the resulting GIF (and timing) against an equivalent VHS run.
+# Both runs are pinned to a single physical CPU core so the comparison is fair.
 #
 # The build environment is the bake `torture` target wired from split
 # Dockerfiles, with the same Rust + Zig toolchain as ci.yml / release.yml / docker.yml. The
@@ -23,6 +23,7 @@ on:
       - "scripts/torture_program.py"
       - "scripts/torture_compare.sh"
       - "scripts/gif_frame_analyzer.py"
+      - "src/full_recording.rs"
       - "src/runner.rs"
       - "src/renderer.rs"
       - "src/render_common.rs"

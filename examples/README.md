@@ -46,8 +46,8 @@ release named `assets` and are linked from the project [README](../README.md).
 The [`torture_benchmark`](torture_benchmark.rs) example drives
 [`torture.tape`](torture.tape) end-to-end through the evp library and
 prints a one-page report with pipeline-health counters
-(missed frames, max queue depths, wall-clock time). It exits non-zero
-when more than **5 %** of expected frames were dropped.
+(dropped raw-frame consumer frames, max queue depths, wall-clock time). It
+exits non-zero when more than **5 %** of raw-frame consumer sends were dropped.
 
 Run locally on a single physical core and compare against VHS in Docker:
 

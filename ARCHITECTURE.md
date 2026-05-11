@@ -3,22 +3,23 @@
 `evp` is a small Rust CLI that ingests [VHS](https://github.com/charmbracelet/vhs)–format `.tape`
 scripts and produces GIF, SVG, or JSON outputs by driving a real shell inside an
 embedded [libghostty‑vt](https://github.com/ghostty-org/ghostty) terminal
-emulator. Capture + diff-encoding happen on the runner thread; each renderer
-runs concurrently on its own worker thread.
+emulator. The runner captures dense `RawFrame`s and hands them to any
+configured raw-frame consumers. CLI rendering does not build a full in-memory
+recording; the opt-in `FullRecording` consumer exists for library callers that
+need one.
 
 ```
-   +----------+      try_send
-   |  PTY /   | --------------------------------+
-   |  runner  |                                 v
-   | (diff +  | <---PTY bytes--+          +-----------------+
-   |  fold)   |                |          | renderer worker |
-   +----------+                |          | (gif/svg/json)  |
-        |                      |          +-----------------+
-        |                      |                  |
-        v                      |                  v
-   Recording (returned)        |            <output file>
-   to caller as RunOutput      |
-                               |
+                        try_send
+   +----------+   bounded(4096)   +---------------------+
+   |  PTY /   | ---RawFrame-----> | RawFrameConsumer(s) |
+   |  runner  |                   | gif / svg / json /  |
+   |          | <---PTY bytes--+  | FullRecording       |
+   +----------+                |  +---------------------+
+        |                      |            |
+        |                      |            v
+        |                      |      <output file> or
+        |                      |       Recording
+        |                      |
    +-----------------+   +-----------+
    | libghostty-vt   |   |  shell    |
    | Terminal        |   +-----------+
@@ -27,15 +28,16 @@ runs concurrently on its own worker thread.
 
 The PTY thread is the timing master. It is **never** blocked on a downstream
 channel — every hand-off uses `try_send`, so the worst case under sustained
-renderer back-pressure is a dropped renderer frame, not a stalled terminal.
+consumer back-pressure is a dropped consumer frame, not a stalled terminal.
 
 ## Pipeline overview
 
 1. **Parse** the `.tape` source into `Script { settings, env, events, outputs }`
    ([src/script/parser.rs](src/script/parser.rs)). Durations stay relative.
-2. **Spawn renderer workers** (only for `run_and_render*`): one thread per
-   output is created up front and handed a `Sender<RawFrame>` it owns.
-   See [src/renderer.rs](src/renderer.rs).
+2. **Spawn raw-frame consumers** as needed: one renderer thread per output
+   ([src/renderer.rs](src/renderer.rs)) and, for library callers that need an
+   in-memory recording, one `FullRecording` worker
+   ([src/full_recording.rs](src/full_recording.rs)).
 3. **Spawn the shell** in a pseudo-terminal ([src/pty.rs](src/pty.rs)) and
    construct a `libghostty_vt::Terminal` with the resolved cell grid
    ([src/runner.rs](src/runner.rs)).
@@ -45,11 +47,11 @@ renderer back-pressure is a dropped renderer frame, not a stalled terminal.
    emitting an event.
 5. **Run loop** (PTY thread): drain the PTY into the terminal, evaluate
    pending waits, fire all events whose deadline has passed, snapshot the
-   terminal at every frame deadline, fold it into the in-progress `Recording`,
-   `try_send` clones to renderers, then `poll(2)` on the PTY fd until the next
-   deadline.
-6. **Render** (renderer threads): each output consumes the runner's dense
-   frames independently and writes its file when its receiver closes.
+   terminal at every frame deadline, `try_send` clones to raw-frame consumers,
+   then `poll(2)` on the PTY fd until the next deadline.
+6. **Consume** (consumer threads): each output or library consumer processes
+   the runner's dense frames independently and finishes when its receiver
+   closes.
 
 ## Main runner loop (detailed)
 
@@ -61,8 +63,7 @@ The loop in [src/runner.rs](src/runner.rs) is deadline-driven rather than
      writes.
    - Construct a complete absolute event timeline (`build_timeline`), where
      relative script durations are already expanded/scaled.
-   - Create the in-memory `RecordingBuilder` and start any requested renderer
-     workers.
+   - Start any requested raw-frame consumers.
 
 2. **Per-iteration PTY drain**
    - `pty.drain_into(&mut terminal)` feeds all currently available shell bytes
@@ -83,10 +84,9 @@ The loop in [src/runner.rs](src/runner.rs) is deadline-driven rather than
 5. **Frame capture**
    - While frame deadlines are due, capture via ghostty render iterators into
      a dense `RawFrame` (cells + cursor + default colors + `t_ms`).
-   - Fold the frame into the in-memory `RecordingBuilder`.
-   - **Non-blocking** `try_send` to each renderer. On `Full`, increment the
-     renderer dropped-frame counter and continue — the runner never stalls on
-     output encoding.
+   - **Non-blocking** `try_send` to each raw-frame consumer. On `Full`,
+     increment the consumer dropped-frame counter and continue — the runner
+     never stalls on output encoding or recording assembly.
 
 6. **Exit condition**
    - Stop only after the event timeline is exhausted, no wait is active, and
@@ -101,26 +101,27 @@ The loop in [src/runner.rs](src/runner.rs) is deadline-driven rather than
 
 | Thread        | Owns                                                         | Responsibility                                                                |
 |---------------|--------------------------------------------------------------|-------------------------------------------------------------------------------|
-| **PTY/runner**| `Terminal`, `Pty`, `KeyTranslator`, capture iterators, `RecordingBuilder` | Drive the VT, pump the script timeline, capture and diff frames. |
+| **PTY/runner**| `Terminal`, `Pty`, `KeyTranslator`, capture iterators        | Drive the VT, pump the script timeline, capture raw frames.                  |
 | **renderer**  | gif/svg/json encoder state, output file                      | Write one output incrementally as frames arrive.                             |
+| **FullRecording** | `RecordingBuilder`                                      | Optional library-only in-memory `Recording` assembly.                        |
 
 ### Channels
 
-Renderer channels are bounded `crossbeam_channel`s with capacity `4096`
+Raw-frame consumer channels are bounded `crossbeam_channel`s with capacity `4096`
 ([src/render_common.rs](src/render_common.rs)):
 
-- `runner -> renderer`: PTY thread `try_send`s clones directly to each
-  renderer; full or disconnected = drop that renderer forward.
+- `runner -> consumer`: PTY thread `try_send`s clones directly to each
+  consumer; full or disconnected = drop that consumer forward.
 
-The PTY loop never waits for a slow renderer. In practice the workers keep up
+The PTY loop never waits for a slow consumer. In practice the workers keep up
 easily on release builds.
 
 ### Sender-drop discipline (deadlock avoidance)
 
-Each renderer worker exits its `rx.recv()` loop only when **all** senders
-drop. `RendererHandle` exposes a `tx: Sender<RawFrame>` clone for the runner;
-it must be dropped *before* `JoinHandle::join` is called, otherwise the
-worker can never finish:
+Each consumer worker exits its `rx.recv()` loop only when **all** senders drop.
+`RendererHandle` exposes a `tx: Sender<RawFrame>` clone for the runner; it must
+be dropped *before* `JoinHandle::join` is called, otherwise the worker can never
+finish:
 
 ```rust
 // src/renderer.rs
@@ -141,13 +142,15 @@ never cross thread boundaries. Only owned `RawFrame` values (plain
 
 ## Public API surfaces
 
-The library exposes both a "capture only" path and "capture + stream render"
-paths:
+The library exposes stats-only, recording, and streaming render paths:
 
-- `evp::run(&Script) -> RunOutput` — drives the script, returns the
-   `Recording`. No image encoding.
+- `evp::run(&Script) -> RunStats` — drives the script without attaching any
+   consumers.
+- `evp::run_and_return_recording(&Script) -> RunOutput` — attaches the
+   `FullRecording` consumer and returns an in-memory `Recording`.
 - `evp::run_and_render(&Script, Vec<(RendererBackend, PathBuf)>)` — spawns one
-   renderer thread per output and streams frames to all of them.
+   renderer thread per output, streams frames to all of them, and returns
+   `RunStats`.
 - `evp::run_and_render_gif(&Script, RenderOptions, PathBuf)` — convenience
    wrapper for one GIF output.
 - `evp::run_and_render_svg(&Script, SvgOptions, PathBuf)` — convenience
@@ -165,8 +168,9 @@ multi-renderer streaming entry point.
 ## Rendering internals
 
 All streaming renderers consume `RawFrame`s directly from the runner. GIF and
-SVG never touch the `Recording` during a streaming run; JSON builds the same
-intermediate `Recording` format in its own renderer thread.
+SVG never touch a full `Recording` during a streaming run; JSON builds the same
+intermediate `Recording` format in its own consumer thread because JSON output
+is that recording.
 
 ### GIF path ([src/render_gif.rs](src/render_gif.rs))
 

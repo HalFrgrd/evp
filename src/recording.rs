@@ -1,11 +1,11 @@
 //! Recording artifact: a sequence of terminal frames captured at a fixed
 //! framerate.
 //!
-//! The runner produces dense [`RawFrame`]s at the target framerate, then folds
-//! them into a [`Recording`] which keeps the first frame in full and subsequent
-//! frames as **cell diffs** against the prior one. This dramatically shrinks
-//! JSON serialisation while still being a lossless representation of the
-//! captured terminal state.
+//! The runner produces dense [`RawFrame`]s at the target framerate. Consumers
+//! that need the intermediate format fold those raw frames into a [`Recording`]
+//! which keeps the first frame in full and subsequent frames as **cell diffs**
+//! against the prior one. This dramatically shrinks JSON serialisation while
+//! still being a lossless representation of the captured terminal state.
 
 use serde::{Deserialize, Serialize};
 
@@ -48,7 +48,7 @@ impl CellSnap {
 
 /// A complete terminal grid plus cursor state, captured at a single point
 /// in time. Produced by the runner thread and optionally shipped over channels
-/// to renderer threads.
+/// to raw-frame consumers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RawFrame {
     /// Time relative to recording start, in milliseconds.

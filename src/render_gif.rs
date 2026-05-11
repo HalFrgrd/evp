@@ -20,7 +20,7 @@ use woff2_patched::convert_woff2_to_ttf;
 use crate::{
     FrameStyle,
     recording::{RawFrame, Recording, style_flags},
-    render_common::{RENDER_STREAM_CHANNEL_CAPACITY, RenderOptions},
+    render_common::{RAW_FRAME_CONSUMER_CHANNEL_CAPACITY, RenderOptions},
     style::window_bar_dot_metrics,
 };
 
@@ -109,7 +109,8 @@ pub fn spawn_gif_stream(
     let baseline = scaled.ascent().ceil() as u32;
     let layout = layout_metrics(cfg.cols, cfg.rows, cell_w, cell_h, opts.frame_style);
 
-    let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) = bounded(RENDER_STREAM_CHANNEL_CAPACITY);
+    let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) =
+        bounded(RAW_FRAME_CONSUMER_CHANNEL_CAPACITY);
     let join = thread::Builder::new()
         .name("evp-gif-stream".into())
         .spawn(move || {

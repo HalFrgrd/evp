@@ -42,21 +42,23 @@ render_avg_ms      ≈ 1200    (gifski streaming, 320 frames)
 
 ## Streaming render pipeline (must-know)
 
-`evp` runs the runner plus one renderer worker per output:
+`evp` runs the runner plus one raw-frame consumer worker per output or
+library recording request:
 
 1. **PTY/runner** — drives libghostty + the script timeline. Captures one
-   `RawFrame` per frame deadline and folds it into the diff-compressed
-   `Recording` returned in `RunOutput`.
-2. **Renderer worker** (gif, svg, or json) — consumes dense `RawFrame`s from
-   its own channel and writes its output file when the receiver closes.
+   `RawFrame` per frame deadline and hands clones to consumers with
+   non-blocking sends.
+2. **RawFrameConsumer worker** — gif/svg/json renderers write output files;
+   the optional `FullRecording` consumer builds an in-memory `Recording` for
+   library callers.
 
 ### Hard rules
 
-- The PTY thread **must never block** on renderers. It uses `try_send` on
-  each renderer channel; if a queue is full, that renderer frame is dropped
-  and `renderer_dropped_frames` is logged at the end.
-- Bounded renderer channel capacity is `4096`. This is large enough to absorb
-  bursts on cold starts; do not shrink it without a benchmark.
+- The PTY thread **must never block** on raw-frame consumers. It uses
+  `try_send` on each consumer channel; if a queue is full, that consumer frame
+  is dropped and `raw_frame_consumer_dropped_frames` is logged at the end.
+- Bounded raw-frame consumer channel capacity is `4096`. This is large enough
+  to absorb bursts on cold starts; do not shrink it without a benchmark.
 
 ### Sender-drop discipline (the hang we keep re-creating)
 
@@ -99,13 +101,15 @@ handle's `tx`) and `h.join()` deadlocked.
 - libghostty types (`Terminal`, render iterators) are `!Send + !Sync`. They
   stay on the runner thread. Only owned `RawFrame` values (plain `Vec` +
   cursor + colors) ever cross a thread boundary.
-- The runner owns the only mutable `RecordingBuilder`; renderer workers only
-  receive owned `RawFrame` clones.
+- The runner must not own a `RecordingBuilder` by default. Only the optional
+  `FullRecording` raw-frame consumer builds an in-memory `Recording`.
 
 ## Output formats
 
 - `.gif`, `.svg`, and `.json` go through the same `renderer::spawn_renderer`
   entry point. Each output gets its own streaming worker.
+- `run_and_return_recording` attaches the `FullRecording` consumer for tests
+  and library callers that need a `Recording`.
 - Adding a new output format means: implement a `spawn_X_stream`
   returning a handle with `tx: Sender<RawFrame>` + `join() -> Result<()>`,
   then add a `RendererBackend::X` arm in `src/renderer.rs`.
@@ -123,11 +127,11 @@ Look for these milestones (in order):
 ```
 spawning pty
 applied default Snazzy color palette
-recording captured frames=…
+frames captured
 output written path=…
 ```
 
-If "recording captured" prints but "output written" never does, you're in
+If "frames captured" prints but "output written" never does, you're in
 a renderer-thread deadlock — re-read the *Sender-drop discipline*
 section.
 

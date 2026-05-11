@@ -1,4 +1,4 @@
-//! Torture-test benchmark for the evp PTY → renderer pipeline.
+//! Torture-test benchmark for the evp PTY → raw-frame-consumer pipeline.
 //!
 //! Drives `examples/torture.tape` (100×30 grid, 60 fps, ~10 s, types at
 //! 100 chars/min) which in turn runs `scripts/torture_program.py`. The
@@ -10,13 +10,12 @@
 //! The bench reports:
 //!
 //!   * total wall-clock time spent
-//!   * frames the runner intended to capture vs. how many landed in
-//!     the recording
-//!   * dropped renderer frames
-//!   * high-water mark for renderer queues
+//!   * frames the runner intended to capture vs. how many it captured
+//!   * dropped raw-frame consumer frames
+//!   * high-water mark for raw-frame consumer queues
 //!
-//! Exits with a non-zero status if more than 5 % of expected frames were not
-//! recorded — that's the explicit pass/fail signal the GHA
+//! Exits with a non-zero status if more than 5 % of raw-frame consumer sends
+//! were dropped — that's the explicit pass/fail signal the GHA
 //! workflow looks at.
 //!
 //! Pinning to a single physical core is the caller's responsibility:
@@ -100,30 +99,15 @@ fn run() -> Result<bool> {
     eprintln!("torture: starting (cpu_affinity={cpu_set})");
 
     let started = Instant::now();
-    let out = evp::run_and_render_gif(&script, render_opts, out_gif.clone()).context("evp run")?;
+    let stats =
+        evp::run_and_render_gif(&script, render_opts, out_gif.clone()).context("evp run")?;
     let wall_ms = started.elapsed().as_millis();
 
-    let stats = out.stats;
-    let recording_frames = out.recording.frames.len();
     let gif_bytes = fs::metadata(&out_gif).map(|m| m.len()).unwrap_or(0);
 
-    let missed_pct = stats.missed_capture_fraction() * 100.0;
-    let renderer_drop_pct = if stats.expected_frames == 0 {
-        0.0
-    } else {
-        (stats.renderer_dropped_frames as f64 / stats.expected_frames as f64) * 100.0
-    };
+    let missed_pct = stats.dropped_consumer_fraction() * 100.0;
 
-    let report = format_report(
-        &cpu_set,
-        wall_ms,
-        gif_bytes,
-        recording_frames,
-        &stats,
-        missed_pct,
-        renderer_drop_pct,
-        &out_gif,
-    );
+    let report = format_report(&cpu_set, wall_ms, gif_bytes, &stats, missed_pct, &out_gif);
 
     print!("{report}");
     if let Some(parent) = report_path.parent() {
@@ -141,10 +125,8 @@ fn format_report(
     cpu_set: &str,
     wall_ms: u128,
     gif_bytes: u64,
-    recording_frames: usize,
     stats: &RunStats,
     missed_pct: f64,
-    renderer_drop_pct: f64,
     out_gif: &PathBuf,
 ) -> String {
     let mut s = String::new();
@@ -159,21 +141,20 @@ fn format_report(
         stats.expected_frames
     ));
     s.push_str(&format!(
-        "recorded_frames     = {}\n",
-        stats.recorded_frames
-    ));
-    s.push_str(&format!("recording_frames    = {recording_frames}\n"));
-    s.push_str(&format!(
-        "missed_recording    = {} ({missed_pct:.2}%)\n",
-        stats.expected_frames.saturating_sub(stats.recorded_frames)
+        "captured_frames     = {}\n",
+        stats.captured_frames
     ));
     s.push_str(&format!(
-        "max_renderer_queue  = {} / 4096\n",
-        stats.max_renderer_queue_len
+        "consumer_count      = {}\n",
+        stats.raw_frame_consumer_count
     ));
     s.push_str(&format!(
-        "dropped_renderer    = {} ({renderer_drop_pct:.2}%)\n",
-        stats.renderer_dropped_frames
+        "max_consumer_queue  = {} / 4096\n",
+        stats.max_raw_frame_consumer_queue_len
+    ));
+    s.push_str(&format!(
+        "dropped_consumer    = {} ({missed_pct:.2}%)\n",
+        stats.raw_frame_consumer_dropped_frames
     ));
     s.push_str(&format!(
         "missed_threshold    = {:.0}%\n",

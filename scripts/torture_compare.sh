@@ -74,9 +74,8 @@ extract() {
 }
 
 evp_wall=$(extract "$evp_report" "wall_ms")
-evp_missed=$(extract "$evp_report" "missed_recording")
-evp_dropped_renderer=$(extract "$evp_report" "dropped_renderer")
-evp_max_q=$(extract "$evp_report" "max_renderer_queue")
+evp_dropped_consumer=$(extract "$evp_report" "dropped_consumer")
+evp_max_q=$(extract "$evp_report" "max_consumer_queue")
 evp_result=$(extract "$evp_report" "result")
 evp_cpu=$(extract "$evp_report" "cpu_affinity")
 vhs_wall=$(extract "$vhs_report" "wall_ms")
@@ -154,9 +153,8 @@ VHS wall-clock / evp wall-clock = **${ratio}** (>1 means evp is faster).
 
 ## evp pipeline health
 
-- missed recording frames: ${evp_missed:-?}
-- dropped renderer frames: ${evp_dropped_renderer:-?}
-- max runner→renderer queue: ${evp_max_q:-?}
+- dropped raw-frame consumer frames: ${evp_dropped_consumer:-?}
+- max runner→raw-frame-consumer queue: ${evp_max_q:-?}
 - pass/fail (>5 % missed = fail): **${evp_result:-?}**
 
 ## evp gif frame analysis

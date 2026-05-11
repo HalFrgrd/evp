@@ -1,4 +1,4 @@
-//! JSON renderer for the intermediate [`Recording`] format.
+//! JSON raw-frame consumer for the intermediate [`Recording`] format.
 
 use std::{
     path::{Path, PathBuf},
@@ -9,8 +9,7 @@ use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
 
 use crate::recording::{RawFrame, Recording, RecordingBuilder, RecordingConfig};
-
-const JSON_STREAM_CHANNEL_CAPACITY: usize = 4096;
+use crate::render_common::RAW_FRAME_CONSUMER_CHANNEL_CAPACITY;
 
 pub struct JsonStreamConfig {
     pub cols: u16,
@@ -35,7 +34,8 @@ impl JsonStreamHandle {
 }
 
 pub fn spawn_json_stream(cfg: JsonStreamConfig, output: PathBuf) -> Result<JsonStreamHandle> {
-    let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) = bounded(JSON_STREAM_CHANNEL_CAPACITY);
+    let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) =
+        bounded(RAW_FRAME_CONSUMER_CHANNEL_CAPACITY);
     let join = thread::Builder::new()
         .name("evp-json-stream".into())
         .spawn(move || run_json_stream_worker(rx, cfg, output))

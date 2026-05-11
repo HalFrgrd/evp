@@ -186,7 +186,7 @@ pipeline so other Rust tools can embed it:
 
 ```rust
 let script = evp::parse_script(include_str!("../examples/hello.tape"))?;
-let out    = evp::run(&script)?;
+let out    = evp::run_and_return_recording(&script)?;
 let json   = evp::recording_to_json(&out.recording)?;
 evp::render_gif(&out.recording, &evp::RenderOptions {
     font_path: None,
