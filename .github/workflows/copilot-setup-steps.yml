@@ -1,0 +1,107 @@
+name: "Copilot Setup Steps"
+
+# Pre-warm the Copilot cloud-agent environment so that subsequent
+# `cargo build` / `cargo test` invocations succeed even after the
+# agent firewall blocks `ziglang.org` and the Zig package CDN.
+#
+# Two things need network access to build this project from a clean
+# checkout:
+#   1. Zig 0.15.x — currently hosted on https://ziglang.org. The
+#      Copilot firewall does not allow this host by default.
+#   2. The pinned upstream Ghostty source plus its Zig package
+#      dependencies. These are fetched lazily by
+#      `libghostty-vt-sys`'s build.rs via `zig build`, which goes
+#      out to GitHub + the Zig package mirror.
+#
+# Both happen here, while the runner still has open internet, so the
+# agent itself never needs to reach those hosts.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  # The job MUST be called `copilot-setup-steps` or Copilot will not
+  # pick it up.
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+
+    env:
+      # Keep this in sync with docker/build-env.Dockerfile.
+      ZIG_VERSION: "0.15.2"
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Zig ${{ env.ZIG_VERSION }}
+        # Mirrors the curl-from-ziglang.org logic in
+        # docker/build-env.Dockerfile so the toolchain pinning stays
+        # in one place. Installs to /opt/zig and exports the path
+        # for every later step (and for the agent that runs after
+        # these setup steps complete).
+        run: |
+          set -euo pipefail
+          arch="$(uname -m)"
+          case "$arch" in
+            x86_64)  zig_arch="x86_64" ;;
+            aarch64) zig_arch="aarch64" ;;
+            *) echo "unsupported arch $arch" >&2; exit 1 ;;
+          esac
+          tarball="zig-${zig_arch}-linux-${ZIG_VERSION}.tar.xz"
+          curl -fsSLo "/tmp/${tarball}" \
+            "https://ziglang.org/download/${ZIG_VERSION}/${tarball}"
+          sudo mkdir -p /opt
+          sudo tar -xJf "/tmp/${tarball}" -C /opt
+          sudo mv "/opt/zig-${zig_arch}-linux-${ZIG_VERSION}" /opt/zig
+          rm "/tmp/${tarball}"
+          echo "/opt/zig" >> "$GITHUB_PATH"
+          /opt/zig/zig version
+
+      - name: Install Rust toolchain (matches Cargo.toml edition)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry, git checkouts, and target/
+        # Caching `target/` matters here: libghostty-vt-sys's build.rs
+        # drops the fetched Ghostty source and Zig package cache
+        # under target/<profile>/build/libghostty-vt-sys-*/out/, and
+        # we want the agent to reuse it instead of re-fetching.
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: copilot-setup-${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            copilot-setup-${{ runner.os }}-cargo-
+
+      - name: Pre-fetch Cargo dependencies
+        # Pulls every crate in Cargo.lock into ~/.cargo/registry +
+        # ~/.cargo/git so cargo never needs the network at agent
+        # time. This is what makes the libghostty-rs git dep
+        # available offline.
+        run: cargo fetch --locked
+
+      - name: Pre-build to populate libghostty-vt-sys download cache
+        # Runs build.rs end-to-end so:
+        #   * the Ghostty source pinned in libghostty-vt-sys is
+        #     downloaded into target/.../out/,
+        #   * `zig build` resolves and caches all upstream Zig
+        #     package dependencies under the same out/ tree,
+        #   * the libghostty-vt static archive is compiled.
+        # After this step the agent can `cargo build` / `cargo
+        # test` with no outbound network access.
+        env:
+          CARGO_NET_OFFLINE: "false"
+        run: cargo build --workspace --all-targets --locked

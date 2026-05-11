@@ -156,6 +156,29 @@ docker buildx bake builder     # intermediate builder image
 docker buildx bake test --set builder.args.BUILD_ENV_IMAGE=ghcr.io/<owner>/evp-build-env:latest
 ```
 
+#### Restricted-network environments (Copilot cloud agent etc.)
+
+A clean checkout needs network access to two places:
+
+- `https://ziglang.org/...` for the Zig 0.15.x toolchain, and
+- the upstream Ghostty source + Zig package mirror, fetched lazily
+  by `libghostty-vt-sys`'s `build.rs` the first time `zig build`
+  runs.
+
+Sandboxed environments (notably the GitHub Copilot cloud agent's
+firewall) typically block the Zig hosts. Two ways to cope:
+
+- **Cargo / native builds.** A `.github/workflows/copilot-setup-steps.yml`
+  is included that installs Zig and runs `cargo fetch` + `cargo build`
+  on a vanilla GitHub-hosted runner — i.e. *before* the agent
+  firewall engages — so `~/.cargo` and `target/` are fully warmed
+  for the agent. No further changes are required to use the agent
+  on this repo.
+- **Docker builds.** Use the published Rust+Zig image as shown
+  above (`--set builder.args.BUILD_ENV_IMAGE=ghcr.io/<owner>/evp-build-env:latest`).
+  Cargo still needs `https://github.com` (allowed by the default
+  Copilot firewall) to resolve the `libghostty-rs` git dep.
+
 ### As a library
 
 `evp` ships both a `[lib]` and a `[[bin]]`. The library exposes the full

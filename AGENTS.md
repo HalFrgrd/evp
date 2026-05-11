@@ -159,3 +159,9 @@ section.
 - If an environment cannot resolve `ziglang.org`, point bake at the published
   image instead of rebuilding Zig:
   `docker buildx bake test --set builder.args.BUILD_ENV_IMAGE=ghcr.io/<owner>/evp-build-env:latest`.
+- For non-Docker restricted environments (e.g. the Copilot cloud agent's
+  firewall), `.github/workflows/copilot-setup-steps.yml` installs Zig and
+  pre-warms `~/.cargo` + `target/` (including the Ghostty source and Zig
+  package cache that `libghostty-vt-sys`'s `build.rs` would otherwise
+  fetch) on a vanilla GitHub-hosted runner before the agent starts.
+  Keep its `ZIG_VERSION` in sync with `docker/build-env.Dockerfile`.
