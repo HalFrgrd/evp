@@ -76,6 +76,17 @@ fn full_haystack(rec: &Recording) -> String {
     s
 }
 
+fn temp_json_path(prefix: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "{prefix}-{}-{}.json",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ))
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -251,14 +262,7 @@ Type "json"
 Sleep 200ms
 "#;
     let rec = record(tape);
-    let path = std::env::temp_dir().join(format!(
-        "evp-render-json-{}-{}.json",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let path = temp_json_path("evp-render-json");
 
     evp::render_json(&rec, &path).expect("render json");
     let bytes = std::fs::read(&path).expect("read json");

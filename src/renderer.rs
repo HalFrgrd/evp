@@ -117,7 +117,7 @@ pub fn spawn_renderer(
 }
 
 pub fn render_recording(rec: &Recording, backend: RendererBackend, output: PathBuf) -> Result<()> {
-    let backend = match backend {
+    let non_json_backend = match backend {
         RendererBackend::Json => return render_json::render_json(rec, &output),
         backend => backend,
     };
@@ -130,7 +130,7 @@ pub fn render_recording(rec: &Recording, backend: RendererBackend, output: PathB
             cell_height_px: rec.cell_height_px,
             frame_style: rec.frame_style,
         },
-        backend,
+        non_json_backend,
         output,
     )?;
 
