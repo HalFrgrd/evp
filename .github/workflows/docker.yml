@@ -59,8 +59,16 @@ jobs:
         id: tags
         run: |
           set -euo pipefail
-          tags_csv="$(printf '%s\n' '${{ steps.meta.outputs.tags }}' | paste -sd, -)"
-          echo "csv=${tags_csv}" >> "$GITHUB_OUTPUT"
+          {
+            echo 'set<<EOF'
+            while IFS= read -r tag; do
+              [[ -z "$tag" ]] && continue
+              echo "runtime.tags=${tag}"
+            done <<< "$TAGS"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
 
       - name: Compute git metadata for Docker build
         id: gitmeta
@@ -97,7 +105,7 @@ jobs:
           targets: runtime
           push: ${{ github.event_name != 'pull_request' }}
           set: |
-            runtime.tags=${{ steps.tags.outputs.csv }}
+            ${{ steps.tags.outputs.set }}
             *.cache-from=type=gha
             *.cache-to=type=gha,mode=max
             *.args.VERGEN_GIT_SHA=${{ steps.gitmeta.outputs.sha }}
