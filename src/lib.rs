@@ -32,6 +32,7 @@ pub mod render_svg;
 pub mod renderer;
 pub mod runner;
 pub mod script;
+pub mod style;
 
 use std::path::{Path, PathBuf};
 
@@ -42,6 +43,7 @@ pub use render::RenderOptions;
 pub use render_svg::SvgOptions;
 pub use runner::{RunOptions, RunOutput, RunStats};
 pub use script::{Event, KeySpec, ModSet, NamedKey, Script, Settings, WaitScope};
+pub use style::{FrameStyle, Theme, WindowBarStyle};
 
 /// Parse a `.tape` script source string into an AST.
 ///
@@ -84,7 +86,7 @@ pub fn run_and_render_gif(
             framerate: script.settings.framerate,
             cell_width_px: opts.cell_w_px,
             cell_height_px: opts.cell_h_px,
-            padding_px: opts.padding_px,
+            frame_style: opts.frame_style,
         },
         renderer::RendererBackend::Gif(render_opts),
         output,
@@ -111,7 +113,7 @@ pub fn run_and_render_svg(
             framerate: script.settings.framerate,
             cell_width_px: opts.cell_w_px,
             cell_height_px: opts.cell_h_px,
-            padding_px: opts.padding_px,
+            frame_style: opts.frame_style,
         },
         renderer::RendererBackend::Svg(render_opts),
         output,
@@ -131,7 +133,7 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, output: &Path) -> Resul
         renderer::RendererBackend::Gif(RenderOptions {
             font_path: opts.font_path.clone(),
             font_size: opts.font_size,
-            padding_px: opts.padding_px,
+            frame_style: rec.frame_style,
         }),
         output.to_path_buf(),
     )

@@ -17,7 +17,11 @@ use gifski::{Settings, progress};
 use tracing::{info, warn};
 use woff2_patched::convert_woff2_to_ttf;
 
-use crate::recording::{RawFrame, Recording, style_flags};
+use crate::{
+    FrameStyle,
+    recording::{RawFrame, Recording, style_flags},
+    style::window_bar_dot_metrics,
+};
 
 // Rendering can briefly lag behind capture on busy systems; this queue absorbs
 // bursts so the upstream pipeline usually stays lock-free.
@@ -62,12 +66,25 @@ struct FontFamily {
 pub struct RenderOptions {
     pub font_path: Option<String>,
     pub font_size: f32,
-    pub padding_px: u32,
+    pub frame_style: FrameStyle,
 }
 
 pub struct GifStreamConfig {
     pub cols: u16,
     pub rows: u16,
+}
+
+#[derive(Clone, Copy)]
+struct LayoutMetrics {
+    canvas_w: u32,
+    canvas_h: u32,
+    frame_x: u32,
+    frame_y: u32,
+    frame_w: u32,
+    frame_h: u32,
+    bar_h: u32,
+    content_x: u32,
+    content_y: u32,
 }
 
 pub struct GifStreamHandle {
@@ -99,8 +116,7 @@ pub fn spawn_gif_stream(
         .max(1.0) as u32;
     let cell_h = (scaled.height() + scaled.line_gap()).ceil().max(1.0) as u32;
     let baseline = scaled.ascent().ceil() as u32;
-    let canvas_w = cfg.cols as u32 * cell_w + opts.padding_px * 2;
-    let canvas_h = cfg.rows as u32 * cell_h + opts.padding_px * 2;
+    let layout = layout_metrics(cfg.cols, cfg.rows, cell_w, cell_h, opts.frame_style);
 
     let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) = bounded(RENDER_STREAM_CHANNEL_CAPACITY);
     let join = thread::Builder::new()
@@ -114,9 +130,8 @@ pub fn spawn_gif_stream(
                 cell_w,
                 cell_h,
                 baseline,
-                opts.padding_px,
-                canvas_w,
-                canvas_h,
+                opts.frame_style,
+                layout,
             )
         })
         .expect("failed to spawn gif stream worker");
@@ -133,7 +148,7 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<(
         RenderOptions {
             font_path: opts.font_path.clone(),
             font_size: opts.font_size,
-            padding_px: opts.padding_px,
+            frame_style: rec.frame_style,
         },
         out.to_path_buf(),
     )?;
@@ -148,6 +163,38 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<(
     }
 
     stream.join()
+}
+
+pub fn render_png_frame(frame: &RawFrame, opts: &RenderOptions, out: &Path) -> Result<()> {
+    let loaded = load_font_family(opts.font_path.as_deref())?;
+    let family = loaded.family;
+    let scale = PxScale::from(opts.font_size);
+    let scaled = family.regular.as_scaled(scale);
+    let cell_w = scaled
+        .h_advance(family.regular.glyph_id('M'))
+        .ceil()
+        .max(1.0) as u32;
+    let cell_h = (scaled.height() + scaled.line_gap()).ceil().max(1.0) as u32;
+    let baseline = scaled.ascent().ceil() as u32;
+    let mut warned_missing_faces = HashSet::new();
+    let buf = rasterize_raw_frame(
+        frame,
+        &family,
+        scale,
+        cell_w,
+        cell_h,
+        baseline,
+        opts.frame_style,
+        &mut warned_missing_faces,
+    );
+    let layout = layout_metrics(frame.cols, frame.rows, cell_w, cell_h, opts.frame_style);
+    lodepng::encode24_file(
+        out,
+        &buf,
+        layout.canvas_w as usize,
+        layout.canvas_h as usize,
+    )
+    .with_context(|| format!("encoding {}", out.display()))
 }
 
 /// Convert RGB (3-byte) to RGBA (4-byte) with full alpha.
@@ -173,13 +220,12 @@ fn run_gif_stream_worker(
     cell_w: u32,
     cell_h: u32,
     baseline: u32,
-    padding: u32,
-    canvas_w: u32,
-    canvas_h: u32,
+    frame_style: FrameStyle,
+    layout: LayoutMetrics,
 ) -> Result<()> {
     let (collector, writer) = gifski::new(Settings {
-        width: Some(canvas_w),
-        height: Some(canvas_h),
+        width: Some(layout.canvas_w),
+        height: Some(layout.canvas_h),
         quality: 100,
         fast: false,
         repeat: gifski::Repeat::Infinite,
@@ -217,7 +263,7 @@ fn run_gif_stream_worker(
             cell_w,
             cell_h,
             baseline,
-            padding,
+            frame_style,
             &mut warned_missing_faces,
         );
 
@@ -228,7 +274,8 @@ fn run_gif_stream_worker(
             // frame at t=0. Emit the very first captured frame unconditionally
             // so leading sleeps are represented correctly.
             let rgba = rgb_to_rgba(&buf);
-            let frame_img = imgref::ImgVec::new(rgba, canvas_w as usize, canvas_h as usize);
+            let frame_img =
+                imgref::ImgVec::new(rgba, layout.canvas_w as usize, layout.canvas_h as usize);
             collector
                 .add_frame_rgba(frame_index, frame_img, 0.0)
                 .context("add first frame to gifski")?;
@@ -243,7 +290,8 @@ fn run_gif_stream_worker(
         }
 
         let rgba = rgb_to_rgba(&buf);
-        let frame_img = imgref::ImgVec::new(rgba, canvas_w as usize, canvas_h as usize);
+        let frame_img =
+            imgref::ImgVec::new(rgba, layout.canvas_w as usize, layout.canvas_h as usize);
         collector
             .add_frame_rgba(frame_index, frame_img, frame.t_ms as f64 / 1000.0)
             .context("add frame to gifski")?;
@@ -260,7 +308,8 @@ fn run_gif_stream_worker(
         && let Some(buf) = prev_buf.as_ref()
     {
         let rgba = rgb_to_rgba(buf);
-        let frame_img = imgref::ImgVec::new(rgba, canvas_w as usize, canvas_h as usize);
+        let frame_img =
+            imgref::ImgVec::new(rgba, layout.canvas_w as usize, layout.canvas_h as usize);
         collector
             .add_frame_rgba(frame_index, frame_img, last_seen_t_ms as f64 / 1000.0)
             .context("add trailing delay frame to gifski")?;
@@ -281,29 +330,40 @@ fn rasterize_raw_frame(
     cell_w: u32,
     cell_h: u32,
     baseline: u32,
-    padding: u32,
+    frame_style: FrameStyle,
     warned_missing_faces: &mut HashSet<&'static str>,
 ) -> Vec<u8> {
-    let canvas_w = frame.cols as u32 * cell_w + padding * 2;
-    let canvas_h = frame.rows as u32 * cell_h + padding * 2;
-    let mut buf = vec![0u8; (canvas_w * canvas_h * 3) as usize];
+    let layout = layout_metrics(frame.cols, frame.rows, cell_w, cell_h, frame_style);
+    let mut buf = vec![0u8; (layout.canvas_w * layout.canvas_h * 3) as usize];
 
     fill_rect(
         &mut buf,
-        canvas_w,
+        layout.canvas_w,
         0,
         0,
-        canvas_w,
-        canvas_h,
+        layout.canvas_w,
+        layout.canvas_h,
+        frame_style.margin_fill,
+    );
+    fill_rect(
+        &mut buf,
+        layout.canvas_w,
+        layout.frame_x,
+        layout.frame_y,
+        layout.frame_w,
+        layout.frame_h,
         frame.default_bg,
     );
+    if frame_style.window_bar.enabled() {
+        draw_window_bar(&mut buf, layout.canvas_w, layout, frame_style.window_bar);
+    }
 
     for row in 0..frame.rows {
         for col in 0..frame.cols {
             let idx = row as usize * frame.cols as usize + col as usize;
             let cell = &frame.cells[idx];
-            let x = padding + col as u32 * cell_w;
-            let y = padding + row as u32 * cell_h;
+            let x = layout.content_x + col as u32 * cell_w;
+            let y = layout.content_y + row as u32 * cell_h;
 
             let (mut fg, mut bg) = (cell.fg, cell.bg);
             if cell.flags & style_flags::INVERSE != 0 {
@@ -311,7 +371,7 @@ fn rasterize_raw_frame(
             }
 
             if bg != frame.default_bg || cell.flags & style_flags::INVERSE != 0 {
-                fill_rect(&mut buf, canvas_w, x, y, cell_w, cell_h, bg);
+                fill_rect(&mut buf, layout.canvas_w, x, y, cell_w, cell_h, bg);
             }
 
             if cell.text.is_empty() {
@@ -334,10 +394,10 @@ fn rasterize_raw_frame(
                             return;
                         }
                         let (px, py) = (px as u32, py as u32);
-                        if px >= canvas_w || py >= canvas_h {
+                        if px >= layout.canvas_w || py >= layout.canvas_h {
                             return;
                         }
-                        blend_pixel(&mut buf, canvas_w, px, py, fg, coverage);
+                        blend_pixel(&mut buf, layout.canvas_w, px, py, fg, coverage);
                     });
                 }
                 let scaled = font.as_scaled(scale);
@@ -346,18 +406,174 @@ fn rasterize_raw_frame(
 
             if cell.flags & style_flags::UNDERLINE != 0 {
                 let uy = y + cell_h.saturating_sub(2);
-                fill_rect(&mut buf, canvas_w, x, uy, cell_w, 1, fg);
+                fill_rect(&mut buf, layout.canvas_w, x, uy, cell_w, 1, fg);
             }
         }
     }
 
     if let Some((cx, cy)) = frame.cursor {
-        let x = padding + cx as u32 * cell_w;
-        let y = padding + cy as u32 * cell_h;
-        invert_rect(&mut buf, canvas_w, x, y, cell_w, cell_h);
+        let x = layout.content_x + cx as u32 * cell_w;
+        let y = layout.content_y + cy as u32 * cell_h;
+        invert_rect(&mut buf, layout.canvas_w, x, y, cell_w, cell_h);
+    }
+
+    if frame_style.border_radius_px > 0 {
+        mask_outside_rounded_rect(
+            &mut buf,
+            layout.canvas_w,
+            layout,
+            frame_style.border_radius_px,
+            frame_style.margin_fill,
+        );
     }
 
     buf
+}
+
+fn layout_metrics(
+    cols: u16,
+    rows: u16,
+    cell_w: u32,
+    cell_h: u32,
+    frame_style: FrameStyle,
+) -> LayoutMetrics {
+    let bar_h = if frame_style.window_bar.enabled() {
+        frame_style.window_bar_size_px
+    } else {
+        0
+    };
+    let frame_w = cols as u32 * cell_w + frame_style.padding_px * 2;
+    let frame_h = rows as u32 * cell_h + frame_style.padding_px * 2 + bar_h;
+    LayoutMetrics {
+        canvas_w: frame_w + frame_style.margin_px * 2,
+        canvas_h: frame_h + frame_style.margin_px * 2,
+        frame_x: frame_style.margin_px,
+        frame_y: frame_style.margin_px,
+        frame_w,
+        frame_h,
+        bar_h,
+        content_x: frame_style.margin_px + frame_style.padding_px,
+        content_y: frame_style.margin_px + bar_h + frame_style.padding_px,
+    }
+}
+
+fn draw_window_bar(buf: &mut [u8], w: u32, layout: LayoutMetrics, style: crate::WindowBarStyle) {
+    let bar_h = layout.bar_h;
+    let (radius, gap) = window_bar_dot_metrics(bar_h);
+    let dots_w = radius * 2 * 3 + gap * 2;
+    let start_x = if style.align_right() {
+        layout.frame_x + layout.frame_w.saturating_sub(dots_w + gap)
+    } else {
+        layout.frame_x + gap
+    };
+    let cy = layout.frame_y + bar_h / 2;
+    for (idx, color) in [[255, 95, 86], [255, 189, 46], [39, 201, 63]]
+        .iter()
+        .enumerate()
+    {
+        let cx = start_x + idx as u32 * (radius * 2 + gap) + radius;
+        if style.outlined() {
+            draw_circle_outline(buf, w, cx, cy, radius, *color, 2);
+        } else {
+            fill_circle(buf, w, cx, cy, radius, *color);
+        }
+    }
+}
+
+fn fill_circle(buf: &mut [u8], w: u32, cx: u32, cy: u32, radius: u32, color: [u8; 3]) {
+    let r2 = (radius * radius) as i64;
+    for y in cy.saturating_sub(radius)..=cy + radius {
+        for x in cx.saturating_sub(radius)..=cx + radius {
+            let dx = x as i64 - cx as i64;
+            let dy = y as i64 - cy as i64;
+            if dx * dx + dy * dy <= r2 {
+                let i = ((y * w + x) * 3) as usize;
+                if i + 2 < buf.len() {
+                    buf[i] = color[0];
+                    buf[i + 1] = color[1];
+                    buf[i + 2] = color[2];
+                }
+            }
+        }
+    }
+}
+
+fn draw_circle_outline(
+    buf: &mut [u8],
+    w: u32,
+    cx: u32,
+    cy: u32,
+    radius: u32,
+    color: [u8; 3],
+    thickness: u32,
+) {
+    let outer = (radius * radius) as i64;
+    let inner_radius = radius.saturating_sub(thickness);
+    let inner = (inner_radius * inner_radius) as i64;
+    for y in cy.saturating_sub(radius)..=cy + radius {
+        for x in cx.saturating_sub(radius)..=cx + radius {
+            let dx = x as i64 - cx as i64;
+            let dy = y as i64 - cy as i64;
+            let d2 = dx * dx + dy * dy;
+            if d2 <= outer && d2 >= inner {
+                let i = ((y * w + x) * 3) as usize;
+                if i + 2 < buf.len() {
+                    buf[i] = color[0];
+                    buf[i + 1] = color[1];
+                    buf[i + 2] = color[2];
+                }
+            }
+        }
+    }
+}
+
+fn mask_outside_rounded_rect(
+    buf: &mut [u8],
+    w: u32,
+    layout: LayoutMetrics,
+    radius: u32,
+    fill: [u8; 3],
+) {
+    let radius = radius.min(layout.frame_w / 2).min(layout.frame_h / 2) as i64;
+    for y in layout.frame_y..layout.frame_y + layout.frame_h {
+        for x in layout.frame_x..layout.frame_x + layout.frame_w {
+            if !inside_rounded_rect(x, y, layout, radius) {
+                let i = ((y * w + x) * 3) as usize;
+                if i + 2 < buf.len() {
+                    buf[i] = fill[0];
+                    buf[i + 1] = fill[1];
+                    buf[i + 2] = fill[2];
+                }
+            }
+        }
+    }
+}
+
+fn inside_rounded_rect(x: u32, y: u32, layout: LayoutMetrics, radius: i64) -> bool {
+    if radius == 0 {
+        return true;
+    }
+    let x = x as i64;
+    let y = y as i64;
+    let left = layout.frame_x as i64;
+    let top = layout.frame_y as i64;
+    let right = (layout.frame_x + layout.frame_w - 1) as i64;
+    let bottom = (layout.frame_y + layout.frame_h - 1) as i64;
+    if (x >= left + radius && x <= right - radius) || (y >= top + radius && y <= bottom - radius) {
+        return true;
+    }
+    let (cx, cy) = if x < left + radius && y < top + radius {
+        (left + radius, top + radius)
+    } else if x > right - radius && y < top + radius {
+        (right - radius, top + radius)
+    } else if x < left + radius && y > bottom - radius {
+        (left + radius, bottom - radius)
+    } else {
+        (right - radius, bottom - radius)
+    };
+    let dx = x - cx;
+    let dy = y - cy;
+    dx * dx + dy * dy <= radius * radius
 }
 
 fn fill_rect(buf: &mut [u8], w: u32, x: u32, y: u32, rw: u32, rh: u32, color: [u8; 3]) {

@@ -14,6 +14,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::{FrameStyle, Theme, WindowBarStyle};
+
 /// Top-level parsed script.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Script {
@@ -42,12 +44,17 @@ pub struct Settings {
     pub cols: Option<u16>, // explicit override
     pub rows: Option<u16>, // explicit override
     pub padding: u32,
+    pub margin: u32,
+    pub margin_fill: [u8; 3],
+    pub window_bar: WindowBarStyle,
+    pub window_bar_size: u32,
+    pub border_radius: u32,
     pub line_height: f32,
     pub letter_spacing: f32,
     pub framerate: u32,
     pub playback_speed: f32,
     pub typing_speed: Duration,
-    pub theme: Option<String>,
+    pub theme: Theme,
     pub cursor_blink: bool,
     pub wait_timeout: Duration,
     pub wait_pattern: String,
@@ -66,12 +73,17 @@ impl Default for Settings {
             cols: None,
             rows: None,
             padding: 60,
+            margin: 0,
+            margin_fill: FrameStyle::default().margin_fill,
+            window_bar: WindowBarStyle::None,
+            window_bar_size: FrameStyle::default().window_bar_size_px,
+            border_radius: 0,
             line_height: 1.0,
             letter_spacing: 1.0,
             framerate: 50,
             playback_speed: 1.0,
             typing_speed: Duration::from_millis(50),
-            theme: None,
+            theme: Theme::vhs_default(),
             cursor_blink: true,
             wait_timeout: Duration::from_secs(15),
             wait_pattern: ">$".to_string(),
@@ -105,6 +117,10 @@ pub enum Event {
     /// Capture a still snapshot to `path`. (Captured by the runner via the
     /// recording pipeline, then exported separately.)
     Screenshot(String),
+    /// Store text in the tape-local clipboard.
+    Copy(String),
+    /// Paste the current tape-local clipboard contents into the PTY.
+    Paste,
     /// Hide subsequent commands from the recording until [`Event::Show`].
     Hide,
     /// Resume recording after a [`Event::Hide`].

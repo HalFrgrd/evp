@@ -102,7 +102,7 @@ Sleep 500ms
     assert!(rec.rows >= 5, "rows too small: {}", rec.rows);
     assert!(rec.cell_width_px > 0);
     assert!(rec.cell_height_px > 0);
-    assert!(rec.padding_px > 0);
+    assert!(rec.frame_style.padding_px > 0);
 
     assert!(!rec.frames.is_empty(), "no frames captured");
     assert!(matches!(rec.frames[0], Frame::Key { .. }));
@@ -223,7 +223,7 @@ Sleep 200ms
     assert_eq!(parsed.framerate, rec.framerate);
     assert_eq!(parsed.cell_width_px, rec.cell_width_px);
     assert_eq!(parsed.cell_height_px, rec.cell_height_px);
-    assert_eq!(parsed.padding_px, rec.padding_px);
+    assert_eq!(parsed.frame_style, rec.frame_style);
     assert_eq!(parsed.frames.len(), rec.frames.len());
 
     // Reconstructed cells must match index-by-index for every frame.
@@ -289,11 +289,7 @@ Sleep 300ms
         .iter()
         .map(|f| f["t_ms"].as_u64().expect("frame has t_ms") as u32)
         .collect();
-    let max_gap = t_values
-        .windows(2)
-        .map(|w| w[1] - w[0])
-        .max()
-        .unwrap_or(0);
+    let max_gap = t_values.windows(2).map(|w| w[1] - w[0]).max().unwrap_or(0);
     assert!(
         max_gap < 1_000,
         "hidden section leaked into recording timeline; max frame gap was {max_gap}ms"

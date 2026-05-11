@@ -4,7 +4,7 @@ use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::Sender;
 
 use crate::{
-    RawFrame, Recording, RenderOptions, SvgOptions,
+    FrameStyle, RawFrame, Recording, RenderOptions, SvgOptions,
     render::{self, GifStreamConfig, GifStreamHandle},
     render_svg::{self, SvgStreamConfig, SvgStreamHandle},
 };
@@ -20,7 +20,7 @@ pub struct RendererConfig {
     pub framerate: u32,
     pub cell_width_px: u32,
     pub cell_height_px: u32,
-    pub padding_px: u32,
+    pub frame_style: FrameStyle,
 }
 
 enum RendererJoin {
@@ -79,7 +79,7 @@ pub fn spawn_renderer(
                     framerate: cfg.framerate,
                     cell_width_px: cfg.cell_width_px,
                     cell_height_px: cfg.cell_height_px,
-                    padding_px: cfg.padding_px,
+                    frame_style: cfg.frame_style,
                 },
                 opts,
                 output,
@@ -101,7 +101,7 @@ pub fn render_recording(rec: &Recording, backend: RendererBackend, output: PathB
             framerate: rec.framerate,
             cell_width_px: rec.cell_width_px,
             cell_height_px: rec.cell_height_px,
-            padding_px: rec.padding_px,
+            frame_style: rec.frame_style,
         },
         backend,
         output,

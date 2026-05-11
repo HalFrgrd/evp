@@ -93,8 +93,7 @@ fn run() -> Result<bool> {
     eprintln!("torture: starting (cpu_affinity={cpu_set})");
 
     let started = Instant::now();
-    let out =
-        evp::run_and_render_gif(&script, render_opts, out_gif.clone()).context("evp run")?;
+    let out = evp::run_and_render_gif(&script, render_opts, out_gif.clone()).context("evp run")?;
     let wall_ms = started.elapsed().as_millis();
 
     let stats = out.stats;
@@ -148,8 +147,14 @@ fn format_report(
     s.push_str(&format!("output_gif_bytes    = {gif_bytes}\n"));
     s.push_str(&format!("wall_ms             = {wall_ms}\n"));
     s.push_str(&format!("cpu_affinity        = {cpu_set}\n"));
-    s.push_str(&format!("expected_frames     = {}\n", stats.expected_frames));
-    s.push_str(&format!("captured_frames     = {}\n", stats.captured_frames));
+    s.push_str(&format!(
+        "expected_frames     = {}\n",
+        stats.expected_frames
+    ));
+    s.push_str(&format!(
+        "captured_frames     = {}\n",
+        stats.captured_frames
+    ));
     s.push_str(&format!("recording_frames    = {recording_frames}\n"));
     s.push_str(&format!(
         "encoder_received    = {}\n",
@@ -201,9 +206,7 @@ fn locate_tape() -> Result<PathBuf> {
             return Ok(c.clone());
         }
     }
-    anyhow::bail!(
-        "couldn't find examples/torture.tape; set EVP_TORTURE_TAPE to its path"
-    );
+    anyhow::bail!("couldn't find examples/torture.tape; set EVP_TORTURE_TAPE to its path");
 }
 
 fn locate_torture_program() -> Result<PathBuf> {
@@ -220,9 +223,7 @@ fn locate_torture_program() -> Result<PathBuf> {
             return Ok(c.clone());
         }
     }
-    anyhow::bail!(
-        "couldn't find scripts/torture_program.py; set EVP_TORTURE_PROGRAM to its path"
-    );
+    anyhow::bail!("couldn't find scripts/torture_program.py; set EVP_TORTURE_PROGRAM to its path");
 }
 
 /// The tape hard-codes `/tmp/torture_program.py` so the same file works

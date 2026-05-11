@@ -12,6 +12,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 
 use super::ast::{Event, KeySpec, ModSet, NamedKey, Script, Settings, WaitScope};
+use crate::style::{Theme, WindowBarStyle, parse_hex_color};
 
 /// Parse a complete script source.
 ///
@@ -215,6 +216,9 @@ fn parse_line(
                 .first()
                 .map(|t| unquote(t).to_string())
                 .ok_or_else(|| anyhow!("Screenshot needs a path"))?;
+            if !path.to_ascii_lowercase().ends_with(".png") {
+                bail!("Screenshot path must end with .png (got `{path}`)");
+            }
             script.events.push(Event::Screenshot(path));
         }
         "Wait" => script.events.push(parse_wait(rest, &script.settings)?),
@@ -244,10 +248,20 @@ fn parse_line(
             visited.remove(&canonical);
             res?;
         }
-        "Copy" | "Paste" => bail!(
-            "`Copy` / `Paste` are VHS clipboard commands that evp does not implement yet \
-             (see README \"VHS feature parity\")."
-        ),
+        "Copy" => {
+            if rest.is_empty() {
+                bail!("Copy requires at least one quoted string");
+            }
+            let mut text = String::new();
+            for (idx, token) in rest.iter().enumerate() {
+                if idx > 0 {
+                    text.push(' ');
+                }
+                text.push_str(unquote_required(token)?);
+            }
+            script.events.push(Event::Copy(text));
+        }
+        "Paste" => script.events.push(Event::Paste),
         // `Type[@duration] "text" ["text" ...]`
         h if h == "Type" || h.starts_with("Type@") => {
             let delay = parse_at_duration(h, "Type", script.settings.typing_speed)?;
@@ -279,91 +293,36 @@ fn apply_set(rest: &[String], s: &mut Settings) -> Result<()> {
         .ok_or_else(|| anyhow!("Set requires a key"))?
         .as_str();
     match key {
-        "Shell" => {
-            if rest.len() < 2 {
-                bail!("Set {key} requires a value");
-            }
-            let cmd = rest[1..]
-                .iter()
-                .map(|t| unquote(t))
-                .collect::<Vec<_>>()
-                .join(" ");
-            s.shell = Some(cmd);
-        }
-        "FontFamily" => {
-            let val = get_set_value(rest, key)?;
-            s.font_family = Some(val);
-        }
-        "FontSize" => {
-            let val = get_set_value(rest, key)?;
-            s.font_size = val.parse()?;
-        }
-        "Width" => {
-            let val = get_set_value(rest, key)?;
-            s.width = val.parse()?;
-        }
-        "Height" => {
-            let val = get_set_value(rest, key)?;
-            s.height = val.parse()?;
-        }
+        "Shell" => s.shell = Some(set_scalar(rest, key)?),
+        "FontFamily" => s.font_family = Some(set_scalar(rest, key)?),
+        "FontSize" => s.font_size = set_scalar(rest, key)?.parse()?,
+        "Width" => s.width = set_scalar(rest, key)?.parse()?,
+        "Height" => s.height = set_scalar(rest, key)?.parse()?,
         // vhs has no native cell-grid setting; we expose them for convenience.
-        "Cols" | "Columns" => {
-            let val = get_set_value(rest, key)?;
-            s.cols = Some(val.parse()?);
-        }
-        "Rows" => {
-            let val = get_set_value(rest, key)?;
-            s.rows = Some(val.parse()?);
-        }
-        "Padding" => {
-            let val = get_set_value(rest, key)?;
-            s.padding = val.parse()?;
-        }
-        "LineHeight" => {
-            let val = get_set_value(rest, key)?;
-            s.line_height = val.parse()?;
-        }
-        "Framerate" | "FrameRate" | "FPS" => {
-            let val = get_set_value(rest, key)?;
-            s.framerate = val.parse()?;
-        }
-        "PlaybackSpeed" => {
-            let val = get_set_value(rest, key)?;
-            s.playback_speed = val.parse()?;
-        }
-        "TypingSpeed" => {
-            let val = get_set_value(rest, key)?;
-            s.typing_speed = parse_duration(&val)?;
-        }
-        "WaitTimeout" => {
-            let val = get_set_value(rest, key)?;
-            s.wait_timeout = parse_duration(&val)?;
-        }
-        "WaitPattern" => {
-            let val = get_set_value(rest, key)?;
-            s.wait_pattern = val;
-        }
+        "Cols" | "Columns" => s.cols = Some(set_scalar(rest, key)?.parse()?),
+        "Rows" => s.rows = Some(set_scalar(rest, key)?.parse()?),
+        "Padding" => s.padding = set_scalar(rest, key)?.parse()?,
+        "Margin" => s.margin = set_scalar(rest, key)?.parse()?,
+        "MarginFill" => s.margin_fill = parse_hex_color(&set_scalar(rest, key)?)?,
+        "WindowBar" => s.window_bar = WindowBarStyle::parse(&set_scalar(rest, key)?)?,
+        "WindowBarSize" => s.window_bar_size = set_scalar(rest, key)?.parse()?,
+        "BorderRadius" => s.border_radius = set_scalar(rest, key)?.parse()?,
+        "LineHeight" => s.line_height = set_scalar(rest, key)?.parse()?,
+        "Framerate" | "FrameRate" | "FPS" => s.framerate = set_scalar(rest, key)?.parse()?,
+        "PlaybackSpeed" => s.playback_speed = set_scalar(rest, key)?.parse()?,
+        "TypingSpeed" => s.typing_speed = parse_duration(&set_scalar(rest, key)?)?,
+        "WaitTimeout" => s.wait_timeout = parse_duration(&set_scalar(rest, key)?)?,
+        "WaitPattern" => s.wait_pattern = set_scalar(rest, key)?,
         // VHS settings that evp does NOT yet implement. We bail loudly so a
         // tape author isn't misled into thinking these are taking effect.
         // See README ("VHS feature parity") for the up-to-date matrix.
-        "Theme" => bail!(unsupported_set_msg("Theme")),
+        "Theme" => s.theme = Theme::from_spec(&set_value(rest, key)?)?,
         "LetterSpacing" => bail!(unsupported_set_msg("LetterSpacing")),
-        "CursorBlink" => bail!(unsupported_set_msg("CursorBlink")),
+        "CursorBlink" => s.cursor_blink = set_scalar(rest, key)?.parse()?,
         "LoopOffset" => bail!(unsupported_set_msg("LoopOffset")),
-        "Margin" => bail!(unsupported_set_msg("Margin")),
-        "MarginFill" => bail!(unsupported_set_msg("MarginFill")),
-        "WindowBar" => bail!(unsupported_set_msg("WindowBar")),
-        "WindowBarSize" => bail!(unsupported_set_msg("WindowBarSize")),
-        "BorderRadius" => bail!(unsupported_set_msg("BorderRadius")),
         other => bail!("unknown Set key: {other}"),
     }
     Ok(())
-}
-
-fn get_set_value(rest: &[String], key: &str) -> Result<String> {
-    rest.get(1)
-        .map(|t| unquote(t).to_string())
-        .ok_or_else(|| anyhow!("Set {key} requires a value"))
 }
 
 /// Build a consistent error message for `Set` keys VHS understands but evp
@@ -375,6 +334,22 @@ fn unsupported_set_msg(key: &str) -> String {
          See the README's \"VHS feature parity\" section. \
          Remove the directive or run the tape with vhs instead."
     )
+}
+
+fn set_scalar(rest: &[String], key: &str) -> Result<String> {
+    rest.get(1)
+        .map(|t| unquote(t).to_string())
+        .ok_or_else(|| anyhow!("Set {key} requires a value"))
+}
+
+fn set_value(rest: &[String], key: &str) -> Result<String> {
+    if rest.len() < 2 {
+        bail!("Set {key} requires a value");
+    }
+    if rest.len() == 2 {
+        return Ok(unquote(&rest[1]).to_string());
+    }
+    Ok(rest[1..].join(" "))
 }
 
 // ---------------------------------------------------------------------------
@@ -615,21 +590,9 @@ mod tests {
         );
     }
 
-    /// VHS settings that evp does not implement should fail loudly so a
-    /// tape author isn't misled into thinking they're taking effect.
     #[test]
     fn unsupported_set_keys_bail() {
-        for key in [
-            "Theme",
-            "LetterSpacing",
-            "CursorBlink",
-            "LoopOffset",
-            "Margin",
-            "MarginFill",
-            "WindowBar",
-            "WindowBarSize",
-            "BorderRadius",
-        ] {
+        for key in ["LetterSpacing", "LoopOffset"] {
             let src = format!("Output out.gif\nSet {key} something\n");
             let err = parse(&src).unwrap_err();
             let msg = format!("{err:#}");
@@ -641,15 +604,10 @@ mod tests {
     }
 
     #[test]
-    fn copy_paste_bail() {
-        for cmd in ["Copy \"hello\"", "Paste"] {
-            let err = parse(&format!("Output out.gif\n{cmd}\n")).unwrap_err();
-            let msg = format!("{err:#}");
-            assert!(
-                msg.contains("Copy") || msg.contains("Paste"),
-                "expected clipboard parity error, got: {msg}"
-            );
-        }
+    fn copy_paste_parse() {
+        let script = parse("Output out.gif\nCopy \"hello\"\nPaste\n").unwrap();
+        assert!(matches!(&script.events[0], Event::Copy(text) if text == "hello"));
+        assert!(matches!(&script.events[1], Event::Paste));
     }
 
     #[test]
@@ -667,43 +625,30 @@ mod tests {
         for ext in ["mp4", "webm", "txt", "ascii", "png"] {
             let err = parse(&format!("Output out.{ext}\n")).unwrap_err();
             let msg = format!("{err:#}");
-            assert!(
-                msg.contains(ext),
-                "expected `.{ext}` to bail, got: {msg}"
-            );
+            assert!(msg.contains(ext), "expected `.{ext}` to bail, got: {msg}");
         }
     }
 
     #[test]
-    fn screenshot_parses_but_runtime_will_fail() {
-        // Parser still accepts `Screenshot` so error messages can come from
-        // the runner with full context. Make sure we kept the AST node.
+    fn screenshot_parses() {
         let s = parse("Output out.gif\nScreenshot shot.png\n").unwrap();
         assert!(matches!(&s.events[0], Event::Screenshot(p) if p == "shot.png"));
     }
 
     #[test]
-    fn set_shell_accepts_full_command_with_args() {
+    fn theme_json_parses() {
         let s = parse(
-            r#"
-            Output out.gif
-            Set Shell bash --norc
-        "#,
+            "Output out.gif\nSet Theme { \"name\": \"Whimsy\", \"background\": \"#29283b\", \"foreground\": \"#b3b0d6\" }\n",
         )
         .unwrap();
-        assert_eq!(s.settings.shell.as_deref(), Some("bash --norc"));
+        assert_eq!(s.settings.theme.name.as_deref(), Some("Whimsy"));
+        assert_eq!(s.settings.theme.background, "#29283b");
+    }
 
-        let s = parse(
-            r#"
-            Output out.gif
-            Set Shell /bin/bash --rcfile somefile.rc
-        "#,
-        )
-        .unwrap();
-        assert_eq!(
-            s.settings.shell.as_deref(),
-            Some("/bin/bash --rcfile somefile.rc")
-        );
+    #[test]
+    fn theme_preset_parses() {
+        let s = parse("Output out.gif\nSet Theme \"Whimsy\"\n").unwrap();
+        assert_eq!(s.settings.theme.name.as_deref(), Some("Whimsy"));
     }
 
     /// Tiny self-cleaning tempdir helper so we don't pull in `tempfile`.

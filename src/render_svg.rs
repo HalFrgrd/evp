@@ -42,7 +42,11 @@ use std::{
 use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
 
-use crate::recording::{RawFrame, Recording, style_flags};
+use crate::{
+    FrameStyle,
+    recording::{RawFrame, Recording, style_flags},
+    style::{rgb_hex, window_bar_dot_metrics},
+};
 
 const SVG_STREAM_CHANNEL_CAPACITY: usize = 4096;
 
@@ -65,7 +69,20 @@ pub struct SvgStreamConfig {
     pub framerate: u32,
     pub cell_width_px: u32,
     pub cell_height_px: u32,
-    pub padding_px: u32,
+    pub frame_style: FrameStyle,
+}
+
+#[derive(Clone, Copy)]
+struct LayoutMetrics {
+    canvas_w: u32,
+    canvas_h: u32,
+    frame_x: u32,
+    frame_y: u32,
+    frame_w: u32,
+    frame_h: u32,
+    bar_h: u32,
+    content_x: u32,
+    content_y: u32,
 }
 
 pub struct SvgStreamHandle {
@@ -111,7 +128,7 @@ pub fn render_svg(rec: &Recording, opts: &SvgOptions, out: &Path) -> Result<()> 
             framerate: rec.framerate,
             cell_width_px: rec.cell_width_px,
             cell_height_px: rec.cell_height_px,
-            padding_px: rec.padding_px,
+            frame_style: rec.frame_style,
         },
         opts.clone(),
         out.to_path_buf(),
@@ -134,9 +151,9 @@ pub fn render_svg(rec: &Recording, opts: &SvgOptions, out: &Path) -> Result<()> 
 pub fn render_svg_to_string(rec: &Recording, opts: &SvgOptions) -> Result<String> {
     let cell_w = rec.cell_width_px.max(1);
     let cell_h = rec.cell_height_px.max(1);
-    let pad = rec.padding_px;
-    let canvas_w = rec.cols as u32 * cell_w + pad * 2;
-    let canvas_h = rec.rows as u32 * cell_h + pad * 2;
+    let layout = layout_metrics(rec.cols, rec.rows, cell_w, cell_h, rec.frame_style);
+    let canvas_w = layout.canvas_w;
+    let canvas_h = layout.canvas_h;
 
     // Total animation duration, in seconds, derived from the last frame's
     // timestamp plus a single frame interval so the final frame is held
@@ -149,11 +166,6 @@ pub fn render_svg_to_string(rec: &Recording, opts: &SvgOptions) -> Result<String
     };
     let total_ms = (last_t_ms + frame_ms).max(1);
     let total_s = total_ms as f32 / 1000.0;
-
-    let default_bg_hex = match rec.frames.first() {
-        Some(crate::recording::Frame::Key { default_bg, .. }) => *default_bg,
-        _ => [0, 0, 0],
-    };
 
     // Reconstruct every frame up-front so we can emit them in document
     // order and skip duplicates trivially. For the recording sizes we
@@ -206,8 +218,18 @@ pub fn render_svg_to_string(rec: &Recording, opts: &SvgOptions) -> Result<String
 "#,
         w = canvas_w,
         h = canvas_h,
-        bg = rgb_hex(default_bg_hex),
+        bg = rgb_hex(rec.frame_style.margin_fill),
     ));
+    if rec.frame_style.border_radius_px > 0 {
+        s.push_str(&format!(
+            r#"<defs><clipPath id="frame-clip"><rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}" ry="{r}"/></clipPath></defs>"#,
+            x = layout.frame_x,
+            y = layout.frame_y,
+            w = layout.frame_w,
+            h = layout.frame_h,
+            r = rec.frame_style.border_radius_px.min(layout.frame_w / 2).min(layout.frame_h / 2),
+        ));
+    }
 
     // Master timer. We animate a no-op attribute on a zero-size rect so
     // we can reference its `begin` from each frame's <set>.
@@ -227,7 +249,15 @@ pub fn render_svg_to_string(rec: &Recording, opts: &SvgOptions) -> Result<String
             b = begin_s,
             e = end_s,
         ));
-        emit_frame_body(&mut s, frame, cell_w, cell_h, pad, opts.font_size);
+        emit_frame_body(
+            &mut s,
+            frame,
+            cell_w,
+            cell_h,
+            layout,
+            rec.frame_style,
+            opts.font_size,
+        );
         s.push_str("</g>\n");
     }
 
@@ -286,9 +316,15 @@ fn run_svg_stream_worker(
         last.end_ms = total_ms;
     }
 
-    let default_bg_hex = frames.first().map(|f| f.default_bg).unwrap_or([0, 0, 0]);
-    let canvas_w = cfg.cols as u32 * cfg.cell_width_px.max(1) + cfg.padding_px * 2;
-    let canvas_h = cfg.rows as u32 * cfg.cell_height_px.max(1) + cfg.padding_px * 2;
+    let layout = layout_metrics(
+        cfg.cols,
+        cfg.rows,
+        cfg.cell_width_px.max(1),
+        cfg.cell_height_px.max(1),
+        cfg.frame_style,
+    );
+    let canvas_w = layout.canvas_w;
+    let canvas_h = layout.canvas_h;
     let total_s = total_ms as f32 / 1000.0;
 
     let mut s = String::with_capacity(64 * 1024);
@@ -306,8 +342,18 @@ fn run_svg_stream_worker(
 "#,
         w = canvas_w,
         h = canvas_h,
-        bg = rgb_hex(default_bg_hex),
+        bg = rgb_hex(cfg.frame_style.margin_fill),
     ));
+    if cfg.frame_style.border_radius_px > 0 {
+        s.push_str(&format!(
+            r#"<defs><clipPath id="frame-clip"><rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}" ry="{r}"/></clipPath></defs>"#,
+            x = layout.frame_x,
+            y = layout.frame_y,
+            w = layout.frame_w,
+            h = layout.frame_h,
+            r = cfg.frame_style.border_radius_px.min(layout.frame_w / 2).min(layout.frame_h / 2),
+        ));
+    }
     s.push_str(&format!(
         r#"<rect width="0" height="0"><animate id="t" attributeName="x" from="0" to="0" dur="{dur}s" repeatCount="indefinite"/></rect>
 "#,
@@ -328,7 +374,8 @@ fn run_svg_stream_worker(
             frame,
             cfg.cell_width_px.max(1),
             cfg.cell_height_px.max(1),
-            cfg.padding_px,
+            layout,
+            cfg.frame_style,
             opts.font_size,
         );
         s.push_str("</g>\n");
@@ -351,9 +398,27 @@ fn emit_frame_body(
     frame: &RawFrame,
     cell_w: u32,
     cell_h: u32,
-    pad: u32,
+    layout: LayoutMetrics,
+    frame_style: FrameStyle,
     font_size: f32,
 ) {
+    let clip_attr = if frame_style.border_radius_px > 0 {
+        r#" clip-path="url(#frame-clip)""#
+    } else {
+        ""
+    };
+    s.push_str(&format!(
+        r#"<g{clip}><rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{bg}"/>"#,
+        clip = clip_attr,
+        x = layout.frame_x,
+        y = layout.frame_y,
+        w = layout.frame_w,
+        h = layout.frame_h,
+        bg = rgb_hex(frame.default_bg),
+    ));
+    if frame_style.window_bar.enabled() {
+        emit_window_bar(s, layout, frame_style.window_bar);
+    }
     // Background rectangles: collapse runs of identical bg in the same row.
     for row in 0..frame.rows {
         let mut col = 0u16;
@@ -373,8 +438,8 @@ fn emit_frame_body(
                 }
                 run_end += 1;
             }
-            let x = pad + col as u32 * cell_w;
-            let y = pad + row as u32 * cell_h;
+            let x = layout.content_x + col as u32 * cell_w;
+            let y = layout.content_y + row as u32 * cell_h;
             let rw = (run_end - col) as u32 * cell_w;
             s.push_str(&format!(
                 r#"<rect x="{x}" y="{y}" width="{rw}" height="{ch}" fill="{f}"/>"#,
@@ -410,8 +475,8 @@ fn emit_frame_body(
                 run.push_str(&next.text);
                 run_end += 1;
             }
-            let x = pad + col as u32 * cell_w;
-            let y = pad + row as u32 * cell_h + baseline;
+            let x = layout.content_x + col as u32 * cell_w;
+            let y = layout.content_y + row as u32 * cell_h + baseline;
             let weight = if style & style_flags::BOLD != 0 {
                 " font-weight=\"bold\""
             } else {
@@ -446,8 +511,8 @@ fn emit_frame_body(
 
     // Cursor: draw an inverted block over the cell.
     if let Some((cx, cy)) = frame.cursor {
-        let x = pad + cx as u32 * cell_w;
-        let y = pad + cy as u32 * cell_h;
+        let x = layout.content_x + cx as u32 * cell_w;
+        let y = layout.content_y + cy as u32 * cell_h;
         s.push_str(&format!(
             r#"<rect x="{x}" y="{y}" width="{cw}" height="{ch}" fill="{c}" fill-opacity="0.7"/>"#,
             cw = cell_w,
@@ -455,6 +520,7 @@ fn emit_frame_body(
             c = rgb_hex(frame.default_fg),
         ));
     }
+    s.push_str("</g>");
 }
 
 // ---------------------------------------------------------------------------
@@ -473,8 +539,61 @@ fn frames_visually_identical(a: &RawFrame, b: &RawFrame) -> bool {
     a.cells == b.cells && a.cursor == b.cursor && a.default_bg == b.default_bg
 }
 
-fn rgb_hex(c: [u8; 3]) -> String {
-    format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])
+fn layout_metrics(
+    cols: u16,
+    rows: u16,
+    cell_w: u32,
+    cell_h: u32,
+    frame_style: FrameStyle,
+) -> LayoutMetrics {
+    let bar_h = if frame_style.window_bar.enabled() {
+        frame_style.window_bar_size_px
+    } else {
+        0
+    };
+    let frame_w = cols as u32 * cell_w + frame_style.padding_px * 2;
+    let frame_h = rows as u32 * cell_h + frame_style.padding_px * 2 + bar_h;
+    LayoutMetrics {
+        canvas_w: frame_w + frame_style.margin_px * 2,
+        canvas_h: frame_h + frame_style.margin_px * 2,
+        frame_x: frame_style.margin_px,
+        frame_y: frame_style.margin_px,
+        frame_w,
+        frame_h,
+        bar_h,
+        content_x: frame_style.margin_px + frame_style.padding_px,
+        content_y: frame_style.margin_px + bar_h + frame_style.padding_px,
+    }
+}
+
+fn emit_window_bar(s: &mut String, layout: LayoutMetrics, style: crate::WindowBarStyle) {
+    let (radius, gap) = window_bar_dot_metrics(layout.bar_h);
+    let dots_w = radius * 2 * 3 + gap * 2;
+    let start_x = if style.align_right() {
+        layout.frame_x + layout.frame_w.saturating_sub(dots_w + gap)
+    } else {
+        layout.frame_x + gap
+    };
+    let cy = layout.frame_y + layout.bar_h / 2;
+    for (idx, color) in [[255, 95, 86], [255, 189, 46], [39, 201, 63]]
+        .iter()
+        .enumerate()
+    {
+        let cx = start_x + idx as u32 * (radius * 2 + gap) + radius;
+        if style.outlined() {
+            s.push_str(&format!(
+                r#"<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{stroke}" stroke-width="2"/>"#,
+                r = radius,
+                stroke = rgb_hex(*color),
+            ));
+        } else {
+            s.push_str(&format!(
+                r#"<circle cx="{cx}" cy="{cy}" r="{r}" fill="{fill}"/>"#,
+                r = radius,
+                fill = rgb_hex(*color),
+            ));
+        }
+    }
 }
 
 /// Escape a string for use as an XML attribute value.
@@ -497,7 +616,10 @@ fn escape_text(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recording::{CellSnap, Frame};
+    use crate::{
+        FrameStyle,
+        recording::{CellSnap, Frame},
+    };
 
     fn synth_recording() -> Recording {
         let blank = CellSnap::blank([255, 255, 255], [0, 0, 0]);
@@ -520,7 +642,10 @@ mod tests {
             framerate: 10,
             cell_width_px: 8,
             cell_height_px: 16,
-            padding_px: 4,
+            frame_style: FrameStyle {
+                padding_px: 4,
+                ..FrameStyle::default()
+            },
             frames: vec![Frame::Key {
                 t_ms: 0,
                 cursor: Some((2, 0)),

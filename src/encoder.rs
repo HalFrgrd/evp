@@ -10,7 +10,10 @@ use std::thread::{self, JoinHandle};
 use anyhow::Result;
 use crossbeam_channel::{Receiver, Sender, bounded};
 
-use crate::recording::{CellChange, Frame, RawFrame, Recording};
+use crate::{
+    FrameStyle,
+    recording::{CellChange, Frame, RawFrame, Recording},
+};
 
 // Keep enough buffered frames that short encode spikes do not immediately
 // push back on the terminal-driving thread.
@@ -44,7 +47,7 @@ pub struct EncoderConfig {
     pub framerate: u32,
     pub cell_width_px: u32,
     pub cell_height_px: u32,
-    pub padding_px: u32,
+    pub frame_style: FrameStyle,
     /// Force a full keyframe every N diff frames so that random‑access
     /// reconstruction stays cheap.
     pub keyframe_interval: u32,
@@ -168,7 +171,7 @@ fn run(
         framerate: cfg.framerate,
         cell_width_px: cfg.cell_width_px,
         cell_height_px: cfg.cell_height_px,
-        padding_px: cfg.padding_px,
+        frame_style: cfg.frame_style,
         frames,
     };
     drop(frame_tap);
