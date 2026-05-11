@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Torture-test program for the evp/VHS rendering pipeline.
+"""Stress-test program for the evp/VHS rendering pipeline.
 
 For every byte received on stdin, the program redraws every cell of a
 COLS×ROWS terminal grid with:
@@ -17,9 +17,9 @@ any rate it likes.
 
 Configurable via env vars:
 
-    TORTURE_COLS    grid width  (default 100)
-    TORTURE_ROWS    grid height (default 30)
-    TORTURE_SEED    PRNG seed   (default 0xEEA — deterministic output)
+    STRESS_TEST_COLS    grid width  (default 100)
+    STRESS_TEST_ROWS    grid height (default 30)
+    STRESS_TEST_SEED    PRNG seed   (default 0xEEA — deterministic output)
 
 Writes a final newline + cursor-show on EOF / SIGINT so the host shell
 isn't left in a weird state.
@@ -32,9 +32,9 @@ import random
 import sys
 
 
-COLS = int(os.environ.get("TORTURE_COLS", "100"))
-ROWS = int(os.environ.get("TORTURE_ROWS", "30"))
-SEED = int(os.environ.get("TORTURE_SEED", "0xEEA"), 0)
+COLS = int(os.environ.get("STRESS_TEST_COLS", "100"))
+ROWS = int(os.environ.get("STRESS_TEST_ROWS", "30"))
+SEED = int(os.environ.get("STRESS_TEST_SEED", "0xEEA"), 0)
 
 # ASCII printable range minus space (so every cell visibly changes).
 ASCII_MIN = 0x21

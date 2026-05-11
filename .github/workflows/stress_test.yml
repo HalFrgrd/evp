@@ -1,17 +1,17 @@
-name: torture
+name: stress_test
 
-# Runs the torture-test benchmark for the evp PTY → encoder → renderer
+# Runs the stress-test benchmark for the evp PTY → encoder → renderer
 # pipeline and compares the resulting GIF (and timing) against an
 # equivalent VHS run. Both runs are pinned to a single physical CPU
 # core so the comparison is fair.
 #
-# The build environment is the bake `torture` target wired from split
+# The build environment is the bake `stress_test` target wired from split
 # Dockerfiles, with the same Rust + Zig toolchain as ci.yml / release.yml / docker.yml. The
 # runner never installs Rust, Zig, or any other build tooling; every
 # build and analysis step runs inside the image.
 #
 # Trigger: manual (workflow_dispatch) or any push that touches the
-# benchmark surface (the example, the tape, the torture program, the
+# benchmark surface (the example, the tape, the stress_test program, the
 # library bits it exercises, the Dockerfiles/bake wiring, or this workflow itself).
 
 on:
@@ -19,10 +19,10 @@ on:
   push:
     branches: [master]
     paths:
-      - "examples/torture_benchmark.rs"
-      - "examples/torture.tape"
-      - "scripts/torture_program.py"
-      - "scripts/torture_compare.sh"
+      - "examples/stress_test_benchmark.rs"
+      - "examples/stress_test.tape"
+      - "scripts/stress_test_program.py"
+      - "scripts/stress_test_compare.sh"
       - "scripts/gif_frame_analyzer.py"
       - "src/runner.rs"
       - "src/encoder.rs"
@@ -33,36 +33,36 @@ on:
       - "Cargo.lock"
       - "docker/*.Dockerfile"
       - "docker-bake.hcl"
-      - ".github/workflows/torture.yml"
+      - ".github/workflows/stress_test.yml"
   pull_request:
     branches: [master]
     paths:
-      - "examples/torture_benchmark.rs"
-      - "examples/torture.tape"
-      - "scripts/torture_program.py"
-      - "scripts/torture_compare.sh"
+      - "examples/stress_test_benchmark.rs"
+      - "examples/stress_test.tape"
+      - "scripts/stress_test_program.py"
+      - "scripts/stress_test_compare.sh"
       - "scripts/gif_frame_analyzer.py"
       - "docker/*.Dockerfile"
       - "docker-bake.hcl"
-      - ".github/workflows/torture.yml"
+      - ".github/workflows/stress_test.yml"
 
 permissions:
   contents: read
 
 concurrency:
-  group: torture-${{ github.ref }}
+  group: stress_test-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  torture:
+  stress_test:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       RUST_LOG: "info"
-      # Must match `Set Framerate` in examples/torture.tape — used by
-      # gif_frame_analyzer.py via torture_compare.sh.
-      TORTURE_FPS: "60"
-      TORTURE_IMAGE: "evp-torture:ci"
+      # Must match `Set Framerate` in examples/stress_test.tape — used by
+      # gif_frame_analyzer.py via stress_test_compare.sh.
+      STRESS_TEST_FPS: "60"
+      STRESS_TEST_IMAGE: "evp-stress_test:ci"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -70,17 +70,17 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build torture image (bake `torture` target)
-        # Builds Rust + Zig + the torture_benchmark example via bake's
+      - name: Build stress_test image (bake `stress_test` target)
+        # Builds Rust + Zig + the stress_test_benchmark example via bake's
         # split Dockerfiles and target contexts.
         uses: docker/bake-action@v5
         with:
           files: ./docker-bake.hcl
-          targets: torture
+          targets: stress_test
           load: true
           push: false
           set: |
-            torture.tags=${{ env.TORTURE_IMAGE }}
+            stress_test.tags=${{ env.STRESS_TEST_IMAGE }}
             *.cache-from=type=gha
             *.cache-to=type=gha,mode=max
 
@@ -96,9 +96,9 @@ jobs:
           # Pre-create the output dir as the runner user so the
           # container (running as root by default) writes files we can
           # read back without `sudo chown` gymnastics.
-          mkdir -p torture-out
+          mkdir -p stress_test-out
 
-      - name: Run evp torture benchmark (Docker, pinned to CPU 0)
+      - name: Run evp stress_test benchmark (Docker, pinned to CPU 0)
         # `--cpus=1 --cpuset-cpus=0` is the docker equivalent of
         # `taskset -c 0`: hard-cap the container to logical CPU 0.
         # The benchmark records the resulting affinity from
@@ -109,14 +109,14 @@ jobs:
           docker run --rm \
               --cpus=1 --cpuset-cpus=0 \
               --user "$(id -u):$(id -g)" \
-              -v "$PWD/torture-out:/out" \
+              -v "$PWD/stress_test-out:/out" \
               -e RUST_LOG \
-              "$TORTURE_IMAGE" \
-              /usr/local/bin/torture_benchmark \
+              "$STRESS_TEST_IMAGE" \
+              /usr/local/bin/stress_test_benchmark \
                   /out/evp.gif \
                   /out/evp.report.txt
 
-      - name: Run VHS torture benchmark (Docker, pinned to CPU 0)
+      - name: Run VHS stress_test benchmark (Docker, pinned to CPU 0)
         # `--cpus=1 --cpuset-cpus=0` matches the evp run above. We
         # measure wall clock with `date +%s%N` since VHS itself doesn't
         # surface a timing field.
@@ -127,35 +127,39 @@ jobs:
         continue-on-error: true
         run: |
           set -eux
-          mkdir -p torture-out
+          mkdir -p stress_test-out
           # VHS image. Pin to a known tag for reproducibility.
           VHS_IMAGE="ghcr.io/charmbracelet/vhs:v0.10.0"
           docker pull "$VHS_IMAGE" || VHS_IMAGE="ghcr.io/charmbracelet/vhs:latest"
           docker pull "$VHS_IMAGE"
 
-          # Stage the torture program where the tape expects it.
-          install -D -m 0755 scripts/torture_program.py torture-out/work/tmp/torture_program.py
-          install -D -m 0644 examples/torture.tape torture-out/work/torture.tape
+          # Stage the stress_test program where the tape expects it.
+          install -D -m 0755 scripts/stress_test_program.py stress_test-out/work/tmp/stress_test_program.py
+          install -D -m 0644 examples/stress_test.tape stress_test-out/work/stress_test.tape
 
           start_ns=$(date +%s%N)
           # Mount the staged dir as /vhs (workdir) and bind /tmp inside
-          # the container to the host's torture-out/work/tmp so the
-          # Python script is reachable at /tmp/torture_program.py.
+          # the container to the host's stress_test-out/work/tmp so the
+          # Python script is reachable at /tmp/stress_test_program.py.
           docker run --rm \
               --cpus=1 --cpuset-cpus=0 \
               --user "$(id -u):$(id -g)" \
-              -v "$PWD/torture-out/work:/vhs" \
-              -v "$PWD/torture-out/work/tmp:/tmp" \
+              -e HOME=/tmp \
+              -e XDG_CONFIG_HOME=/tmp/chrome-config \
+              -e XDG_CACHE_HOME=/tmp/chrome-cache \
+              -e XDG_RUNTIME_DIR=/tmp/chrome-runtime \
+              -v "$PWD/stress_test-out/work:/vhs" \
+              -v "$PWD/stress_test-out/work/tmp:/tmp" \
               -w /vhs \
               "$VHS_IMAGE" \
-              torture.tape \
+              stress_test.tape \
               || true
           end_ns=$(date +%s%N)
           wall_ms=$(( (end_ns - start_ns) / 1000000 ))
 
           # VHS writes its output gif to the cwd inside the container.
-          if [[ -f torture-out/work/torture.gif ]]; then
-              mv torture-out/work/torture.gif torture-out/vhs.gif
+          if [[ -f stress_test-out/work/stress_test.gif ]]; then
+              mv stress_test-out/work/stress_test.gif stress_test-out/vhs.gif
           fi
 
           # cpu_affinity inside the container — query a tiny helper
@@ -165,38 +169,38 @@ jobs:
               2>/dev/null || echo "(unknown)")
 
           {
-            echo "=== vhs torture benchmark ==="
+            echo "=== vhs stress_test benchmark ==="
             echo "renderer            = vhs"
             echo "image               = $VHS_IMAGE"
-            echo "output_gif          = torture-out/vhs.gif"
-            echo "output_gif_bytes    = $(stat -c %s torture-out/vhs.gif 2>/dev/null || echo 0)"
+            echo "output_gif          = stress_test-out/vhs.gif"
+            echo "output_gif_bytes    = $(stat -c %s stress_test-out/vhs.gif 2>/dev/null || echo 0)"
             echo "wall_ms             = $wall_ms"
             echo "cpu_affinity        = $vhs_cpu"
-          } > torture-out/vhs.report.txt
-          cat torture-out/vhs.report.txt
+          } > stress_test-out/vhs.report.txt
+          cat stress_test-out/vhs.report.txt
 
       - name: Build comparison report (Docker, same image)
-        # Run torture_compare.sh + gif_frame_analyzer.py inside the
-        # torture image so this step also has zero host-side tooling
+        # Run stress_test_compare.sh + gif_frame_analyzer.py inside the
+        # stress_test image so this step also has zero host-side tooling
         # requirements (no python3 install on the runner).
         run: |
           set -eux
           # Make sure the vhs side has *something* even if the docker
           # step bombed entirely.
-          if [[ ! -f torture-out/vhs.report.txt ]]; then
-              echo "renderer            = vhs" > torture-out/vhs.report.txt
-              echo "wall_ms             = (failed)" >> torture-out/vhs.report.txt
-              echo "cpu_affinity        = (n/a)" >> torture-out/vhs.report.txt
+          if [[ ! -f stress_test-out/vhs.report.txt ]]; then
+              echo "renderer            = vhs" > stress_test-out/vhs.report.txt
+              echo "wall_ms             = (failed)" >> stress_test-out/vhs.report.txt
+              echo "cpu_affinity        = (n/a)" >> stress_test-out/vhs.report.txt
           fi
           docker run --rm \
               --user "$(id -u):$(id -g)" \
-              -v "$PWD/torture-out:/out" \
-              -e TORTURE_FPS \
+              -v "$PWD/stress_test-out:/out" \
+              -e STRESS_TEST_FPS \
               -w /src \
-              "$TORTURE_IMAGE" \
+              "$STRESS_TEST_IMAGE" \
               bash -c '
                 set -eux
-                ./scripts/torture_compare.sh \
+                ./scripts/stress_test_compare.sh \
                     /out/evp.gif \
                     /out/evp.report.txt \
                     /out/vhs.gif \
@@ -206,43 +210,43 @@ jobs:
                 # consumers do not have to re-run the tool.
                 if [ -f /out/evp.gif ]; then
                     python3 scripts/gif_frame_analyzer.py /out/evp.gif \
-                        --fps "$TORTURE_FPS" --json > /out/evp.gif.analysis.json
+                        --fps "$STRESS_TEST_FPS" --json > /out/evp.gif.analysis.json
                 fi
                 if [ -f /out/vhs.gif ]; then
                     python3 scripts/gif_frame_analyzer.py /out/vhs.gif \
-                        --fps "$TORTURE_FPS" --json > /out/vhs.gif.analysis.json
+                        --fps "$STRESS_TEST_FPS" --json > /out/vhs.gif.analysis.json
                 fi
               '
           echo
           echo "=== comparison.md ==="
-          cat torture-out/comparison.md
+          cat stress_test-out/comparison.md
           # Mirror the comparison into the workflow summary so PR
           # reviewers can see it without downloading the artifact.
-          cat torture-out/comparison.md >> "$GITHUB_STEP_SUMMARY"
+          cat stress_test-out/comparison.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload torture artifact
+      - name: Upload stress_test artifact
         uses: actions/upload-artifact@v4
         with:
-          name: torture-comparison
+          name: stress_test-comparison
           path: |
-            torture-out/evp.gif
-            torture-out/vhs.gif
-            torture-out/evp.report.txt
-            torture-out/vhs.report.txt
-            torture-out/evp.gif.analysis.json
-            torture-out/vhs.gif.analysis.json
-            torture-out/comparison.md
+            stress_test-out/evp.gif
+            stress_test-out/vhs.gif
+            stress_test-out/evp.report.txt
+            stress_test-out/vhs.report.txt
+            stress_test-out/evp.gif.analysis.json
+            stress_test-out/vhs.gif.analysis.json
+            stress_test-out/comparison.md
           if-no-files-found: warn
 
       - name: Enforce pass/fail
-        # The torture_benchmark binary already exits non-zero when more
+        # The stress_test_benchmark binary already exits non-zero when more
         # than 5 % of expected frames were dropped, so this step is
         # primarily a belt-and-braces re-check using the persisted
         # report.
         run: |
           set -eu
-          test -s torture-out/evp.gif
-          test -s torture-out/vhs.gif
-          result=$(awk -F'=' '/^result/ { gsub(/[[:space:]]/,"",$2); print $2 }' torture-out/evp.report.txt)
+          test -s stress_test-out/evp.gif
+          test -s stress_test-out/vhs.gif
+          result=$(awk -F'=' '/^result/ { gsub(/[[:space:]]/,"",$2); print $2 }' stress_test-out/evp.report.txt)
           echo "evp result: $result"
           test "$result" = "PASS"
