@@ -158,14 +158,6 @@ fn parse_line(
                 .first()
                 .map(|t| unquote(t).to_string())
                 .ok_or_else(|| anyhow!("Output requires a path"))?;
-            if !script.outputs.is_empty() {
-                bail!(
-                    "evp only supports a single `Output` directive per tape (got `{}` after `{}`). \
-                     VHS allows multiple outputs; this is tracked under \"VHS feature parity\" in the README.",
-                    path,
-                    script.outputs[0]
-                );
-            }
             // Restrict output extensions up-front so users see the failure
             // as soon as the tape is parsed rather than at render time.
             let ext = std::path::Path::new(&path)
@@ -173,17 +165,17 @@ fn parse_line(
                 .and_then(|e| e.to_str())
                 .map(|s| s.to_ascii_lowercase());
             match ext.as_deref() {
-                Some("gif") | Some("svg") => {}
+                Some("gif") | Some("svg") | Some("json") => {}
                 Some(other) => bail!(
                     "Output `{path}` has unsupported extension `.{other}`. \
-                     evp currently writes `.gif` or `.svg` only. \
+                     evp currently writes `.gif`, `.svg`, or `.json` only. \
                      `.mp4`, `.webm`, `.png` (frame directory), `.txt`, and `.ascii` outputs \
                      are VHS features evp does not implement yet \
                      (see README \"VHS feature parity\")."
                 ),
                 None => bail!(
                     "Output `{path}` has no extension. evp picks the renderer from the extension; \
-                     use `.gif` or `.svg`."
+                     use `.gif`, `.svg`, or `.json`."
                 ),
             }
             script.outputs.push(path);
@@ -611,13 +603,9 @@ mod tests {
     }
 
     #[test]
-    fn multiple_outputs_bail() {
-        let err = parse("Output a.gif\nOutput b.gif\n").unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(
-            msg.contains("single `Output`"),
-            "expected single-output error, got: {msg}"
-        );
+    fn multiple_outputs_parse() {
+        let script = parse("Output a.gif\nOutput b.svg\nOutput c.json\n").unwrap();
+        assert_eq!(script.outputs, vec!["a.gif", "b.svg", "c.json"]);
     }
 
     #[test]

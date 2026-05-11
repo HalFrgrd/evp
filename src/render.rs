@@ -63,6 +63,7 @@ struct FontFamily {
     fallback_regular: Vec<FontArc>,
 }
 
+#[derive(Clone)]
 pub struct RenderOptions {
     pub font_path: Option<String>,
     pub font_size: f32,

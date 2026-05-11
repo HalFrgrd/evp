@@ -143,16 +143,27 @@ pub fn derive_options(s: &Settings) -> RunOptions {
 
 /// Run the script end‑to‑end. Returns the completed recording.
 pub fn run(script: &Script) -> Result<RunOutput> {
-    run_with_frame_tap(script, None)
+    run_with_frame_taps(script, Vec::new())
 }
 
 /// Run the script and optionally mirror dense raw frames into `frame_tap`.
 ///
-/// The tap is attached to the encoder worker, so the terminal-driving thread
-/// still performs only one send per frame.
+/// The tap is attached directly to the terminal-driving thread. Sends are
+/// non-blocking, so a slow renderer cannot stall the PTY loop.
 pub fn run_with_frame_tap(
     script: &Script,
     frame_tap: Option<Sender<RawFrame>>,
+) -> Result<RunOutput> {
+    run_with_frame_taps(script, frame_tap.into_iter().collect())
+}
+
+/// Run the script and mirror dense raw frames into zero or more renderer taps.
+///
+/// Each tap receives frames directly from the terminal-driving thread via
+/// `try_send`; full or disconnected renderer queues do not block capture.
+pub fn run_with_frame_taps(
+    script: &Script,
+    frame_taps: Vec<Sender<RawFrame>>,
 ) -> Result<RunOutput> {
     enforce_require(&script.require)?;
     let opts = derive_options(&script.settings);
@@ -208,7 +219,6 @@ pub fn run_with_frame_tap(
             frame_style: opts.frame_style,
             keyframe_interval: script.settings.framerate * 5,
         },
-        frame_tap,
     );
     let encoder_stats: Arc<EncoderStats> = Arc::clone(&encoder.stats);
 
@@ -233,6 +243,8 @@ pub fn run_with_frame_tap(
     let mut expected_frames: u64 = 0;
     let mut captured_frames: u64 = 0;
     let mut max_capture_queue_len: usize = 0;
+    let mut max_renderer_queue_len: usize = 0;
+    let mut renderer_dropped_frames: u64 = 0;
 
     // Decile progress tracking based on elapsed wall-clock time vs expected
     // timeline duration. We emit once when elapsed crosses each 10 % bucket.
@@ -352,6 +364,19 @@ pub fn run_with_frame_tap(
                 if qlen > max_capture_queue_len {
                     max_capture_queue_len = qlen;
                 }
+                for tap in &frame_taps {
+                    let tap_len = tap.len();
+                    if tap_len > max_renderer_queue_len {
+                        max_renderer_queue_len = tap_len;
+                    }
+                    match tap.try_send(frame.clone()) {
+                        Ok(()) => {}
+                        Err(TrySendError::Full(_)) => {
+                            renderer_dropped_frames += 1;
+                        }
+                        Err(TrySendError::Disconnected(_)) => {}
+                    }
+                }
                 // Never block the terminal-driving thread: if the queue is full,
                 // we drop this frame and continue. This preserves input/output
                 // responsiveness under sustained encode pressure.
@@ -398,6 +423,7 @@ pub fn run_with_frame_tap(
 
     // Drop the encoder sender so the worker exits and we can join it.
     drop(encoder.tx);
+    drop(frame_taps);
     let recording = encoder
         .join
         .join()
@@ -408,8 +434,8 @@ pub fn run_with_frame_tap(
         captured_frames,
         dropped_capture_frames,
         max_capture_queue_len,
-        max_renderer_queue_len: encoder_stats.max_tap_queue_len.load(Ordering::Relaxed),
-        tap_dropped_frames: encoder_stats.tap_dropped_frames.load(Ordering::Relaxed),
+        max_renderer_queue_len,
+        tap_dropped_frames: renderer_dropped_frames,
         encoder_frames_received: encoder_stats.frames_received.load(Ordering::Relaxed),
     };
     if dropped_capture_frames > 0 {

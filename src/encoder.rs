@@ -12,7 +12,7 @@ use crossbeam_channel::{Receiver, Sender, bounded};
 
 use crate::{
     FrameStyle,
-    recording::{CellChange, Frame, RawFrame, Recording},
+    recording::{RawFrame, Recording, RecordingBuilder, RecordingConfig},
 };
 
 // Keep enough buffered frames that short encode spikes do not immediately
@@ -73,27 +73,27 @@ impl EncoderHandle {
 }
 
 /// Spawn the encoder thread.
-pub fn spawn(cfg: EncoderConfig, frame_tap: Option<Sender<RawFrame>>) -> EncoderHandle {
+pub fn spawn(cfg: EncoderConfig) -> EncoderHandle {
     let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) = bounded(RAW_FRAME_CHANNEL_CAPACITY);
     let stats = Arc::new(EncoderStats::default());
     let stats_clone = Arc::clone(&stats);
     let join = thread::Builder::new()
         .name("evp-encoder".into())
-        .spawn(move || run(cfg, rx, frame_tap, stats_clone))
+        .spawn(move || run(cfg, rx, stats_clone))
         .expect("failed to spawn encoder thread");
     EncoderHandle { tx, join, stats }
 }
 
-fn run(
-    cfg: EncoderConfig,
-    rx: Receiver<RawFrame>,
-    frame_tap: Option<Sender<RawFrame>>,
-    stats: Arc<EncoderStats>,
-) -> Result<Recording> {
-    use crossbeam_channel::TrySendError;
-    let mut frames: Vec<Frame> = Vec::new();
-    let mut last_dense: Option<RawFrame> = None;
-    let mut frames_since_key: u32 = 0;
+fn run(cfg: EncoderConfig, rx: Receiver<RawFrame>, stats: Arc<EncoderStats>) -> Result<Recording> {
+    let mut builder = RecordingBuilder::new(RecordingConfig {
+        cols: cfg.cols,
+        rows: cfg.rows,
+        framerate: cfg.framerate,
+        cell_width_px: cfg.cell_width_px,
+        cell_height_px: cfg.cell_height_px,
+        frame_style: cfg.frame_style,
+        keyframe_interval: cfg.keyframe_interval,
+    });
 
     while let Ok(frame) = rx.recv() {
         // Sample queue depths as soon as we wake up so we observe the
@@ -102,80 +102,10 @@ fn run(
         bump_max(&stats.max_inbound_queue_len, inbound_len);
         stats.frames_received.fetch_add(1, Ordering::Relaxed);
 
-        if let Some(tap) = &frame_tap {
-            // Try to forward to the renderer. We use try_send so a slow
-            // renderer never stalls the encoder; the recording is always
-            // built completely even if some frames don't make it into the
-            // rendered output.
-            bump_max(&stats.max_tap_queue_len, tap.len());
-            match tap.try_send(frame.clone()) {
-                Ok(()) => {}
-                Err(TrySendError::Full(_)) => {
-                    stats.tap_dropped_frames.fetch_add(1, Ordering::Relaxed);
-                }
-                Err(TrySendError::Disconnected(_)) => {}
-            }
-        }
-
-        // Decide between keyframe and diff.
-        let is_key = match &last_dense {
-            None => true,
-            Some(prev) => {
-                prev.cols != frame.cols
-                    || prev.rows != frame.rows
-                    || frames_since_key >= cfg.keyframe_interval
-            }
-        };
-
-        if is_key {
-            frames.push(Frame::Key {
-                t_ms: frame.t_ms,
-                cursor: frame.cursor,
-                default_fg: frame.default_fg,
-                default_bg: frame.default_bg,
-                cells: frame.cells.clone(),
-            });
-            frames_since_key = 0;
-        } else {
-            let prev = last_dense.as_ref().unwrap();
-            let mut changes: Vec<CellChange> = Vec::new();
-            // The grid sizes match (verified above) so a parallel walk is
-            // safe.
-            for (idx, (a, b)) in prev.cells.iter().zip(frame.cells.iter()).enumerate() {
-                if a != b {
-                    changes.push(CellChange {
-                        idx: idx as u32,
-                        cell: b.clone(),
-                    });
-                }
-            }
-            // Even if the grid hasn't changed, the cursor or default colors
-            // might have, so we still emit an (empty) diff frame – it's
-            // cheap and keeps the timeline aligned with the framerate.
-            frames.push(Frame::Diff {
-                t_ms: frame.t_ms,
-                cursor: frame.cursor,
-                default_fg: frame.default_fg,
-                default_bg: frame.default_bg,
-                changes,
-            });
-            frames_since_key += 1;
-        }
-
-        last_dense = Some(frame);
+        builder.push_raw(frame);
     }
 
-    let recording = Recording {
-        cols: cfg.cols,
-        rows: cfg.rows,
-        framerate: cfg.framerate,
-        cell_width_px: cfg.cell_width_px,
-        cell_height_px: cfg.cell_height_px,
-        frame_style: cfg.frame_style,
-        frames,
-    };
-    drop(frame_tap);
-    Ok(recording)
+    Ok(builder.finish())
 }
 
 /// Atomic max-update helper: store `val` if it's greater than the

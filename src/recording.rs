@@ -120,6 +120,94 @@ pub struct Recording {
     pub frames: Vec<Frame>,
 }
 
+/// Configuration constants used while folding dense [`RawFrame`]s into a
+/// diff-compressed [`Recording`].
+#[derive(Debug, Clone, Copy)]
+pub struct RecordingConfig {
+    pub cols: u16,
+    pub rows: u16,
+    pub framerate: u32,
+    pub cell_width_px: u32,
+    pub cell_height_px: u32,
+    pub frame_style: FrameStyle,
+    pub keyframe_interval: u32,
+}
+
+/// Incrementally folds dense [`RawFrame`]s into a diff-compressed
+/// [`Recording`].
+pub struct RecordingBuilder {
+    cfg: RecordingConfig,
+    frames: Vec<Frame>,
+    last_dense: Option<RawFrame>,
+    frames_since_key: u32,
+}
+
+impl RecordingBuilder {
+    pub fn new(cfg: RecordingConfig) -> Self {
+        Self {
+            cfg,
+            frames: Vec::new(),
+            last_dense: None,
+            frames_since_key: 0,
+        }
+    }
+
+    pub fn push_raw(&mut self, frame: RawFrame) {
+        let is_key = match &self.last_dense {
+            None => true,
+            Some(prev) => {
+                prev.cols != frame.cols
+                    || prev.rows != frame.rows
+                    || self.frames_since_key >= self.cfg.keyframe_interval
+            }
+        };
+
+        if is_key {
+            self.frames.push(Frame::Key {
+                t_ms: frame.t_ms,
+                cursor: frame.cursor,
+                default_fg: frame.default_fg,
+                default_bg: frame.default_bg,
+                cells: frame.cells.clone(),
+            });
+            self.frames_since_key = 0;
+        } else {
+            let prev = self.last_dense.as_ref().unwrap();
+            let mut changes: Vec<CellChange> = Vec::new();
+            for (idx, (a, b)) in prev.cells.iter().zip(frame.cells.iter()).enumerate() {
+                if a != b {
+                    changes.push(CellChange {
+                        idx: idx as u32,
+                        cell: b.clone(),
+                    });
+                }
+            }
+            self.frames.push(Frame::Diff {
+                t_ms: frame.t_ms,
+                cursor: frame.cursor,
+                default_fg: frame.default_fg,
+                default_bg: frame.default_bg,
+                changes,
+            });
+            self.frames_since_key += 1;
+        }
+
+        self.last_dense = Some(frame);
+    }
+
+    pub fn finish(self) -> Recording {
+        Recording {
+            cols: self.cfg.cols,
+            rows: self.cfg.rows,
+            framerate: self.cfg.framerate,
+            cell_width_px: self.cfg.cell_width_px,
+            cell_height_px: self.cfg.cell_height_px,
+            frame_style: self.cfg.frame_style,
+            frames: self.frames,
+        }
+    }
+}
+
 impl Recording {
     /// Reconstruct a dense [`RawFrame`] for `index` by replaying diffs from
     /// the most recent keyframe at or before it. Used by the renderer.
