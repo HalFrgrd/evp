@@ -50,6 +50,8 @@ jobs:
         # in one place. Installs to /opt/zig and exports the path
         # for every later step (and for the agent that runs after
         # these setup steps complete).
+        env:
+          ZIG_VERSION: ${{ env.ZIG_VERSION }}
         run: |
           set -euo pipefail
           arch="$(uname -m)"
