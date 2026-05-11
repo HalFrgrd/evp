@@ -30,7 +30,7 @@ libghostty-vt = { git = "https://github.com/uzaaft/libghostty-rs", rev = "5ac47e
 anyhow = "1"
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
-clap_complete = "4.6.4"
+clap_complete = "4.6.5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
