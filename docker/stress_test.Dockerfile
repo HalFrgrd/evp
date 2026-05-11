@@ -38,7 +38,9 @@ WORKDIR /work
 RUN set -eux; \
     mkdir -p /out /tmp; \
     install -D -m 0755 /opt/stress_test/stress_test_program.py /tmp/stress_test_program.py; \
-    /usr/local/bin/stress_test_benchmark /out/evp.gif /out/evp.report.txt; \
+    EVP_STRESS_TEST_TAPE=/opt/stress_test/stress_test.tape \
+    EVP_STRESS_TEST_PROGRAM=/opt/stress_test/stress_test_program.py \
+      /usr/local/bin/stress_test_benchmark /out/evp.gif /out/evp.report.txt; \
     start_ns=$(date +%s%N); \
     vhs /opt/stress_test/stress_test.tape; \
     end_ns=$(date +%s%N); \
