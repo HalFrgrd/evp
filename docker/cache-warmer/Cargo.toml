@@ -1,0 +1,33 @@
+# Tiny fixture crate used only by `docker/build-env.Dockerfile`'s
+# `build-env-warm` stage. Its sole purpose is to drag in
+# `libghostty-vt-sys` at the same pin used by evp's top-level
+# `Cargo.toml` so that running `cargo build` once during build-env
+# image construction:
+#
+#   1. clones the upstream Ghostty source pinned inside
+#      libghostty-vt-sys's `build.rs`, and
+#   2. lets `zig build` resolve every Zig package dependency into the
+#      shared `ZIG_GLOBAL_CACHE_DIR`.
+#
+# Both artifacts are then copied to known paths inside the image
+# (`GHOSTTY_SOURCE_DIR`, `ZIG_GLOBAL_CACHE_DIR`) so subsequent
+# `cargo build` invocations in the `builder` stage — and in any
+# Copilot cloud-agent run that uses this image — never need outbound
+# network access to ghostty.org or the Zig package mirror.
+#
+# IMPORTANT: keep the `rev =` below in lockstep with the
+# `libghostty-vt` dep in the workspace-root `Cargo.toml`. If they
+# drift, the cached Ghostty source will be stale and the builder's
+# `cargo build` will fall back to a network fetch (which is exactly
+# what we want to avoid in restricted environments).
+[package]
+name = "evp-cache-warmer"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+libghostty-vt = { git = "https://github.com/uzaaft/libghostty-rs", rev = "5ac47e9eb166add2c00c432bc65c279133629712", features = ["link-static"] }

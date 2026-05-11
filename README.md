@@ -175,9 +175,14 @@ firewall) typically block the Zig hosts. Two ways to cope:
   for the agent. No further changes are required to use the agent
   on this repo.
 - **Docker builds.** Use the published Rust+Zig image as shown
-  above (`--set builder.args.BUILD_ENV_IMAGE=ghcr.io/<owner>/evp-build-env:latest`).
-  Cargo still needs `https://github.com` (allowed by the default
-  Copilot firewall) to resolve the `libghostty-rs` git dep.
+  above (`--set builder.args.BUILD_ENV_IMAGE=ghcr.io/<owner>/evp-build-env:latest`),
+  or simply run `scripts/bake-offline.sh <target>` which injects that
+  override plus the matching `build-env` context against a locally
+  tagged `evp-build-env:local`. The image bakes in the pinned Ghostty
+  source and Zig package cache, so the subsequent `cargo build` inside
+  the builder never needs to reach `ghostty.org` or the Zig package
+  mirror. Cargo still needs `https://github.com` (allowed by the
+  default Copilot firewall) to resolve the `libghostty-rs` git dep.
 
 ### As a library
 
