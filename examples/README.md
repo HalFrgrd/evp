@@ -9,7 +9,7 @@ backend.
 | [hello.tape](hello.tape) | Bare-minimum recording – type a single command. |
 | [shell-tour.tape](shell-tour.tape) | Multiple commands paced with `Wait` instead of `Sleep`. |
 | [keys.tape](keys.tape) | Modifier keys + line-editing (`Ctrl+U`). |
-| [colors.tape](colors.tape) | ANSI SGR colour table – stresses the cell encoder. |
+| [colors.tape](colors.tape) | ANSI SGR colour table – stresses cell diffing. |
 | [progress.tape](progress.tape) | In-place line rewrites – stresses the diff path. |
 | [torture.tape](torture.tape) | 100×30 grid at 60 fps where every keystroke triggers a full-screen random-cell repaint. Used by the [`torture_benchmark`](torture_benchmark.rs) example and the `torture` GitHub Actions workflow. |
 
@@ -54,8 +54,8 @@ Run locally on a single physical core and compare against VHS in Docker:
 ```bash
 cargo build --release --example torture_benchmark
 
-# Pin to logical CPU 0 so the renderer/encoder/runner threads share
-# one core – this is what the GitHub Actions workflow does too.
+# Pin to logical CPU 0 so the renderer/runner threads share one core –
+# this is what the GitHub Actions workflow does too.
 taskset -c 0 ./target/release/examples/torture_benchmark \
     /tmp/evp-torture.gif /tmp/evp-torture.report.txt
 

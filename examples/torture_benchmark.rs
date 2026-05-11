@@ -1,4 +1,4 @@
-//! Torture-test benchmark for the evp PTY → encoder → renderer pipeline.
+//! Torture-test benchmark for the evp PTY → renderer pipeline.
 //!
 //! Drives `examples/torture.tape` (100×30 grid, 60 fps, ~10 s, types at
 //! 100 chars/min) which in turn runs `scripts/torture_program.py`. The
@@ -12,11 +12,11 @@
 //!   * total wall-clock time spent
 //!   * frames the runner intended to capture vs. how many landed in
 //!     the recording
-//!   * dropped (= "missed") frames at each pipeline stage
-//!   * high-water marks for both inter-thread queues
+//!   * dropped renderer frames
+//!   * high-water mark for renderer queues
 //!
-//! Exits with a non-zero status if more than 5 % of expected capture
-//! frames were dropped — that's the explicit pass/fail signal the GHA
+//! Exits with a non-zero status if more than 5 % of expected frames were not
+//! recorded — that's the explicit pass/fail signal the GHA
 //! workflow looks at.
 //!
 //! Pinning to a single physical core is the caller's responsibility:
@@ -96,7 +96,6 @@ fn run() -> Result<bool> {
         },
     };
 
-
     let cpu_set = current_cpu_affinity().unwrap_or_else(|| "(unknown)".to_string());
     eprintln!("torture: starting (cpu_affinity={cpu_set})");
 
@@ -109,10 +108,10 @@ fn run() -> Result<bool> {
     let gif_bytes = fs::metadata(&out_gif).map(|m| m.len()).unwrap_or(0);
 
     let missed_pct = stats.missed_capture_fraction() * 100.0;
-    let tap_drop_pct = if stats.expected_frames == 0 {
+    let renderer_drop_pct = if stats.expected_frames == 0 {
         0.0
     } else {
-        (stats.tap_dropped_frames as f64 / stats.expected_frames as f64) * 100.0
+        (stats.renderer_dropped_frames as f64 / stats.expected_frames as f64) * 100.0
     };
 
     let report = format_report(
@@ -122,7 +121,7 @@ fn run() -> Result<bool> {
         recording_frames,
         &stats,
         missed_pct,
-        tap_drop_pct,
+        renderer_drop_pct,
         &out_gif,
     );
 
@@ -145,7 +144,7 @@ fn format_report(
     recording_frames: usize,
     stats: &RunStats,
     missed_pct: f64,
-    tap_drop_pct: f64,
+    renderer_drop_pct: f64,
     out_gif: &PathBuf,
 ) -> String {
     let mut s = String::new();
@@ -160,29 +159,21 @@ fn format_report(
         stats.expected_frames
     ));
     s.push_str(&format!(
-        "captured_frames     = {}\n",
-        stats.captured_frames
+        "recorded_frames     = {}\n",
+        stats.recorded_frames
     ));
     s.push_str(&format!("recording_frames    = {recording_frames}\n"));
     s.push_str(&format!(
-        "encoder_received    = {}\n",
-        stats.encoder_frames_received
-    ));
-    s.push_str(&format!(
-        "dropped_capture     = {} ({missed_pct:.2}%)\n",
-        stats.dropped_capture_frames
-    ));
-    s.push_str(&format!(
-        "dropped_renderer    = {} ({tap_drop_pct:.2}%)\n",
-        stats.tap_dropped_frames
-    ));
-    s.push_str(&format!(
-        "max_capture_queue   = {} / 4096\n",
-        stats.max_capture_queue_len
+        "missed_recording    = {} ({missed_pct:.2}%)\n",
+        stats.expected_frames.saturating_sub(stats.recorded_frames)
     ));
     s.push_str(&format!(
         "max_renderer_queue  = {} / 4096\n",
         stats.max_renderer_queue_len
+    ));
+    s.push_str(&format!(
+        "dropped_renderer    = {} ({renderer_drop_pct:.2}%)\n",
+        stats.renderer_dropped_frames
     ));
     s.push_str(&format!(
         "missed_threshold    = {:.0}%\n",

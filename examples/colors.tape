@@ -1,5 +1,5 @@
 # Render an ANSI colour table — a good visual stress-test for the cell
-# diff encoder and the GIF / SVG renderers.
+# diff recorder and the GIF / SVG renderers.
 #
 # Uses printf to lay down 8 bright + 8 normal colours via SGR sequences.
 

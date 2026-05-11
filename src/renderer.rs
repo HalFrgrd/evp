@@ -5,7 +5,7 @@ use crossbeam_channel::Sender;
 
 use crate::{
     FrameStyle, RawFrame, Recording, RenderOptions, SvgOptions,
-    render::{self, GifStreamConfig, GifStreamHandle},
+    render_gif::{self, GifStreamConfig, GifStreamHandle},
     render_json::{self, JsonStreamConfig, JsonStreamHandle},
     render_svg::{self, SvgStreamConfig, SvgStreamHandle},
 };
@@ -61,7 +61,7 @@ pub fn spawn_renderer(
 ) -> Result<RendererHandle> {
     match backend {
         RendererBackend::Gif(opts) => {
-            let h = render::spawn_gif_stream(
+            let h = render_gif::spawn_gif_stream(
                 GifStreamConfig {
                     cols: cfg.cols,
                     rows: cfg.rows,

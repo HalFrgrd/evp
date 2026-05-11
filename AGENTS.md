@@ -42,27 +42,21 @@ render_avg_ms      ≈ 1200    (gifski streaming, 320 frames)
 
 ## Streaming render pipeline (must-know)
 
-`evp` runs three cooperating threads:
+`evp` runs the runner plus one renderer worker per output:
 
 1. **PTY/runner** — drives libghostty + the script timeline. Captures one
-   `RawFrame` per frame deadline.
-2. **Encoder** — folds each `RawFrame` into the diff-compressed
-   `Recording` and forwards a clone to the renderer through the
-   *frame_tap* channel.
-3. **Renderer worker** (gif or svg) — rasterizes/encodes incrementally as
-   frames arrive, writing the output file when its receiver closes.
+   `RawFrame` per frame deadline and folds it into the diff-compressed
+   `Recording` returned in `RunOutput`.
+2. **Renderer worker** (gif, svg, or json) — consumes dense `RawFrame`s from
+   its own channel and writes its output file when the receiver closes.
 
 ### Hard rules
 
-- The PTY thread **must never block**. It uses `try_send` on the encoder
-  channel; if the queue (4096 frames) is full, the frame is dropped and a
-  `dropped_capture_frames` warning is logged at the end. Do not switch
-  this back to `send()`.
-- The encoder uses `try_send` on the frame_tap for the same reason — a
-  slow renderer must not stall the recording.
-- Bounded channel capacity is `4096` for both `runner→encoder` and
-  `encoder→renderer`. This is large enough to absorb bursts on cold
-  starts; do not shrink it without a benchmark.
+- The PTY thread **must never block** on renderers. It uses `try_send` on
+  each renderer channel; if a queue is full, that renderer frame is dropped
+  and `renderer_dropped_frames` is logged at the end.
+- Bounded renderer channel capacity is `4096`. This is large enough to absorb
+  bursts on cold starts; do not shrink it without a benchmark.
 
 ### Sender-drop discipline (the hang we keep re-creating)
 
@@ -85,7 +79,7 @@ Do the same pattern in any new handle wrapper. This was the cause of the
 worker had two live senders (`self.tx` on the wrapper + the inner
 handle's `tx`) and `h.join()` deadlocked.
 
-### Gifski-specific rules (`src/render.rs`)
+### Gifski-specific rules (`src/render_gif.rs`)
 
 - `gifski::new()` returns `(collector, writer)`. The writer's `write()`
   call **blocks until the collector is dropped**. Two valid topologies:
@@ -105,15 +99,13 @@ handle's `tx`) and `h.join()` deadlocked.
 - libghostty types (`Terminal`, render iterators) are `!Send + !Sync`. They
   stay on the runner thread. Only owned `RawFrame` values (plain `Vec` +
   cursor + colors) ever cross a thread boundary.
-- The encoder thread owns the only mutable `Recording` until it joins.
-- Any new background work (e.g. JSON dumping, screenshot side outputs)
-  should consume the recording **after** the runner returns it, not
-  in parallel — otherwise reconstruction/diff invariants get tricky.
+- The runner owns the only mutable `RecordingBuilder`; renderer workers only
+  receive owned `RawFrame` clones.
 
 ## Output formats
 
-- `.gif` and `.svg` go through the same `renderer::run` entry point.
-  Both end up in a streaming worker driven by the `frame_tap` channel.
+- `.gif`, `.svg`, and `.json` go through the same `renderer::spawn_renderer`
+  entry point. Each output gets its own streaming worker.
 - Adding a new output format means: implement a `spawn_X_stream`
   returning a handle with `tx: Sender<RawFrame>` + `join() -> Result<()>`,
   then add a `RendererBackend::X` arm in `src/renderer.rs`.
@@ -123,7 +115,7 @@ handle's `tx`) and `h.join()` deadlocked.
 Useful filters when chasing pipeline bugs:
 
 ```
-RUST_LOG=evp::runner=debug,evp::encoder=info,evp::render=info ./target/release/evp …
+RUST_LOG=evp::runner=debug,evp::render_gif=info,evp::render_svg=info ./target/release/evp …
 ```
 
 Look for these milestones (in order):

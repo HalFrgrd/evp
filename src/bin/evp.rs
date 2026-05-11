@@ -55,13 +55,14 @@ const VERSION_LONG: &str = concat!(
     name = "evp",
     about = "Run a VHS-format script and produce a GIF",
     version = env!("CARGO_PKG_VERSION"),
-    long_version = VERSION_LONG
+    long_version = VERSION_LONG,
+    subcommand_negates_reqs = true
 )]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
     /// Path to the `.tape` script. Optional when `--run-test-script` is set.
-    #[arg(required_unless_present_any = ["run_test_script", "command"])]
+    #[arg(required_unless_present = "run_test_script")]
     script: Option<PathBuf>,
     /// Run the built-in demo tape embedded in the binary. Writes to
     /// `./evp-test.gif` in the current directory unless `--output` is

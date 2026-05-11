@@ -10,7 +10,7 @@ COLS×ROWS terminal grid with:
   * a random combination of bold / italic / underline / inverse modifiers.
 
 Effectively zero per-cell memoisation, so every keystroke produces the
-worst-case "every cell changed" diff for the encoder/renderer to chew
+worst-case "every cell changed" diff for the recorder/renderer to chew
 on. The program intentionally ignores the *value* of the input — only
 the keystroke count matters — which lets the recording driver type at
 any rate it likes.

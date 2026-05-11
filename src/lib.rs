@@ -20,15 +20,15 @@
 //! - [`recording_to_json`] / [`recording_from_json`] — round-trip a
 //!   recording through JSON.
 //!
-//! The submodules ([`runner`], [`encoder`], [`recording`], [`render`],
+//! The submodules ([`runner`], [`recording`], [`render_gif`],
 //! [`script`], [`pty`], [`keys`]) are also `pub` for callers that need
 //! finer control.
 
-pub mod encoder;
 pub mod keys;
 pub mod pty;
 pub mod recording;
-pub mod render;
+pub mod render_common;
+pub mod render_gif;
 pub mod render_json;
 pub mod render_svg;
 pub mod renderer;
@@ -41,7 +41,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 pub use recording::{CellChange, CellSnap, Frame, RawFrame, Recording};
-pub use render::RenderOptions;
+pub use render_common::RenderOptions;
 pub use render_svg::SvgOptions;
 pub use runner::{RunOptions, RunOutput, RunStats};
 pub use script::{Event, KeySpec, ModSet, NamedKey, Script, Settings, WaitScope};

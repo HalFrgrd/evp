@@ -1,5 +1,5 @@
 //! Main loop: drive libghostty + the PTY, schedule events, and ship
-//! captured frames to the encoder and renderer threads.
+//! captured frames to renderer threads.
 //!
 //! ## Threading model
 //!
@@ -7,8 +7,6 @@
 //!   It drains the PTY into the terminal each iteration, executes the next
 //!   scripted event when its scheduled time arrives, and grabs a screen
 //!   snapshot at every framerate tick.
-//! - **Encoder thread** (see [`crate::encoder`]): receives raw frames and
-//!   folds them into a diff‑compressed [`Recording`].
 //! - **Renderer threads** (see [`crate::renderer`]): optionally receive the
 //!   same dense raw frames directly from the runner.
 //!
@@ -18,8 +16,6 @@
 //! also wakes us early.
 
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -35,19 +31,16 @@ use tracing::{debug, info, warn};
 
 use crate::{
     FrameStyle,
-    encoder::{EncoderConfig, EncoderStats},
     keys::KeyTranslator,
     pty::{Pty, PtyError, PtySize},
-    recording::{CellSnap, RawFrame, style_flags},
+    recording::{CellSnap, RawFrame, RecordingBuilder, RecordingConfig, style_flags},
     script::{Event, NamedKey, Script, Settings, WaitScope},
 };
 
 /// Output of [`run`].
 pub struct RunOutput {
     pub recording: crate::recording::Recording,
-    /// Pipeline-health counters captured during the run. Useful for
-    /// benchmarking and torture-testing the PTY → encoder → renderer
-    /// pipeline.
+    /// Pipeline-health counters captured during the run.
     pub stats: RunStats,
 }
 
@@ -59,33 +52,25 @@ pub struct RunStats {
     /// Number of frames the runner intended to capture (one per frame
     /// deadline, including any that were ultimately dropped).
     pub expected_frames: u64,
-    /// Number of frames the runner successfully handed to the encoder.
-    pub captured_frames: u64,
-    /// Number of frames the runner had to drop because the encoder's
-    /// inbound queue was full. Counted as "missed frames" by the
-    /// torture benchmark.
-    pub dropped_capture_frames: u64,
-    /// Highest observed `len()` of the runner → encoder queue.
-    pub max_capture_queue_len: usize,
+    /// Number of frames folded into the returned [`crate::Recording`].
+    pub recorded_frames: u64,
     /// Highest observed `len()` of any runner → renderer queue.
     /// Zero when no renderer was attached.
     pub max_renderer_queue_len: usize,
     /// Number of frames the runner couldn't forward to renderers because
     /// renderer queues were full.
-    pub tap_dropped_frames: u64,
-    /// Number of frames the encoder received from the runner. Should
-    /// match `captured_frames` modulo races during shutdown.
-    pub encoder_frames_received: u64,
+    pub renderer_dropped_frames: u64,
 }
 
 impl RunStats {
-    /// Fraction of expected frames that were dropped before reaching
-    /// the encoder. Returns 0.0 when no frames were expected.
+    /// Fraction of expected frames that were not recorded. Returns 0.0 when no
+    /// frames were expected.
     pub fn missed_capture_fraction(&self) -> f64 {
         if self.expected_frames == 0 {
             0.0
         } else {
-            self.dropped_capture_frames as f64 / self.expected_frames as f64
+            self.expected_frames.saturating_sub(self.recorded_frames) as f64
+                / self.expected_frames as f64
         }
     }
 }
@@ -148,15 +133,15 @@ pub fn run(script: &Script) -> Result<RunOutput> {
     run_with_frame_taps(script, Vec::new())
 }
 
-/// Run the script and optionally mirror dense raw frames into `frame_tap`.
+/// Run the script and optionally mirror dense raw frames into `render_tap`.
 ///
 /// The tap is attached directly to the terminal-driving thread. Sends are
 /// non-blocking, so a slow renderer cannot stall the PTY loop.
 pub fn run_with_frame_tap(
     script: &Script,
-    frame_tap: Option<Sender<RawFrame>>,
+    render_tap: Option<Sender<RawFrame>>,
 ) -> Result<RunOutput> {
-    run_with_frame_taps(script, frame_tap.into_iter().collect())
+    run_with_frame_taps(script, render_tap.into_iter().collect())
 }
 
 /// Run the script and mirror dense raw frames into zero or more renderer taps.
@@ -165,7 +150,7 @@ pub fn run_with_frame_tap(
 /// `try_send`; full or disconnected renderer queues do not block capture.
 pub fn run_with_frame_taps(
     script: &Script,
-    frame_taps: Vec<Sender<RawFrame>>,
+    render_taps: Vec<Sender<RawFrame>>,
 ) -> Result<RunOutput> {
     enforce_require(&script.require)?;
     let opts = derive_options(&script.settings);
@@ -211,7 +196,7 @@ pub fn run_with_frame_taps(
     // total" while a tape is rendering.
     let expected_total = timeline_end;
 
-    let encoder = crate::encoder::spawn(EncoderConfig {
+    let mut recording = RecordingBuilder::new(RecordingConfig {
         cols: opts.cols,
         rows: opts.rows,
         framerate: script.settings.framerate,
@@ -220,7 +205,6 @@ pub fn run_with_frame_taps(
         frame_style: opts.frame_style,
         keyframe_interval: script.settings.framerate * 5,
     });
-    let encoder_stats: Arc<EncoderStats> = Arc::clone(&encoder.stats);
 
     // Snapshot scratch state.
     let mut render_state = RenderState::new()?;
@@ -239,10 +223,8 @@ pub fn run_with_frame_taps(
     // Wait‑for state. When we're inside a `Wait`, all later events stall
     // until the regex matches or the timeout elapses.
     let mut wait_state: Option<WaitState> = None;
-    let mut dropped_capture_frames: u64 = 0;
     let mut expected_frames: u64 = 0;
-    let mut captured_frames: u64 = 0;
-    let mut max_capture_queue_len: usize = 0;
+    let mut recorded_frames: u64 = 0;
     let mut max_renderer_queue_len: usize = 0;
     let mut renderer_dropped_frames: u64 = 0;
 
@@ -357,13 +339,7 @@ pub fn run_with_frame_taps(
                     continue;
                 }
                 expected_frames += 1;
-                // Sample the queue depth before sending so we capture
-                // the high-water mark when the encoder is most behind.
-                let qlen = encoder.tx.len();
-                if qlen > max_capture_queue_len {
-                    max_capture_queue_len = qlen;
-                }
-                for tap in &frame_taps {
+                for tap in &render_taps {
                     let tap_len = tap.len();
                     if tap_len > max_renderer_queue_len {
                         max_renderer_queue_len = tap_len;
@@ -376,21 +352,8 @@ pub fn run_with_frame_taps(
                         Err(TrySendError::Disconnected(_)) => {}
                     }
                 }
-                // Never block the terminal-driving thread: if the queue is full,
-                // we drop this frame and continue. This preserves input/output
-                // responsiveness under sustained encode pressure.
-                match encoder.tx.try_send(frame) {
-                    Ok(()) => {
-                        captured_frames += 1;
-                    }
-                    Err(TrySendError::Full(_)) => {
-                        dropped_capture_frames += 1;
-                    }
-                    Err(TrySendError::Disconnected(_)) => {
-                        debug!("encoder channel closed early");
-                        break;
-                    }
-                }
+                recording.push_raw(frame);
+                recorded_frames += 1;
             }
             next_frame_at += frame_interval;
         }
@@ -420,36 +383,25 @@ pub fn run_with_frame_taps(
         }
     }
 
-    // Drop the encoder sender so the worker exits and we can join it.
-    drop(encoder.tx);
-    drop(frame_taps);
-    let recording = encoder
-        .join
-        .join()
-        .expect("encoder thread panicked")
-        .context("encoder failure")?;
+    drop(render_taps);
+    let recording = recording.finish();
     let stats = RunStats {
         expected_frames,
-        captured_frames,
-        dropped_capture_frames,
-        max_capture_queue_len,
+        recorded_frames,
         max_renderer_queue_len,
-        tap_dropped_frames: renderer_dropped_frames,
-        encoder_frames_received: encoder_stats.frames_received.load(Ordering::Relaxed),
+        renderer_dropped_frames,
     };
-    if dropped_capture_frames > 0 {
+    if renderer_dropped_frames > 0 {
         warn!(
-            dropped_capture_frames,
-            "capture queue was full; dropped frames to keep terminal loop non-blocking"
+            renderer_dropped_frames,
+            "renderer queue was full; dropped frames to keep terminal loop non-blocking"
         );
     }
     info!(
         expected_frames,
-        captured_frames,
-        dropped_capture_frames,
-        max_capture_queue_len,
+        recorded_frames,
         max_renderer_queue_len = stats.max_renderer_queue_len,
-        tap_dropped_frames = stats.tap_dropped_frames,
+        renderer_dropped_frames = stats.renderer_dropped_frames,
         "pipeline stats"
     );
     Ok(RunOutput { recording, stats })
@@ -695,7 +647,7 @@ fn write_screenshot(frame: &RawFrame, script: &Script, path: &std::path::Path) -
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating screenshot directory {}", parent.display()))?;
     }
-    crate::render::render_png_frame(frame, &render_opts, path)
+    crate::render_gif::render_png_frame(frame, &render_opts, path)
         .with_context(|| format!("writing screenshot {}", path.display()))
 }
 

@@ -20,12 +20,9 @@ use woff2_patched::convert_woff2_to_ttf;
 use crate::{
     FrameStyle,
     recording::{RawFrame, Recording, style_flags},
+    render_common::{RENDER_STREAM_CHANNEL_CAPACITY, RenderOptions},
     style::window_bar_dot_metrics,
 };
-
-// Rendering can briefly lag behind capture on busy systems; this queue absorbs
-// bursts so the upstream pipeline usually stays lock-free.
-const RENDER_STREAM_CHANNEL_CAPACITY: usize = 4096;
 
 const EMBEDDED_JETBRAINS_NERD_MONO_REGULAR_WOFF2: &[u8] = include_bytes!(concat!(
     env!("OUT_DIR"),
@@ -61,13 +58,6 @@ struct FontFamily {
     italic: Option<FontArc>,
     bold_italic: Option<FontArc>,
     fallback_regular: Vec<FontArc>,
-}
-
-#[derive(Clone)]
-pub struct RenderOptions {
-    pub font_path: Option<String>,
-    pub font_size: f32,
-    pub frame_style: FrameStyle,
 }
 
 pub struct GifStreamConfig {
