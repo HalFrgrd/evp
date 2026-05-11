@@ -108,7 +108,7 @@ impl FontSet {
 }
 
 /// Cache key identifying a rasterised glyph outline.
-#[derive(Clone, Hash, Eq, PartialEq)]
+#[derive(Hash, Eq, PartialEq)]
 struct GlyphCacheKey {
     /// Index into [`FontSet::fonts`].
     font_idx: u16,
@@ -131,7 +131,7 @@ struct GlyphBitmap {
     offset_y: i32,
     width: u32,
     height: u32,
-    /// Per-pixel coverage in row-major order \[height × width\].
+    /// Per-pixel coverage in row-major order [height × width].
     pixels: Vec<f32>,
 }
 
@@ -462,14 +462,22 @@ fn rasterize_raw_frame(
 
                 // Populate the cache on first encounter of this
                 // (font, glyph, scale) combination.
+                //
+                // font_idx is the index into FontSet::fonts; the total
+                // number of faces is small (< 10 for the default set) so
+                // u16 is always sufficient.
+                debug_assert!(
+                    font_idx <= u16::MAX as usize,
+                    "font_idx {font_idx} exceeds u16 range"
+                );
                 let cache_key = GlyphCacheKey {
                     font_idx: font_idx as u16,
                     glyph_id: glyph_id.0,
                     scale_bits: scale.x.to_bits(),
                 };
-                if !glyph_cache.contains_key(&cache_key) {
+                let bitmap = glyph_cache.entry(cache_key).or_insert_with(|| {
                     let glyph: Glyph = glyph_id.with_scale(scale);
-                    let bitmap = font.outline_glyph(glyph).map(|outline| {
+                    font.outline_glyph(glyph).map(|outline| {
                         let bounds = outline.px_bounds();
                         let w = (bounds.max.x - bounds.min.x).ceil() as u32;
                         let h = (bounds.max.y - bounds.min.y).ceil() as u32;
@@ -487,11 +495,10 @@ fn rasterize_raw_frame(
                             height: h,
                             pixels,
                         }
-                    });
-                    glyph_cache.insert(cache_key.clone(), bitmap);
-                }
+                    })
+                });
 
-                if let Some(bm) = glyph_cache[&cache_key].as_ref() {
+                if let Some(bm) = bitmap.as_ref() {
                     for gy in 0..bm.height {
                         for gx in 0..bm.width {
                             let coverage = bm.pixels[(gy * bm.width + gx) as usize];
