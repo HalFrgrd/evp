@@ -141,6 +141,8 @@ jobs:
           # Mount the staged dir as /vhs (workdir) and bind /tmp inside
           # the container to the host's stress_test-out/work/tmp so the
           # Python script is reachable at /tmp/stress_test_program.py.
+          # HOME/XDG_* must point at writable /tmp paths for Chrome's
+          # crashpad helper when VHS runs as the non-root GitHub user.
           docker run --rm \
               --cpus=1 --cpuset-cpus=0 \
               --user "$(id -u):$(id -g)" \
