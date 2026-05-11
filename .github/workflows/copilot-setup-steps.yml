@@ -36,8 +36,6 @@ jobs:
       contents: read
 
     env:
-      # Keep this in sync with docker/build-env.Dockerfile.
-      ZIG_VERSION: "0.15.2"
       CARGO_TERM_COLOR: always
 
     steps:
@@ -60,12 +58,12 @@ jobs:
             aarch64) zig_arch="aarch64" ;;
             *) echo "unsupported arch $arch" >&2; exit 1 ;;
           esac
-          tarball="zig-${zig_arch}-linux-${ZIG_VERSION}.tar.xz"
+          tarball="zig-${zig_arch}-linux-0.15.2.tar.xz"
           curl -fsSLo "/tmp/${tarball}" \
-            "https://ziglang.org/download/${ZIG_VERSION}/${tarball}"
+            "https://ziglang.org/download/0.15.2/${tarball}"
           sudo mkdir -p /opt
           sudo tar -xJf "/tmp/${tarball}" -C /opt
-          sudo mv "/opt/zig-${zig_arch}-linux-${ZIG_VERSION}" /opt/zig
+          sudo mv "/opt/zig-${zig_arch}-linux-0.15.2" /opt/zig
           rm "/tmp/${tarball}"
           echo "/opt/zig" >> "$GITHUB_PATH"
           /opt/zig/zig version
