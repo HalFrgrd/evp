@@ -43,7 +43,7 @@ fn main() -> anyhow::Result<()> {
     let render_opts = crate::RenderOptions {
         font_path: None,
         font_size: 22.0,
-        frame_style: FrameStyle::default()
+        frame_style: FrameStyle::default(),
     };
 
     let mut render_ms_total = 0u128;
@@ -85,7 +85,7 @@ fn main() -> anyhow::Result<()> {
 
 fn capture_once_from_script(script_src: &str) -> anyhow::Result<Recording> {
     let script = evp::parse_script(script_src)?;
-    let out = evp::run(&script)?;
+    let out = evp::run_and_return_recording(&script)?;
     Ok(out.recording)
 }
 

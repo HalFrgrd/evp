@@ -5,7 +5,7 @@
 //! beyond what individual tests opt into. The pipeline under test is:
 //!
 //! ```text
-//! parse_script -> run -> Recording -> recording_to_json -> recording_from_json
+//! parse_script -> run_and_return_recording -> Recording -> recording_to_json -> recording_from_json
 //! ```
 //!
 //! Each test parses a tape source, runs it against a real `/bin/sh` in a
@@ -24,7 +24,7 @@ use serde_json::Value;
 /// the returned recording's contents.
 fn record(tape: &str) -> Recording {
     let script = evp::parse_script(tape).expect("parse tape");
-    let out = evp::run(&script).expect("run script");
+    let out = evp::run_and_return_recording(&script).expect("run script");
     out.recording
 }
 
@@ -74,6 +74,17 @@ fn full_haystack(rec: &Recording) -> String {
         }
     }
     s
+}
+
+fn temp_json_path(prefix: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "{prefix}-{}-{}.json",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +245,31 @@ Sleep 200ms
         assert_eq!(a.cursor, b.cursor, "frame {i} cursor mismatch");
         assert_eq!(a.cells, b.cells, "frame {i} cells mismatch");
     }
+}
+
+#[test]
+fn render_json_writes_intermediate_recording() {
+    let tape = r#"
+Output out.json
+Set Width 800
+Set Height 300
+Set FontSize 20
+Set TypingSpeed 20ms
+Set Framerate 30
+Set Shell /bin/sh
+Sleep 200ms
+Type "json"
+Sleep 200ms
+"#;
+    let rec = record(tape);
+    let path = temp_json_path("evp-render-json");
+
+    evp::render_json(&rec, &path).expect("render json");
+    let bytes = std::fs::read(&path).expect("read json");
+    let parsed = evp::recording_from_json(&bytes).expect("parse json");
+    std::fs::remove_file(&path).ok();
+    assert_eq!(parsed.frames.len(), rec.frames.len());
+    assert_eq!(parsed.frame_style, rec.frame_style);
 }
 
 /// `Hide`/`Show` should pause and resume frame recording without pausing

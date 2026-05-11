@@ -36,7 +36,7 @@ Sleep 500ms
 Show
 
 # Stress-test run. 8 ms per char ≈ 125 keystrokes/sec — at 60 fps that's
-# slightly over two updates per captured frame (the encoder/renderer
+# slightly over two updates per captured frame (the raw-frame consumers
 # never gets a quiet moment between repaints). 1300 chars × 8 ms
 # ≈ 10.4 s of typing, then a short trailing Sleep so the final state
 # is captured. The stress_test program ignores the byte values and

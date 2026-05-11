@@ -55,19 +55,20 @@ const VERSION_LONG: &str = concat!(
     name = "evp",
     about = "Run a VHS-format script and produce a GIF",
     version = env!("CARGO_PKG_VERSION"),
-    long_version = VERSION_LONG
+    long_version = VERSION_LONG,
+    subcommand_negates_reqs = true
 )]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
     /// Path to the `.tape` script. Optional when `--run-test-script` is set.
-    #[arg(required_unless_present_any = ["run_test_script", "command"])]
+    #[arg(required_unless_present = "run_test_script")]
     script: Option<PathBuf>,
     /// Run the built-in demo tape embedded in the binary. Writes to
     /// `./evp-test.gif` in the current directory unless `--output` is
     /// also given. Useful for verifying an install works end-to-end
     /// without needing any external files.
-    #[arg(long, conflicts_with = "recording_json")]
+    #[arg(long)]
     run_test_script: bool,
     /// Override the script's `Output` directive.
     #[arg(short, long)]
@@ -76,9 +77,9 @@ struct Cli {
     /// font is auto-discovered.
     #[arg(long)]
     font: Option<String>,
-    /// Also dump the intermediate Recording as JSON to this path.
-    #[arg(long)]
-    recording_json: Option<PathBuf>,
+    /// Also render the intermediate Recording as JSON to this path.
+    #[arg(long = "dump-json")]
+    dump_json: Option<PathBuf>,
     /// Explicit log level override.
     #[arg(long, value_enum)]
     log_level: Option<LogLevel>,
@@ -143,25 +144,6 @@ fn real_main() -> Result<()> {
         evp::parse_script_file(path).with_context(|| format!("parsing {}", path.display()))?
     };
 
-    // Resolve output path: CLI flag wins, otherwise first `Output` directive.
-    let output_path: PathBuf = match cli.output.clone() {
-        Some(p) => p,
-        None => script
-            .outputs
-            .first()
-            .map(PathBuf::from)
-            .ok_or_else(|| anyhow::anyhow!("no Output directive and --output not given"))?,
-    };
-    if !output_path
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("gif") || e.eq_ignore_ascii_case("svg"))
-    {
-        bail!(
-            "only .gif and .svg outputs are supported (got `{}`)",
-            output_path.display()
-        );
-    }
-
     let render_opts = evp::RenderOptions {
         font_path: cli.font.clone().or(script.settings.font_family.clone()),
         font_size: script.settings.font_size,
@@ -177,36 +159,52 @@ fn real_main() -> Result<()> {
 
     info!(events = script.events.len(), "script loaded");
 
-    let ext = output_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
-    let out = if ext.eq_ignore_ascii_case("svg") {
-        let svg_opts = evp::SvgOptions {
-            font_size: render_opts.font_size,
-            ..Default::default()
-        };
-        info!(path = %output_path.display(), "streaming svg render while recording");
-        let out = evp::run_and_render_svg(&script, svg_opts, output_path.clone())
-            .context("running script + streaming svg")?;
-        info!(frames = out.recording.frames.len(), "recording captured");
-        out
-    } else {
-        info!(path = %output_path.display(), "streaming gif render while recording");
-        let out = evp::run_and_render_gif(&script, render_opts, output_path.clone())
-            .context("running script + streaming gif")?;
-        info!(frames = out.recording.frames.len(), "recording captured");
-        out
+    let mut output_paths: Vec<PathBuf> = match cli.output.clone() {
+        Some(p) => vec![p],
+        None => script.outputs.iter().map(PathBuf::from).collect(),
     };
-
-    if let Some(path) = &cli.recording_json {
-        let bytes = evp::recording_to_json(&out.recording)?;
-        std::fs::write(path, bytes).with_context(|| format!("writing {}", path.display()))?;
-        info!(path = %path.display(), "recording written");
+    if output_paths.is_empty() {
+        bail!("no Output directive and --output not given");
+    }
+    if let Some(path) = cli.dump_json.clone() {
+        output_paths.push(path);
     }
 
-    info!(path = %output_path.display(), "output written");
+    let mut renderers = Vec::with_capacity(output_paths.len());
+    for path in &output_paths {
+        renderers.push((backend_for_output(path, &render_opts)?, path.clone()));
+        info!(path = %path.display(), "streaming render while recording");
+    }
+
+    let stats =
+        evp::run_and_render(&script, renderers).context("running script + streaming renders")?;
+    info!(frames = stats.captured_frames, "frames captured");
+    for path in &output_paths {
+        info!(path = %path.display(), "output written");
+    }
     Ok(())
+}
+
+fn backend_for_output(
+    path: &std::path::Path,
+    render_opts: &evp::RenderOptions,
+) -> Result<evp::renderer::RendererBackend> {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if ext.eq_ignore_ascii_case("gif") {
+        Ok(evp::renderer::RendererBackend::Gif(render_opts.clone()))
+    } else if ext.eq_ignore_ascii_case("svg") {
+        Ok(evp::renderer::RendererBackend::Svg(evp::SvgOptions {
+            font_size: render_opts.font_size,
+            ..Default::default()
+        }))
+    } else if ext.eq_ignore_ascii_case("json") {
+        Ok(evp::renderer::RendererBackend::Json)
+    } else {
+        bail!(
+            "only .gif, .svg, and .json outputs are supported (got `{}`)",
+            path.display()
+        );
+    }
 }
 
 fn run_subcommand(command: Commands) -> Result<()> {
