@@ -103,3 +103,58 @@ jobs:
         env:
           CARGO_NET_OFFLINE: "false"
         run: cargo build --workspace --all-targets --locked
+
+      # ----------------------------------------------------------------
+      # Docker bake pre-warm.
+      #
+      # Even with the host cargo + Zig toolchain warmed above, anything
+      # that drives `docker buildx bake` (CI parity tests, the stress
+      # test rig, `extract-binary`) still runs inside an isolated
+      # network namespace. The Dockerfiles in `docker/` would otherwise
+      # try to download Zig from `ziglang.org` and the pinned Ghostty
+      # source / Zig package mirror — both blocked by the agent
+      # firewall.
+      #
+      # The published `ghcr.io/<owner>/evp-build-env:latest` image
+      # already bakes in:
+      #   * Rust + Zig 0.15.x, and
+      #   * a pre-fetched `/opt/ghostty-src` + `/opt/zig-global-cache`
+      #     warmed by `docker/cache-warmer` against the same
+      #     `libghostty-vt` git rev pinned in `Cargo.toml`.
+      #
+      # Pulling it here (and tagging it as `evp-build-env:local` so
+      # `docker-bake.hcl`'s defaults pick it up) means later `bake`
+      # invocations from inside the agent never need network access to
+      # rebuild the toolchain.
+      # ----------------------------------------------------------------
+      - name: Pre-pull evp-build-env image for offline bake
+        # Skip cleanly if this runner image happens to ship without
+        # docker — the cargo-only path above is enough to unblock the
+        # agent for non-bake tasks.
+        if: success()
+        run: |
+          set -euo pipefail
+          if ! command -v docker >/dev/null 2>&1; then
+              echo "docker not available on this runner; skipping bake pre-warm"
+              exit 0
+          fi
+          if ! docker info >/dev/null 2>&1; then
+              echo "docker daemon not reachable; skipping bake pre-warm"
+              exit 0
+          fi
+          owner_lc="${GITHUB_REPOSITORY_OWNER,,}"
+          remote="ghcr.io/${owner_lc}/evp-build-env:latest"
+          echo "Pulling ${remote}"
+          if ! docker pull "${remote}"; then
+              echo "::warning::failed to pull ${remote}; bake-based smoke tests will need to rebuild build-env"
+              exit 0
+          fi
+          docker tag "${remote}" evp-build-env:local
+          # Sanity: confirm the warmed cache landed where the
+          # builder expects it.
+          docker run --rm evp-build-env:local sh -c '
+              set -e
+              test -f "${GHOSTTY_SOURCE_DIR:-/opt/ghostty-src}/build.zig"
+              test -d "${ZIG_GLOBAL_CACHE_DIR:-/opt/zig-global-cache}"
+              echo "build-env warmed cache OK"
+          '

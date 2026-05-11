@@ -5,13 +5,19 @@ on:
     branches: [master]
     paths:
       - "docker/build-env.Dockerfile"
+      - "docker/cache-warmer/**"
       - "docker-bake.hcl"
+      - "Cargo.toml"
+      - "Cargo.lock"
       - ".github/workflows/build-env.yml"
   pull_request:
     branches: [master]
     paths:
       - "docker/build-env.Dockerfile"
+      - "docker/cache-warmer/**"
       - "docker-bake.hcl"
+      - "Cargo.toml"
+      - "Cargo.lock"
       - ".github/workflows/build-env.yml"
   workflow_dispatch:
 
