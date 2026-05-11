@@ -11,7 +11,7 @@ backend.
 | [keys.tape](keys.tape) | Modifier keys + line-editing (`Ctrl+U`). |
 | [colors.tape](colors.tape) | ANSI SGR colour table – stresses cell diffing. |
 | [progress.tape](progress.tape) | In-place line rewrites – stresses the diff path. |
-| [torture.tape](torture.tape) | 100×30 grid at 60 fps where every keystroke triggers a full-screen random-cell repaint. Used by the [`torture_benchmark`](torture_benchmark.rs) example and the `torture` GitHub Actions workflow. |
+| [stress_test.tape](stress_test.tape) | 100×30 grid at 60 fps where every keystroke triggers a full-screen random-cell repaint. Used by the [`stress_test_benchmark`](stress_test_benchmark.rs) example and the `stress_test` GitHub Actions workflow. |
 
 ## Running
 
@@ -41,10 +41,10 @@ release named `assets` and are linked from the project [README](../README.md).
     the upload directory.
 3. Add a row to the table above.
 
-## Torture benchmark
+## Stress-test benchmark
 
-The [`torture_benchmark`](torture_benchmark.rs) example drives
-[`torture.tape`](torture.tape) end-to-end through the evp library and
+The [`stress_test_benchmark`](stress_test_benchmark.rs) example drives
+[`stress_test.tape`](stress_test.tape) end-to-end through the evp library and
 prints a one-page report with pipeline-health counters
 (dropped raw-frame consumer frames, max queue depths, wall-clock time). It
 exits non-zero when more than **5 %** of raw-frame consumer sends were dropped.
@@ -52,26 +52,26 @@ exits non-zero when more than **5 %** of raw-frame consumer sends were dropped.
 Run locally on a single physical core and compare against VHS in Docker:
 
 ```bash
-cargo build --release --example torture_benchmark
+cargo build --release --example stress_test_benchmark
 
 # Pin to logical CPU 0 so the renderer/runner threads share one core –
 # this is what the GitHub Actions workflow does too.
-taskset -c 0 ./target/release/examples/torture_benchmark \
-    /tmp/evp-torture.gif /tmp/evp-torture.report.txt
+taskset -c 0 ./target/release/examples/stress_test_benchmark \
+    /tmp/evp-stress_test.gif /tmp/evp-stress_test.report.txt
 
 # Same scenario through VHS (single-core via docker):
-install -D -m 0755 scripts/torture_program.py /tmp/torture_program.py
+install -D -m 0755 scripts/stress_test_program.py /tmp/stress_test_program.py
 docker run --rm --cpus=1 --cpuset-cpus=0 \
     -v "$PWD/examples:/vhs" -v /tmp:/tmp \
-    ghcr.io/charmbracelet/vhs:latest torture.tape
+    ghcr.io/charmbracelet/vhs:latest stress_test.tape
 
-./scripts/torture_compare.sh \
-    /tmp/evp-torture.gif /tmp/evp-torture.report.txt \
-    examples/torture.gif /dev/null \
-    /tmp/torture-comparison.md
+./scripts/stress_test_compare.sh \
+    /tmp/evp-stress_test.gif /tmp/evp-stress_test.report.txt \
+    examples/stress_test.gif /dev/null \
+    /tmp/stress_test-comparison.md
 ```
 
-The [`torture` workflow](../.github/workflows/torture.yml) runs both
+The [`stress_test` workflow](../.github/workflows/stress_test.yml) runs both
 sides automatically and uploads the comparison + both GIFs as a job
 artifact.
 
@@ -81,12 +81,12 @@ artifact.
 stdlib-only Python tool that walks a GIF's per-frame `delay` metadata
 and reports how many frames look "long" given an expected framerate
 (i.e. effectively skipped). It works on any animated GIF, not just the
-torture output:
+stress_test output:
 
 ```bash
 python3 scripts/gif_frame_analyzer.py path/to/anim.gif --fps 60
 python3 scripts/gif_frame_analyzer.py path/to/anim.gif --fps 30 --json
 ```
 
-The torture workflow also runs it on both renderers' GIFs and embeds
+The stress_test workflow also runs it on both renderers' GIFs and embeds
 the results in `comparison.md`.

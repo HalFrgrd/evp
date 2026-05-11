@@ -59,13 +59,13 @@ target "test" {
   tags = ["evp-test:local"]
 }
 
-target "torture" {
+target "stress_test" {
   inherits   = ["_common"]
-  dockerfile = "docker/torture.Dockerfile"
+  dockerfile = "docker/stress_test.Dockerfile"
   contexts = {
     builder = "target:builder"
   }
-  tags = ["evp-torture:local"]
+  tags = ["evp-stress_test:local"]
 }
 
 target "runtime" {

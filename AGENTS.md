@@ -149,7 +149,7 @@ section.
 ## Docker build environment image
 
 - Dockerfiles are split under `docker/` and connected via `docker-bake.hcl`
-  `contexts` (`build-env -> builder -> test/runtime/torture/extract-binary`).
+  `contexts` (`build-env -> builder -> test/runtime/stress_test/extract-binary`).
 - The reusable Rust+Zig image is `docker/build-env.Dockerfile` and is published
   by `.github/workflows/build-env.yml` to `ghcr.io/<owner>/evp-build-env`.
 - If an environment cannot resolve `ziglang.org`, point bake at the published

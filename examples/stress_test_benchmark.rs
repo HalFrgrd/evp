@@ -1,8 +1,8 @@
-//! Torture-test benchmark for the evp PTY → raw-frame-consumer pipeline.
+//! Stress-test benchmark for the evp PTY → raw-frame-consumer pipeline.
 //!
-//! Drives `examples/torture.tape` (100×30 grid, 60 fps, ~10 s, types at
-//! 100 chars/min) which in turn runs `scripts/torture_program.py`. The
-//! torture program redraws *every cell* with random ASCII + random
+//! Drives `examples/stress_test.tape` (100×30 grid, 60 fps, ~10 s, types at
+//! 100 chars/min) which in turn runs `scripts/stress_test_program.py`. The
+//! stress_test program redraws *every cell* with random ASCII + random
 //! fg/bg + random modifiers on every keystroke, producing the
 //! worst-case "every cell changed" frame the renderer can be asked to
 //! handle.
@@ -28,8 +28,8 @@ use std::{fs, path::PathBuf, process::ExitCode, time::Instant};
 use anyhow::{Context, Result};
 use evp::{FrameStyle, RenderOptions, RunStats};
 
-/// Hard pass/fail threshold: > 5 % missed capture frames is a failure.
-const MAX_MISSED_FRACTION: f64 = 0.05;
+/// Hard pass/fail threshold: > 5 % dropped raw-frame consumer sends is a failure.
+const MAX_DROPPED_FRACTION: f64 = 0.05;
 
 fn main() -> ExitCode {
     // Make sure tracing output from evp ends up on stderr so the bench
@@ -48,14 +48,14 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             } else {
                 eprintln!(
-                    "TORTURE BENCH FAILED: missed-frame fraction exceeded {:.0}%",
-                    MAX_MISSED_FRACTION * 100.0
+                    "STRESS_TEST BENCH FAILED: dropped-consumer fraction exceeded {:.0}%",
+                    MAX_DROPPED_FRACTION * 100.0
                 );
                 ExitCode::from(1)
             }
         }
         Err(e) => {
-            eprintln!("TORTURE BENCH ERROR: {e:?}");
+            eprintln!("STRESS_TEST BENCH ERROR: {e:?}");
             ExitCode::from(2)
         }
     }
@@ -65,19 +65,19 @@ fn run() -> Result<bool> {
     let out_gif = std::env::args()
         .nth(1)
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp/evp-torture.gif"));
+        .unwrap_or_else(|| PathBuf::from("/tmp/evp-stress_test.gif"));
     let report_path = std::env::args()
         .nth(2)
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp/evp-torture-report.txt"));
+        .unwrap_or_else(|| PathBuf::from("/tmp/evp-stress_test-report.txt"));
 
     let tape_path = locate_tape()?;
-    let torture_path = locate_torture_program()?;
-    install_torture_program(&torture_path)?;
+    let stress_test_path = locate_stress_test_program()?;
+    install_stress_test_program(&stress_test_path)?;
 
     let tape_src = fs::read_to_string(&tape_path)
         .with_context(|| format!("reading tape {}", tape_path.display()))?;
-    let mut script = evp::parse_script(&tape_src).context("parsing torture tape")?;
+    let mut script = evp::parse_script(&tape_src).context("parsing stress_test tape")?;
     // Drop any `Output` directive in the tape; the binary controls the
     // output path itself.
     script.outputs.clear();
@@ -96,7 +96,7 @@ fn run() -> Result<bool> {
     };
 
     let cpu_set = current_cpu_affinity().unwrap_or_else(|| "(unknown)".to_string());
-    eprintln!("torture: starting (cpu_affinity={cpu_set})");
+    eprintln!("stress_test: starting (cpu_affinity={cpu_set})");
 
     let started = Instant::now();
     let stats =
@@ -105,9 +105,9 @@ fn run() -> Result<bool> {
 
     let gif_bytes = fs::metadata(&out_gif).map(|m| m.len()).unwrap_or(0);
 
-    let missed_pct = stats.dropped_consumer_fraction() * 100.0;
+    let dropped_pct = stats.dropped_consumer_fraction() * 100.0;
 
-    let report = format_report(&cpu_set, wall_ms, gif_bytes, &stats, missed_pct, &out_gif);
+    let report = format_report(&cpu_set, wall_ms, gif_bytes, &stats, dropped_pct, &out_gif);
 
     print!("{report}");
     if let Some(parent) = report_path.parent() {
@@ -115,9 +115,9 @@ fn run() -> Result<bool> {
     }
     fs::write(&report_path, &report)
         .with_context(|| format!("writing report {}", report_path.display()))?;
-    eprintln!("torture: report written to {}", report_path.display());
+    eprintln!("stress_test: report written to {}", report_path.display());
 
-    Ok(missed_pct <= MAX_MISSED_FRACTION * 100.0)
+    Ok(dropped_pct <= MAX_DROPPED_FRACTION * 100.0)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -126,11 +126,11 @@ fn format_report(
     wall_ms: u128,
     gif_bytes: u64,
     stats: &RunStats,
-    missed_pct: f64,
+    dropped_pct: f64,
     out_gif: &PathBuf,
 ) -> String {
     let mut s = String::new();
-    s.push_str("=== evp torture benchmark ===\n");
+    s.push_str("=== evp stress_test benchmark ===\n");
     s.push_str("renderer            = evp\n");
     s.push_str(&format!("output_gif          = {}\n", out_gif.display()));
     s.push_str(&format!("output_gif_bytes    = {gif_bytes}\n"));
@@ -153,16 +153,16 @@ fn format_report(
         stats.max_raw_frame_consumer_queue_len
     ));
     s.push_str(&format!(
-        "dropped_consumer    = {} ({missed_pct:.2}%)\n",
+        "dropped_consumer    = {} ({dropped_pct:.2}%)\n",
         stats.raw_frame_consumer_dropped_frames
     ));
     s.push_str(&format!(
-        "missed_threshold    = {:.0}%\n",
-        MAX_MISSED_FRACTION * 100.0
+        "dropped_threshold   = {:.0}%\n",
+        MAX_DROPPED_FRACTION * 100.0
     ));
     s.push_str(&format!(
         "result              = {}\n",
-        if missed_pct <= MAX_MISSED_FRACTION * 100.0 {
+        if dropped_pct <= MAX_DROPPED_FRACTION * 100.0 {
             "PASS"
         } else {
             "FAIL"
@@ -172,46 +172,48 @@ fn format_report(
 }
 
 fn locate_tape() -> Result<PathBuf> {
-    if let Ok(p) = std::env::var("EVP_TORTURE_TAPE") {
+    if let Ok(p) = std::env::var("EVP_STRESS_TEST_TAPE") {
         return Ok(PathBuf::from(p));
     }
     // Look up from CWD a few levels.
     let candidates = [
-        PathBuf::from("examples/torture.tape"),
-        PathBuf::from("../examples/torture.tape"),
-        PathBuf::from("/work/examples/torture.tape"),
+        PathBuf::from("examples/stress_test.tape"),
+        PathBuf::from("../examples/stress_test.tape"),
+        PathBuf::from("/work/examples/stress_test.tape"),
     ];
     for c in &candidates {
         if c.exists() {
             return Ok(c.clone());
         }
     }
-    anyhow::bail!("couldn't find examples/torture.tape; set EVP_TORTURE_TAPE to its path");
+    anyhow::bail!("couldn't find examples/stress_test.tape; set EVP_STRESS_TEST_TAPE to its path");
 }
 
-fn locate_torture_program() -> Result<PathBuf> {
-    if let Ok(p) = std::env::var("EVP_TORTURE_PROGRAM") {
+fn locate_stress_test_program() -> Result<PathBuf> {
+    if let Ok(p) = std::env::var("EVP_STRESS_TEST_PROGRAM") {
         return Ok(PathBuf::from(p));
     }
     let candidates = [
-        PathBuf::from("scripts/torture_program.py"),
-        PathBuf::from("../scripts/torture_program.py"),
-        PathBuf::from("/work/scripts/torture_program.py"),
+        PathBuf::from("scripts/stress_test_program.py"),
+        PathBuf::from("../scripts/stress_test_program.py"),
+        PathBuf::from("/work/scripts/stress_test_program.py"),
     ];
     for c in &candidates {
         if c.exists() {
             return Ok(c.clone());
         }
     }
-    anyhow::bail!("couldn't find scripts/torture_program.py; set EVP_TORTURE_PROGRAM to its path");
+    anyhow::bail!(
+        "couldn't find scripts/stress_test_program.py; set EVP_STRESS_TEST_PROGRAM to its path"
+    );
 }
 
-/// The tape hard-codes `/tmp/torture_program.py` so the same file works
+/// The tape hard-codes `/tmp/stress_test_program.py` so the same file works
 /// for both the evp run (this binary) and the VHS run (separate Docker
 /// container). Copy the program into place so the spawned shell can
 /// find it.
-fn install_torture_program(src: &PathBuf) -> Result<()> {
-    let dst = PathBuf::from("/tmp/torture_program.py");
+fn install_stress_test_program(src: &PathBuf) -> Result<()> {
+    let dst = PathBuf::from("/tmp/stress_test_program.py");
     let bytes = fs::read(src).with_context(|| format!("reading {}", src.display()))?;
     fs::write(&dst, &bytes).with_context(|| format!("writing {}", dst.display()))?;
     #[cfg(unix)]
