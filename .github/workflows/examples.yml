@@ -79,7 +79,7 @@ jobs:
         # Replaces only the .gif assets on the rolling `assets` release.
         # `make_latest: false` keeps the latest semver release flagged as
         # latest in the UI; `assets` is just the artifact dump.
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: assets
           name: Example assets

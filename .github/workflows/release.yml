@@ -92,7 +92,7 @@ jobs:
           echo "checksum=dist/${stage}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
 
       - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.name }}
           files: |
