@@ -188,8 +188,13 @@ pub fn render_png_frame(frame: &RawFrame, opts: &RenderOptions, out: &Path) -> R
         &mut warned_missing_faces,
     );
     let layout = layout_metrics(frame.cols, frame.rows, cell_w, cell_h, opts.frame_style);
-    lodepng::encode24_file(out, &buf, layout.canvas_w, layout.canvas_h)
-        .with_context(|| format!("encoding {}", out.display()))
+    lodepng::encode24_file(
+        out,
+        &buf,
+        layout.canvas_w as usize,
+        layout.canvas_h as usize,
+    )
+    .with_context(|| format!("encoding {}", out.display()))
 }
 
 /// Convert RGB (3-byte) to RGBA (4-byte) with full alpha.
