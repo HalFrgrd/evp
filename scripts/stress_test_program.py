@@ -30,6 +30,8 @@ from __future__ import annotations
 import os
 import random
 import sys
+import termios
+import tty
 
 
 COLS = int(os.environ.get("STRESS_TEST_COLS", "100"))
@@ -81,24 +83,31 @@ def main() -> int:
         return 0
 
     stdin_fd = sys.stdin.fileno()
-    while True:
-        try:
-            data = os.read(stdin_fd, 1)
-        except (KeyboardInterrupt, OSError):
-            break
-        if not data:
-            break
-        try:
-            render_frame(rng, sys.stdout)
-        except BrokenPipeError:
-            break
-
-    # Restore cursor on exit so the host shell isn't left with it hidden.
+    old_tty = None
+    if os.isatty(stdin_fd):
+        old_tty = termios.tcgetattr(stdin_fd)
+        tty.setraw(stdin_fd)
     try:
-        sys.stdout.write("\x1b[0m\x1b[?25h\n")
-        sys.stdout.flush()
-    except BrokenPipeError:
-        pass
+        while True:
+            try:
+                data = os.read(stdin_fd, 1)
+            except (KeyboardInterrupt, OSError):
+                break
+            if not data:
+                break
+            try:
+                render_frame(rng, sys.stdout)
+            except BrokenPipeError:
+                break
+    finally:
+        if old_tty is not None:
+            termios.tcsetattr(stdin_fd, termios.TCSADRAIN, old_tty)
+        # Restore cursor on exit so the host shell isn't left with it hidden.
+        try:
+            sys.stdout.write("\x1b[0m\x1b[?25h\n")
+            sys.stdout.flush()
+        except BrokenPipeError:
+            pass
     return 0
 
 
