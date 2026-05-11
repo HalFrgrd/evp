@@ -42,14 +42,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Zig ${{ env.ZIG_VERSION }}
+      - name: Install Zig 0.15.2
         # Mirrors the curl-from-ziglang.org logic in
         # docker/build-env.Dockerfile so the toolchain pinning stays
         # in one place. Installs to /opt/zig and exports the path
         # for every later step (and for the agent that runs after
         # these setup steps complete).
-        env:
-          ZIG_VERSION: ${{ env.ZIG_VERSION }}
         run: |
           set -euo pipefail
           arch="$(uname -m)"

@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::Context;
-use evp::{Frame, Recording, RenderOptions};
+use evp::{Frame, FrameStyle, Recording, RenderOptions};
 
 fn main() -> anyhow::Result<()> {
     let out = std::env::args()
@@ -40,10 +40,10 @@ fn main() -> anyhow::Result<()> {
         .count();
     let diff_frames = rec.frames.len() - key_frames;
 
-    let render_opts = RenderOptions {
+    let render_opts = crate::RenderOptions {
         font_path: None,
-        font_size: 18.0,
-        padding_px: 20,
+        font_size: 22.0,
+        frame_style: FrameStyle::default()
     };
 
     let mut render_ms_total = 0u128;
