@@ -28,13 +28,6 @@ pub struct EncoderStats {
     /// Highest observed `len()` of the encoder's inbound queue
     /// (runner → encoder). Capacity is [`RAW_FRAME_CHANNEL_CAPACITY`].
     pub max_inbound_queue_len: AtomicUsize,
-    /// Highest observed `len()` of the renderer tap queue
-    /// (encoder → renderer). Zero when no tap is configured.
-    pub max_tap_queue_len: AtomicUsize,
-    /// Number of frames the encoder couldn't forward to the renderer tap
-    /// because the tap queue was full. The recording itself is always
-    /// complete; only the rendered output may be missing these.
-    pub tap_dropped_frames: AtomicU64,
     /// Number of frames the encoder received from the runner.
     pub frames_received: AtomicU64,
 }

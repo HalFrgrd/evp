@@ -2,13 +2,13 @@
 
 > **evp** — a small Rust CLI
 > that ingests [VHS](https://github.com/charmbracelet/vhs)-format scripts
-> and produces animated GIFs (and, soon, SVGs) using
+> and produces GIF, SVG, or JSON outputs using
 > [libghostty](https://ghostty.org) as the underlying terminal emulator.
 
 `evp` runs a real shell inside an embedded Ghostty VT, schedules typed
 input from your `.tape` script onto an absolute timeline, snapshots the
-terminal at the configured framerate on a worker thread, then renders
-the resulting `Recording` to an animated artifact.
+terminal at the configured framerate, then streams frames to one or more
+renderer threads.
 
 | | |
 | --- | --- |
@@ -201,8 +201,8 @@ use this same API end-to-end.
 ## CLI
 
 ```text
-evp <script> [-o <output.gif>] [--font <path.ttf>] [--recording-json <path.json>] [--log-level <level>]
-evp --run-test-script [-o <output.gif>]
+evp <script> [-o <output.gif|output.svg|output.json>] [--font <path.ttf>] [--dump-json <path.json>] [--log-level <level>]
+evp --run-test-script [-o <output.gif|output.svg|output.json>]
 evp themes
 evp validate <script>
 evp completion <shell>
@@ -212,9 +212,9 @@ evp completion <shell>
 | --- | --- |
 | `<script>` | Path to a `.tape` file. Required unless `--run-test-script` is set. |
 | `--run-test-script` | Run a small built-in demo tape embedded in the binary. Writes `./evp-test.gif` by default. Useful for verifying an install end-to-end with no external files. |
-| `-o`, `--output` | Override the script's `Output` directive. Output extension picks the renderer (`.gif` or `.svg`). |
+| `-o`, `--output` | Override the script's `Output` directives. Output extension picks the renderer (`.gif`, `.svg`, or `.json`). |
 | `--font` | Path to a TTF/OTF/TTC used by the GIF renderer. Defaults to embedded `JetBrains Mono` family files in `assets/fonts/`. |
-| `--recording-json` | Also dump the intermediate `Recording` to JSON for later re-rendering or inspection. |
+| `--dump-json` | Also render the intermediate `Recording` to JSON for later re-rendering or inspection. |
 | `--log-level` | Explicit level override: `error`, `warn`, `info`, `debug`, `trace`. |
 | `themes` | Print the bundled VHS theme preset names supported by `Set Theme "<name>"`. |
 | `validate <script>` | Parse a tape and exit without running the PTY or renderer. |
@@ -270,7 +270,7 @@ Pin to a specific release for reproducibility:
 | Input | Default | Meaning |
 | --- | --- | --- |
 | `script`      | *(required)* | Path to the `.tape` script. |
-| `output`      | from script's `Output` directive | Output file path. Extension picks the renderer (`.gif` or `.svg`). |
+| `output`      | from script's `Output` directive | Output file path. Extension picks the renderer (`.gif`, `.svg`, or `.json`). |
 | `version`     | `latest`     | evp release tag to install. |
 | `font`        | embedded JetBrains Mono | Optional path to a TTF/OTF font for the GIF renderer. |
 | `log-level`   | `info`       | One of `error`, `warn`, `info`, `debug`, `trace`. |
@@ -321,10 +321,11 @@ is needed.
 | `.tape` parsing (`Set` / `Type` / `Sleep` / `Wait` / `Hide` / `Show` / `Ctrl+X` / `Output` / `Env` / `Source` / `Require`) | working |
 | PTY-backed shell, libghostty VT, diff-encoded `Recording` | working |
 | GIF renderer | working |
-| JSON serialisation of `Recording` | working |
+| JSON renderer / serialisation of `Recording` | working |
 | Animated SVG renderer | working (selectable text, ~10× smaller than GIF) |
 | `Screenshot`, `Copy` / `Paste`, `Set Theme`, `Set Margin*`, `Set WindowBar`, `Set BorderRadius`, `Set CursorBlink` | working |
-| `Set LetterSpacing`, `Set LoopOffset`, multiple `Output`, `.mp4` / `.webm` / `.txt` / `.ascii` / PNG-frames outputs | **not implemented — tape will fail loudly with a clear error** |
+| Multiple `Output` directives for `.gif` / `.svg` / `.json` | working |
+| `Set LetterSpacing`, `Set LoopOffset`, `.mp4` / `.webm` / `.txt` / `.ascii` / PNG-frames outputs | **not implemented — tape will fail loudly with a clear error** |
 
 See [architecture.md](architecture.md) for the design rationale.
 See the next section for the full VHS-vs-evp parity matrix.
@@ -343,7 +344,7 @@ exercised every directive it contains.
 
 | VHS directive | evp |
 | --- | --- |
-| `Output <path>` (single `.gif` / `.svg`) | ✅ |
+| `Output <path>` (`.gif` / `.svg` / `.json`; multiple allowed) | ✅ |
 | `Set Shell <command...>` | ✅ accepts a full command line (e.g. `bash`, `/bin/bash`, `bash --norc`, `bash --rcfile my.rc`) |
 | `Set FontFamily <path-or-name>` (path to a TTF/OTF/TTC) | ⚠️ accepts a font *file path*; VHS resolves font *family names* via fontconfig. Pass `--font /path/to/font.ttf` on the CLI for the same effect. |
 | `Set FontSize <n>` | ✅ |
@@ -386,8 +387,7 @@ floor:
 | --- | --- |
 | `Set LetterSpacing <px>` | parse-time error |
 | `Set LoopOffset <pct>` | parse-time error |
-| Multiple `Output` directives in one tape | parse-time error (use a separate tape per output) |
-| `Output out.mp4` / `.webm` / `.txt` / `.ascii` / PNG frames directory | parse-time error (only `.gif` and `.svg` are written) |
+| `Output out.mp4` / `.webm` / `.txt` / `.ascii` / PNG frames directory | parse-time error (only `.gif`, `.svg`, and `.json` are written) |
 
 ### CLI / tooling not implemented
 
@@ -422,9 +422,6 @@ byte-identical:
   multi-frame mouse-wheel scrolls. evp models them as discrete key
   presses fed to the PTY; programs that respond to mouse wheel events
   in mouse-tracking mode (e.g. `less`) won't react to them.
-- **Single output.** VHS allows multiple `Output` directives in one
-  tape and renders each. evp restricts a tape to one output — split
-  into separate tapes for multi-format renders.
 - **GitHub Action.** VHS has
   [`charmbracelet/vhs-action`](https://github.com/charmbracelet/vhs-action);
   evp ships its own composite action — see

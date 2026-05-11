@@ -236,6 +236,38 @@ Sleep 200ms
     }
 }
 
+#[test]
+fn render_json_writes_intermediate_recording() {
+    let tape = r#"
+Output out.json
+Set Width 800
+Set Height 300
+Set FontSize 20
+Set TypingSpeed 20ms
+Set Framerate 30
+Set Shell /bin/sh
+Sleep 200ms
+Type "json"
+Sleep 200ms
+"#;
+    let rec = record(tape);
+    let path = std::env::temp_dir().join(format!(
+        "evp-render-json-{}-{}.json",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+
+    evp::render_json(&rec, &path).expect("render json");
+    let bytes = std::fs::read(&path).expect("read json");
+    let parsed = evp::recording_from_json(&bytes).expect("parse json");
+    std::fs::remove_file(&path).ok();
+    assert_eq!(parsed.frames.len(), rec.frames.len());
+    assert_eq!(parsed.frame_style, rec.frame_style);
+}
+
 /// `Hide`/`Show` should pause and resume frame recording without pausing
 /// script execution. Hidden wall-clock time must not appear as a large
 /// timestamp gap in the JSON intermediate format.

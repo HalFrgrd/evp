@@ -175,7 +175,8 @@ fn real_main() -> Result<()> {
         info!(path = %path.display(), "streaming render while recording");
     }
 
-    let out = evp::run_and_render(&script, renderers).context("running script + streaming renders")?;
+    let out =
+        evp::run_and_render(&script, renderers).context("running script + streaming renders")?;
     info!(frames = out.recording.frames.len(), "recording captured");
     for path in &output_paths {
         info!(path = %path.display(), "output written");

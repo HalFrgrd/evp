@@ -79,8 +79,11 @@ pub fn run_and_render_gif(
     render_opts: RenderOptions,
     output: PathBuf,
 ) -> Result<RunOutput> {
-    run_and_render(script, vec![(renderer::RendererBackend::Gif(render_opts), output)])
-        .context("running script with gif stream")
+    run_and_render(
+        script,
+        vec![(renderer::RendererBackend::Gif(render_opts), output)],
+    )
+    .context("running script with gif stream")
 }
 
 /// Run a parsed script while streaming SVG assembly in parallel.
@@ -89,8 +92,11 @@ pub fn run_and_render_svg(
     render_opts: SvgOptions,
     output: PathBuf,
 ) -> Result<RunOutput> {
-    run_and_render(script, vec![(renderer::RendererBackend::Svg(render_opts), output)])
-        .context("running script with svg stream")
+    run_and_render(
+        script,
+        vec![(renderer::RendererBackend::Svg(render_opts), output)],
+    )
+    .context("running script with svg stream")
 }
 
 /// Run a parsed script while streaming one or more renderers in parallel.
@@ -126,8 +132,8 @@ pub fn run_and_render(
     }
 
     let taps = streams.iter().map(|stream| stream.tx.clone()).collect();
-    let out =
-        runner::run_with_frame_taps(script, taps).context("running script with renderer streams")?;
+    let out = runner::run_with_frame_taps(script, taps)
+        .context("running script with renderer streams")?;
     for stream in streams {
         stream.join().context("finalising renderer stream")?;
     }

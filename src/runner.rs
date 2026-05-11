@@ -1,5 +1,5 @@
 //! Main loop: drive libghostty + the PTY, schedule events, and ship
-//! captured frames to the encoder thread.
+//! captured frames to the encoder and renderer threads.
 //!
 //! ## Threading model
 //!
@@ -9,6 +9,8 @@
 //!   snapshot at every framerate tick.
 //! - **Encoder thread** (see [`crate::encoder`]): receives raw frames and
 //!   folds them into a diff‑compressed [`Recording`].
+//! - **Renderer threads** (see [`crate::renderer`]): optionally receive the
+//!   same dense raw frames directly from the runner.
 //!
 //! Time is computed up‑front: each event in the parsed script gets an
 //! absolute deadline. The loop sleeps until the next interesting deadline
@@ -65,11 +67,11 @@ pub struct RunStats {
     pub dropped_capture_frames: u64,
     /// Highest observed `len()` of the runner → encoder queue.
     pub max_capture_queue_len: usize,
-    /// Highest observed `len()` of the encoder → renderer queue.
+    /// Highest observed `len()` of any runner → renderer queue.
     /// Zero when no renderer was attached.
     pub max_renderer_queue_len: usize,
-    /// Number of frames the encoder couldn't forward to the renderer
-    /// because the renderer queue was full.
+    /// Number of frames the runner couldn't forward to renderers because
+    /// renderer queues were full.
     pub tap_dropped_frames: u64,
     /// Number of frames the encoder received from the runner. Should
     /// match `captured_frames` modulo races during shutdown.
@@ -209,17 +211,15 @@ pub fn run_with_frame_taps(
     // total" while a tape is rendering.
     let expected_total = timeline_end;
 
-    let encoder = crate::encoder::spawn(
-        EncoderConfig {
-            cols: opts.cols,
-            rows: opts.rows,
-            framerate: script.settings.framerate,
-            cell_width_px: opts.cell_w_px,
-            cell_height_px: opts.cell_h_px,
-            frame_style: opts.frame_style,
-            keyframe_interval: script.settings.framerate * 5,
-        },
-    );
+    let encoder = crate::encoder::spawn(EncoderConfig {
+        cols: opts.cols,
+        rows: opts.rows,
+        framerate: script.settings.framerate,
+        cell_width_px: opts.cell_w_px,
+        cell_height_px: opts.cell_h_px,
+        frame_style: opts.frame_style,
+        keyframe_interval: script.settings.framerate * 5,
+    });
     let encoder_stats: Arc<EncoderStats> = Arc::clone(&encoder.stats);
 
     // Snapshot scratch state.
@@ -300,7 +300,6 @@ pub fn run_with_frame_taps(
                 &mut clipboard,
                 &mut pending_screenshots,
                 start,
-                script,
             )?;
 
             if !was_hidden && hidden {
@@ -627,7 +626,6 @@ fn execute_event(
     clipboard: &mut String,
     pending_screenshots: &mut Vec<PathBuf>,
     start: Instant,
-    script: &Script,
 ) -> Result<()> {
     match event {
         Event::Type { text, .. } => {
