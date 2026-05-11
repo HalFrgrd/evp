@@ -55,24 +55,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute image metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ steps.img.outputs.name }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=sha,format=short
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Generate bake tag overrides
-        id: tags
-        run: |
-          set -euo pipefail
-          tags_json=$(jq -R . <<< "${{ steps.meta.outputs.tags }}" | jq -s .)
-          echo "set=build-env.tags=${tags_json}" >> "$GITHUB_OUTPUT"
-
       - name: Build and push build-env image
         uses: docker/bake-action@v5
         with:
@@ -80,6 +62,6 @@ jobs:
           targets: build-env
           push: ${{ github.event_name != 'pull_request' }}
           set: |
-            ${{ steps.tags.outputs.set }}
+            build-env.tags=${{ env.REGISTRY }}/${{ steps.img.outputs.name }}:latest
             build-env.cache-from=type=gha
             build-env.cache-to=type=gha,mode=max
