@@ -14,7 +14,7 @@ use ab_glyph::{Font, FontArc, Glyph, PxScale, ScaleFont};
 use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
 use gifski::{Settings, progress};
-use tracing::{info, warn};
+use tracing::{debug, warn};
 use woff2_patched::convert_woff2_to_ttf;
 
 use crate::{
@@ -96,7 +96,7 @@ pub fn spawn_gif_stream(
     output: PathBuf,
 ) -> Result<GifStreamHandle> {
     let loaded = load_font_family(opts.font_path.as_deref())?;
-    info!(font = %loaded.description, "using font for gif streaming");
+    debug!(font = %loaded.description, "using font for gif streaming");
 
     let family = loaded.family;
     let scale = PxScale::from(opts.font_size);

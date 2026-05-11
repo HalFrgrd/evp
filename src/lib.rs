@@ -42,6 +42,7 @@ pub mod style;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use tracing::info;
 
 pub use full_recording::{FullRecording, FullRecordingConfig};
 pub use recording::{CellChange, CellSnap, Frame, RawFrame, Recording};
@@ -141,7 +142,8 @@ pub fn run_and_render(
         cell_height_px: opts.cell_h_px,
         frame_style: opts.frame_style,
     };
-    let mut streams = Vec::with_capacity(renderers.len());
+    let mut streams: Vec<(renderer::RendererHandle, PathBuf)> =
+        Vec::with_capacity(renderers.len());
     for (backend, output) in renderers {
         let stream = renderer::spawn_renderer(
             renderer::RendererConfig {
@@ -153,17 +155,22 @@ pub fn run_and_render(
                 frame_style: cfg.frame_style,
             },
             backend,
-            output,
+            output.clone(),
         )
         .context("spawning renderer stream")?;
-        streams.push(stream);
+        streams.push((stream, output));
     }
 
-    let raw_frame_consumers = streams.iter().map(|stream| stream.tx.clone()).collect();
+    let raw_frame_consumers = streams.iter().map(|(stream, _)| stream.tx.clone()).collect();
     let stats = runner::run_with_raw_frame_consumers(script, raw_frame_consumers)
         .context("running script with renderer streams")?;
-    for stream in streams {
+    for (stream, path) in streams {
         stream.join().context("finalising renderer stream")?;
+        if let Ok(meta) = std::fs::metadata(&path) {
+            info!(path = %path.display(), size_bytes = meta.len(), "render thread finished");
+        } else {
+            info!(path = %path.display(), "render thread finished");
+        }
     }
     Ok(stats)
 }
