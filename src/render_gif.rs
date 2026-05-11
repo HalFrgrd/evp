@@ -20,12 +20,9 @@ use woff2_patched::convert_woff2_to_ttf;
 use crate::{
     FrameStyle,
     recording::{RawFrame, Recording, style_flags},
+    render_common::{RAW_FRAME_CONSUMER_CHANNEL_CAPACITY, RenderOptions},
     style::window_bar_dot_metrics,
 };
-
-// Rendering can briefly lag behind capture on busy systems; this queue absorbs
-// bursts so the upstream pipeline usually stays lock-free.
-const RENDER_STREAM_CHANNEL_CAPACITY: usize = 4096;
 
 const EMBEDDED_JETBRAINS_NERD_MONO_REGULAR_WOFF2: &[u8] = include_bytes!(concat!(
     env!("OUT_DIR"),
@@ -61,12 +58,6 @@ struct FontFamily {
     italic: Option<FontArc>,
     bold_italic: Option<FontArc>,
     fallback_regular: Vec<FontArc>,
-}
-
-pub struct RenderOptions {
-    pub font_path: Option<String>,
-    pub font_size: f32,
-    pub frame_style: FrameStyle,
 }
 
 pub struct GifStreamConfig {
@@ -118,7 +109,8 @@ pub fn spawn_gif_stream(
     let baseline = scaled.ascent().ceil() as u32;
     let layout = layout_metrics(cfg.cols, cfg.rows, cell_w, cell_h, opts.frame_style);
 
-    let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) = bounded(RENDER_STREAM_CHANNEL_CAPACITY);
+    let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) =
+        bounded(RAW_FRAME_CONSUMER_CHANNEL_CAPACITY);
     let join = thread::Builder::new()
         .name("evp-gif-stream".into())
         .spawn(move || {

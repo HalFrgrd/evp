@@ -45,10 +45,9 @@ use crossbeam_channel::{Receiver, Sender, bounded};
 use crate::{
     FrameStyle,
     recording::{RawFrame, Recording, style_flags},
+    render_common::RAW_FRAME_CONSUMER_CHANNEL_CAPACITY,
     style::{rgb_hex, window_bar_dot_metrics},
 };
-
-const SVG_STREAM_CHANNEL_CAPACITY: usize = 4096;
 
 /// Tunables for the SVG renderer.
 #[derive(Debug, Clone)]
@@ -102,7 +101,8 @@ pub fn spawn_svg_stream(
     opts: SvgOptions,
     output: PathBuf,
 ) -> Result<SvgStreamHandle> {
-    let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) = bounded(SVG_STREAM_CHANNEL_CAPACITY);
+    let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) =
+        bounded(RAW_FRAME_CONSUMER_CHANNEL_CAPACITY);
     let join = thread::Builder::new()
         .name("evp-svg-stream".into())
         .spawn(move || run_svg_stream_worker(rx, cfg, opts, output))

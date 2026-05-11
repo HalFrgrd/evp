@@ -1,9 +1,8 @@
 name: stress_test
 
-# Runs the stress-test benchmark for the evp PTY → encoder → renderer
-# pipeline and compares the resulting GIF (and timing) against an
-# equivalent VHS run. Both runs are pinned to a single physical CPU
-# core so the comparison is fair.
+# Runs the stress-test benchmark for the evp PTY → raw-frame-consumer pipeline
+# and compares the resulting GIF (and timing) against an equivalent VHS run.
+# Both runs are pinned to a single physical CPU core so the comparison is fair.
 #
 # The build environment is the bake `stress_test` target wired from split
 # Dockerfiles, with the same Rust + Zig toolchain as ci.yml / release.yml / docker.yml. The
@@ -24,10 +23,11 @@ on:
       - "scripts/stress_test_program.py"
       - "scripts/stress_test_compare.sh"
       - "scripts/gif_frame_analyzer.py"
+      - "src/full_recording.rs"
       - "src/runner.rs"
-      - "src/encoder.rs"
       - "src/renderer.rs"
-      - "src/render.rs"
+      - "src/render_common.rs"
+      - "src/render_gif.rs"
       - "src/lib.rs"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -141,6 +141,8 @@ jobs:
           # Mount the staged dir as /vhs (workdir) and bind /tmp inside
           # the container to the host's stress_test-out/work/tmp so the
           # Python script is reachable at /tmp/stress_test_program.py.
+          # HOME/XDG_* must point at writable /tmp paths for Chrome's
+          # crashpad helper when VHS runs as the non-root GitHub user.
           docker run --rm \
               --cpus=1 --cpuset-cpus=0 \
               --user "$(id -u):$(id -g)" \

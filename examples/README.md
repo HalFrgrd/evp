@@ -9,7 +9,7 @@ backend.
 | [hello.tape](hello.tape) | Bare-minimum recording – type a single command. |
 | [shell-tour.tape](shell-tour.tape) | Multiple commands paced with `Wait` instead of `Sleep`. |
 | [keys.tape](keys.tape) | Modifier keys + line-editing (`Ctrl+U`). |
-| [colors.tape](colors.tape) | ANSI SGR colour table – stresses the cell encoder. |
+| [colors.tape](colors.tape) | ANSI SGR colour table – stresses cell diffing. |
 | [progress.tape](progress.tape) | In-place line rewrites – stresses the diff path. |
 | [stress_test.tape](stress_test.tape) | 100×30 grid at 60 fps where every keystroke triggers a full-screen random-cell repaint. Used by the [`stress_test_benchmark`](stress_test_benchmark.rs) example and the `stress_test` GitHub Actions workflow. |
 
@@ -46,22 +46,28 @@ release named `assets` and are linked from the project [README](../README.md).
 The [`stress_test_benchmark`](stress_test_benchmark.rs) example drives
 [`stress_test.tape`](stress_test.tape) end-to-end through the evp library and
 prints a one-page report with pipeline-health counters
-(missed frames, max queue depths, wall-clock time). It exits non-zero
-when more than **5 %** of expected frames were dropped.
+(dropped raw-frame consumer frames, max queue depths, wall-clock time). It
+exits non-zero when more than **5 %** of raw-frame consumer sends were dropped.
 
 Run locally on a single physical core and compare against VHS in Docker:
 
 ```bash
 cargo build --release --example stress_test_benchmark
 
-# Pin to logical CPU 0 so the renderer/encoder/runner threads share
-# one core – this is what the GitHub Actions workflow does too.
+# Pin to logical CPU 0 so the renderer/runner threads share one core –
+# this is what the GitHub Actions workflow does too.
 taskset -c 0 ./target/release/examples/stress_test_benchmark \
     /tmp/evp-stress_test.gif /tmp/evp-stress_test.report.txt
 
 # Same scenario through VHS (single-core via docker):
 install -D -m 0755 scripts/stress_test_program.py /tmp/stress_test_program.py
+# HOME/XDG_* keep Chrome's crashpad helper on writable paths when the
+# VHS container runs as a non-root user.
 docker run --rm --cpus=1 --cpuset-cpus=0 \
+    -e HOME=/tmp \
+    -e XDG_CONFIG_HOME=/tmp/chrome-config \
+    -e XDG_CACHE_HOME=/tmp/chrome-cache \
+    -e XDG_RUNTIME_DIR=/tmp/chrome-runtime \
     -v "$PWD/examples:/vhs" -v /tmp:/tmp \
     ghcr.io/charmbracelet/vhs:latest stress_test.tape
 

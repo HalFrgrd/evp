@@ -42,27 +42,23 @@ render_avg_ms      ≈ 1200    (gifski streaming, 320 frames)
 
 ## Streaming render pipeline (must-know)
 
-`evp` runs three cooperating threads:
+`evp` runs the runner plus one raw-frame consumer worker per output or
+library recording request:
 
 1. **PTY/runner** — drives libghostty + the script timeline. Captures one
-   `RawFrame` per frame deadline.
-2. **Encoder** — folds each `RawFrame` into the diff-compressed
-   `Recording` and forwards a clone to the renderer through the
-   *frame_tap* channel.
-3. **Renderer worker** (gif or svg) — rasterizes/encodes incrementally as
-   frames arrive, writing the output file when its receiver closes.
+   `RawFrame` per frame deadline and hands clones to consumers with
+   non-blocking sends.
+2. **RawFrameConsumer worker** — gif/svg/json renderers write output files;
+   the optional `FullRecording` consumer builds an in-memory `Recording` for
+   library callers.
 
 ### Hard rules
 
-- The PTY thread **must never block**. It uses `try_send` on the encoder
-  channel; if the queue (4096 frames) is full, the frame is dropped and a
-  `dropped_capture_frames` warning is logged at the end. Do not switch
-  this back to `send()`.
-- The encoder uses `try_send` on the frame_tap for the same reason — a
-  slow renderer must not stall the recording.
-- Bounded channel capacity is `4096` for both `runner→encoder` and
-  `encoder→renderer`. This is large enough to absorb bursts on cold
-  starts; do not shrink it without a benchmark.
+- The PTY thread **must never block** on raw-frame consumers. It uses
+  `try_send` on each consumer channel; if a queue is full, that consumer frame
+  is dropped and `raw_frame_consumer_dropped_frames` is logged at the end.
+- Bounded raw-frame consumer channel capacity is `4096`. This is large enough
+  to absorb bursts on cold starts; do not shrink it without a benchmark.
 
 ### Sender-drop discipline (the hang we keep re-creating)
 
@@ -85,7 +81,7 @@ Do the same pattern in any new handle wrapper. This was the cause of the
 worker had two live senders (`self.tx` on the wrapper + the inner
 handle's `tx`) and `h.join()` deadlocked.
 
-### Gifski-specific rules (`src/render.rs`)
+### Gifski-specific rules (`src/render_gif.rs`)
 
 - `gifski::new()` returns `(collector, writer)`. The writer's `write()`
   call **blocks until the collector is dropped**. Two valid topologies:
@@ -105,15 +101,15 @@ handle's `tx`) and `h.join()` deadlocked.
 - libghostty types (`Terminal`, render iterators) are `!Send + !Sync`. They
   stay on the runner thread. Only owned `RawFrame` values (plain `Vec` +
   cursor + colors) ever cross a thread boundary.
-- The encoder thread owns the only mutable `Recording` until it joins.
-- Any new background work (e.g. JSON dumping, screenshot side outputs)
-  should consume the recording **after** the runner returns it, not
-  in parallel — otherwise reconstruction/diff invariants get tricky.
+- The runner must not own a `RecordingBuilder` by default. Only the optional
+  `FullRecording` raw-frame consumer builds an in-memory `Recording`.
 
 ## Output formats
 
-- `.gif` and `.svg` go through the same `renderer::run` entry point.
-  Both end up in a streaming worker driven by the `frame_tap` channel.
+- `.gif`, `.svg`, and `.json` go through the same `renderer::spawn_renderer`
+  entry point. Each output gets its own streaming worker.
+- `run_and_return_recording` attaches the `FullRecording` consumer for tests
+  and library callers that need a `Recording`.
 - Adding a new output format means: implement a `spawn_X_stream`
   returning a handle with `tx: Sender<RawFrame>` + `join() -> Result<()>`,
   then add a `RendererBackend::X` arm in `src/renderer.rs`.
@@ -123,7 +119,7 @@ handle's `tx`) and `h.join()` deadlocked.
 Useful filters when chasing pipeline bugs:
 
 ```
-RUST_LOG=evp::runner=debug,evp::encoder=info,evp::render=info ./target/release/evp …
+RUST_LOG=evp::runner=debug,evp::render_gif=info,evp::render_svg=info ./target/release/evp …
 ```
 
 Look for these milestones (in order):
@@ -131,11 +127,11 @@ Look for these milestones (in order):
 ```
 spawning pty
 applied default Snazzy color palette
-recording captured frames=…
+frames captured
 output written path=…
 ```
 
-If "recording captured" prints but "output written" never does, you're in
+If "frames captured" prints but "output written" never does, you're in
 a renderer-thread deadlock — re-read the *Sender-drop discipline*
 section.
 

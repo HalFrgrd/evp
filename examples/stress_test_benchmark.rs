@@ -1,4 +1,4 @@
-//! Stress-test benchmark for the evp PTY → encoder → renderer pipeline.
+//! Stress-test benchmark for the evp PTY → raw-frame-consumer pipeline.
 //!
 //! Drives `examples/stress_test.tape` (100×30 grid, 60 fps, ~10 s, types at
 //! 100 chars/min) which in turn runs `scripts/stress_test_program.py`. The
@@ -10,13 +10,12 @@
 //! The bench reports:
 //!
 //!   * total wall-clock time spent
-//!   * frames the runner intended to capture vs. how many landed in
-//!     the recording
-//!   * dropped (= "missed") frames at each pipeline stage
-//!   * high-water marks for both inter-thread queues
+//!   * frames the runner intended to capture vs. how many it captured
+//!   * dropped raw-frame consumer frames
+//!   * high-water mark for raw-frame consumer queues
 //!
-//! Exits with a non-zero status if more than 5 % of expected capture
-//! frames were dropped — that's the explicit pass/fail signal the GHA
+//! Exits with a non-zero status if more than 5 % of raw-frame consumer sends
+//! were dropped — that's the explicit pass/fail signal the GHA
 //! workflow looks at.
 //!
 //! Pinning to a single physical core is the caller's responsibility:
@@ -29,8 +28,8 @@ use std::{fs, path::PathBuf, process::ExitCode, time::Instant};
 use anyhow::{Context, Result};
 use evp::{FrameStyle, RenderOptions, RunStats};
 
-/// Hard pass/fail threshold: > 5 % missed capture frames is a failure.
-const MAX_MISSED_FRACTION: f64 = 0.05;
+/// Hard pass/fail threshold: > 5 % dropped raw-frame consumer sends is a failure.
+const MAX_DROPPED_FRACTION: f64 = 0.05;
 
 fn main() -> ExitCode {
     // Make sure tracing output from evp ends up on stderr so the bench
@@ -49,8 +48,8 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             } else {
                 eprintln!(
-                    "STRESS_TEST BENCH FAILED: missed-frame fraction exceeded {:.0}%",
-                    MAX_MISSED_FRACTION * 100.0
+                    "STRESS_TEST BENCH FAILED: dropped-consumer fraction exceeded {:.0}%",
+                    MAX_DROPPED_FRACTION * 100.0
                 );
                 ExitCode::from(1)
             }
@@ -96,35 +95,19 @@ fn run() -> Result<bool> {
         },
     };
 
-
     let cpu_set = current_cpu_affinity().unwrap_or_else(|| "(unknown)".to_string());
     eprintln!("stress_test: starting (cpu_affinity={cpu_set})");
 
     let started = Instant::now();
-    let out = evp::run_and_render_gif(&script, render_opts, out_gif.clone()).context("evp run")?;
+    let stats =
+        evp::run_and_render_gif(&script, render_opts, out_gif.clone()).context("evp run")?;
     let wall_ms = started.elapsed().as_millis();
 
-    let stats = out.stats;
-    let recording_frames = out.recording.frames.len();
     let gif_bytes = fs::metadata(&out_gif).map(|m| m.len()).unwrap_or(0);
 
-    let missed_pct = stats.missed_capture_fraction() * 100.0;
-    let tap_drop_pct = if stats.expected_frames == 0 {
-        0.0
-    } else {
-        (stats.tap_dropped_frames as f64 / stats.expected_frames as f64) * 100.0
-    };
+    let dropped_pct = stats.dropped_consumer_fraction() * 100.0;
 
-    let report = format_report(
-        &cpu_set,
-        wall_ms,
-        gif_bytes,
-        recording_frames,
-        &stats,
-        missed_pct,
-        tap_drop_pct,
-        &out_gif,
-    );
+    let report = format_report(&cpu_set, wall_ms, gif_bytes, &stats, dropped_pct, &out_gif);
 
     print!("{report}");
     if let Some(parent) = report_path.parent() {
@@ -134,7 +117,7 @@ fn run() -> Result<bool> {
         .with_context(|| format!("writing report {}", report_path.display()))?;
     eprintln!("stress_test: report written to {}", report_path.display());
 
-    Ok(missed_pct <= MAX_MISSED_FRACTION * 100.0)
+    Ok(dropped_pct <= MAX_DROPPED_FRACTION * 100.0)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -142,10 +125,8 @@ fn format_report(
     cpu_set: &str,
     wall_ms: u128,
     gif_bytes: u64,
-    recording_frames: usize,
     stats: &RunStats,
-    missed_pct: f64,
-    tap_drop_pct: f64,
+    dropped_pct: f64,
     out_gif: &PathBuf,
 ) -> String {
     let mut s = String::new();
@@ -163,34 +144,25 @@ fn format_report(
         "captured_frames     = {}\n",
         stats.captured_frames
     ));
-    s.push_str(&format!("recording_frames    = {recording_frames}\n"));
     s.push_str(&format!(
-        "encoder_received    = {}\n",
-        stats.encoder_frames_received
+        "consumer_count      = {}\n",
+        stats.raw_frame_consumer_count
     ));
     s.push_str(&format!(
-        "dropped_capture     = {} ({missed_pct:.2}%)\n",
-        stats.dropped_capture_frames
+        "max_consumer_queue  = {} / 4096\n",
+        stats.max_raw_frame_consumer_queue_len
     ));
     s.push_str(&format!(
-        "dropped_renderer    = {} ({tap_drop_pct:.2}%)\n",
-        stats.tap_dropped_frames
+        "dropped_consumer    = {} ({dropped_pct:.2}%)\n",
+        stats.raw_frame_consumer_dropped_frames
     ));
     s.push_str(&format!(
-        "max_capture_queue   = {} / 4096\n",
-        stats.max_capture_queue_len
-    ));
-    s.push_str(&format!(
-        "max_renderer_queue  = {} / 4096\n",
-        stats.max_renderer_queue_len
-    ));
-    s.push_str(&format!(
-        "missed_threshold    = {:.0}%\n",
-        MAX_MISSED_FRACTION * 100.0
+        "dropped_threshold   = {:.0}%\n",
+        MAX_DROPPED_FRACTION * 100.0
     ));
     s.push_str(&format!(
         "result              = {}\n",
-        if missed_pct <= MAX_MISSED_FRACTION * 100.0 {
+        if dropped_pct <= MAX_DROPPED_FRACTION * 100.0 {
             "PASS"
         } else {
             "FAIL"
@@ -231,7 +203,9 @@ fn locate_stress_test_program() -> Result<PathBuf> {
             return Ok(c.clone());
         }
     }
-    anyhow::bail!("couldn't find scripts/stress_test_program.py; set EVP_STRESS_TEST_PROGRAM to its path");
+    anyhow::bail!(
+        "couldn't find scripts/stress_test_program.py; set EVP_STRESS_TEST_PROGRAM to its path"
+    );
 }
 
 /// The tape hard-codes `/tmp/stress_test_program.py` so the same file works

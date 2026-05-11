@@ -19,8 +19,7 @@ use crate::{FrameStyle, Theme, WindowBarStyle};
 /// Top-level parsed script.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Script {
-    /// Output destination (`Output foo.gif`). Multiple outputs are not yet
-    /// supported – the last one wins, mirroring vhs's behaviour.
+    /// Output destinations (`Output foo.gif`, `Output foo.svg`, etc.).
     pub outputs: Vec<String>,
     /// Aggregated `Set` directives.
     pub settings: Settings,
