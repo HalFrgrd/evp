@@ -27,7 +27,7 @@
 use std::{fs, path::PathBuf, process::ExitCode, time::Instant};
 
 use anyhow::{Context, Result};
-use evp::{RenderOptions, RunStats};
+use evp::{FrameStyle, RenderOptions, RunStats};
 
 /// Hard pass/fail threshold: > 5 % missed capture frames is a failure.
 const MAX_MISSED_FRACTION: f64 = 0.05;
@@ -83,11 +83,19 @@ fn run() -> Result<bool> {
     // output path itself.
     script.outputs.clear();
 
-    let render_opts = RenderOptions {
+    let render_opts = crate::RenderOptions {
         font_path: None,
         font_size: script.settings.font_size,
-        padding_px: script.settings.padding,
+        frame_style: FrameStyle {
+            padding_px: script.settings.padding,
+            margin_px: script.settings.margin,
+            margin_fill: script.settings.margin_fill,
+            window_bar: script.settings.window_bar,
+            window_bar_size_px: script.settings.window_bar_size,
+            border_radius_px: script.settings.border_radius,
+        },
     };
+
 
     let cpu_set = current_cpu_affinity().unwrap_or_else(|| "(unknown)".to_string());
     eprintln!("torture: starting (cpu_affinity={cpu_set})");
