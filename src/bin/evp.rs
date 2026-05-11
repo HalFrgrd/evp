@@ -1,7 +1,7 @@
 //! `evp` binary entry point. All real work lives in the library crate
 //! (`evp::*`); this file is the thinnest possible CLI shim around it.
 
-use std::{io, path::PathBuf, process::ExitCode};
+use std::{io, path::PathBuf, process::ExitCode, time::Instant};
 
 use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
@@ -127,6 +127,7 @@ fn main() -> ExitCode {
 
 fn real_main() -> Result<()> {
     let cli = Cli::parse();
+    let evp_start = Instant::now();
 
     if let Some(command) = cli.command {
         return run_subcommand(command);
@@ -179,9 +180,7 @@ fn real_main() -> Result<()> {
     let stats =
         evp::run_and_render(&script, renderers).context("running script + streaming renders")?;
     info!(frames = stats.captured_frames, "frames captured");
-    for path in &output_paths {
-        info!(path = %path.display(), "output written");
-    }
+    info!(elapsed_ms = evp_start.elapsed().as_millis(), "evp finished");
     Ok(())
 }
 

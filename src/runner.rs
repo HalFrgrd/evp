@@ -27,7 +27,7 @@ use libghostty_vt::{
 };
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use regex::Regex;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::{
     FrameStyle,
@@ -267,7 +267,7 @@ pub fn run_with_raw_frame_consumers(
         while wait_state.is_none() && event_idx < timeline.len() && timeline[event_idx].at <= now {
             let scheduled = &timeline[event_idx];
             event_idx += 1;
-            debug!(
+            trace!(
                 event_idx,
                 at_ms = scheduled.at.as_millis(),
                 now_ms = now.as_millis(),
@@ -400,7 +400,7 @@ pub fn run_with_raw_frame_consumers(
             "raw-frame consumer queue was full; dropped frames to keep terminal loop non-blocking"
         );
     }
-    info!(
+    debug!(
         expected_frames,
         captured_frames,
         raw_frame_consumer_count,
@@ -408,6 +408,7 @@ pub fn run_with_raw_frame_consumers(
         raw_frame_consumer_dropped_frames = stats.raw_frame_consumer_dropped_frames,
         "pipeline stats"
     );
+    info!("runner thread finished");
     Ok(stats)
 }
 
