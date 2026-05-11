@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Compare the GIFs and timing data produced by the evp and VHS torture
+# Compare the GIFs and timing data produced by the evp and VHS stress_test
 # runs and emit a single Markdown report suitable for an actions
 # artifact.
 #
 # Inputs (all required):
 #   $1 = path to the evp gif
-#   $2 = path to the evp report.txt (produced by torture_benchmark)
+#   $2 = path to the evp report.txt (produced by stress_test_benchmark)
 #   $3 = path to the vhs gif
 #   $4 = path to the vhs timing log (key=value lines)
 #   $5 = path to write the markdown report to
@@ -93,9 +93,9 @@ fi
 # rest of the report.
 script_dir=$(cd "$(dirname "$0")" && pwd)
 analyzer="$script_dir/gif_frame_analyzer.py"
-# Expected fps for the comparison. Override by exporting TORTURE_FPS
-# before invoking this script. Defaults to 60, matching torture.tape.
-fps=${TORTURE_FPS:-60}
+# Expected fps for the comparison. Override by exporting STRESS_TEST_FPS
+# before invoking this script. Defaults to 60, matching stress_test.tape.
+fps=${STRESS_TEST_FPS:-60}
 
 run_analyzer() {
     # run_analyzer <gif> <label>
@@ -130,11 +130,11 @@ vhs_frames=$(analysis_get "$vhs_analysis" "frame_count")
 vhs_skipped=$(analysis_get "$vhs_analysis" "skipped_frames_est")
 
 cat >"$out_md" <<MD
-# evp vs VHS torture benchmark
+# evp vs VHS stress_test benchmark
 
 Both runs were pinned to a single CPU core (\`taskset -c 0\` for evp,
 \`--cpuset-cpus=0 --cpus=1\` for the VHS docker container) and rendered
-the same \`examples/torture.tape\` script: a 100×30 grid at 60 fps,
+the same \`examples/stress_test.tape\` script: a 100×30 grid at 60 fps,
 typing at ~125 chars/sec (≥2 keystrokes per captured frame) for ~10 s,
 where every keystroke triggers a full-screen redraw with random ASCII
 + random fg/bg + random modifiers in every cell.

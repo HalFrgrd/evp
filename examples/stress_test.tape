@@ -1,6 +1,6 @@
-# Torture-test tape for the evp/VHS rendering pipeline.
+# Stress-test tape for the evp/VHS rendering pipeline.
 #
-# Drives `scripts/torture_program.py` (mounted/copied to /tmp/torture_program.py
+# Drives `scripts/stress_test_program.py` (mounted/copied to /tmp/stress_test_program.py
 # by the workflow) which redraws *every cell* of a 100×30 grid with a
 # random ASCII codepoint + random fg/bg + random modifiers on every byte
 # it receives. The recording captures at 60 fps and the script types at
@@ -13,7 +13,7 @@
 # present, and VHS uses Width/Height. The pixel sizes here match a
 # 100×30 grid at FontSize 14 with line-height 1.0.
 
-Output torture.gif
+Output stress_test.gif
 
 Set Shell bash
 Set FontSize 14
@@ -27,19 +27,19 @@ Set Height 420
 Set Padding 0
 Set Framerate 60
 
-# Fast typing for the prelude so it doesn't eat into the torture window.
+# Fast typing for the prelude so it doesn't eat into the stress_test window.
 Set TypingSpeed 1ms
 Hide
-Type "exec python3 /tmp/torture_program.py"
+Type "exec python3 /tmp/stress_test_program.py"
 Enter
 Sleep 500ms
 Show
 
-# Torture run. 8 ms per char ≈ 125 keystrokes/sec — at 60 fps that's
+# Stress-test run. 8 ms per char ≈ 125 keystrokes/sec — at 60 fps that's
 # slightly over two updates per captured frame (the encoder/renderer
 # never gets a quiet moment between repaints). 1300 chars × 8 ms
 # ≈ 10.4 s of typing, then a short trailing Sleep so the final state
-# is captured. The torture program ignores the byte values and
+# is captured. The stress_test program ignores the byte values and
 # repaints the full 100×30 grid on every received byte.
 #
 # 8 ms (vs. exactly 1000/120 = 8.333 ms) keeps the duration parseable

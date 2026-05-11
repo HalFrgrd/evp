@@ -44,7 +44,7 @@ use crate::{
 pub struct RunOutput {
     pub recording: crate::recording::Recording,
     /// Pipeline-health counters captured during the run. Useful for
-    /// benchmarking and torture-testing the PTY → encoder → renderer
+    /// benchmarking and stress_test-testing the PTY → encoder → renderer
     /// pipeline.
     pub stats: RunStats,
 }
@@ -61,7 +61,7 @@ pub struct RunStats {
     pub captured_frames: u64,
     /// Number of frames the runner had to drop because the encoder's
     /// inbound queue was full. Counted as "missed frames" by the
-    /// torture benchmark.
+    /// stress_test benchmark.
     pub dropped_capture_frames: u64,
     /// Highest observed `len()` of the runner → encoder queue.
     pub max_capture_queue_len: usize,
