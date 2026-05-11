@@ -61,6 +61,8 @@ taskset -c 0 ./target/release/examples/stress_test_benchmark \
 
 # Same scenario through VHS (single-core via docker):
 install -D -m 0755 scripts/stress_test_program.py /tmp/stress_test_program.py
+# HOME/XDG_* keep Chrome's crashpad helper on writable paths when the
+# VHS container runs as a non-root user.
 docker run --rm --cpus=1 --cpuset-cpus=0 \
     -e HOME=/tmp \
     -e XDG_CONFIG_HOME=/tmp/chrome-config \
