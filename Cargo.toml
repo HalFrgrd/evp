@@ -2,6 +2,7 @@
 name = "evp"
 version = "0.3.0"
 edition = "2024"
+license = "MIT"
 build = "build.rs"
 
 [lib]

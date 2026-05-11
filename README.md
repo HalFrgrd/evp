@@ -432,3 +432,14 @@ byte-identical:
   inputs are not interchangeable.
 - **Zero runtime dependencies.** VHS requires `ttyd` and `ffmpeg` on
   `$PATH`. evp's release binary is statically linked and needs neither.
+
+## Acknowledgments
+
+### VHS
+
+evp is based on the vhs project.
+They share little code but evp does try use the same `.tape` file format.
+
+The color themes in [`assets/vhs-themes.json`](assets/vhs-themes.json) are taken from the [VHS](https://github.com/charmbracelet/vhs) project and are licensed under the MIT License. See [licenses/VHS-MIT.txt](licenses/VHS-MIT.txt) for the full license text.
+
+Copyright (c) 2022-2023 Charmbracelet, Inc
