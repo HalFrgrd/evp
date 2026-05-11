@@ -155,7 +155,7 @@ VHS wall-clock / evp wall-clock = **${ratio}** (>1 means evp is faster).
 
 - dropped raw-frame consumer frames: ${evp_dropped_consumer:-?}
 - max runner→raw-frame-consumer queue: ${evp_max_q:-?}
-- pass/fail (>5 % dropped = fail): **${evp_result:-?}**
+- pass/fail (>5 % dropped consumer sends = fail): **${evp_result:-?}**
 
 ## evp gif frame analysis
 

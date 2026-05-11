@@ -62,6 +62,10 @@ taskset -c 0 ./target/release/examples/stress_test_benchmark \
 # Same scenario through VHS (single-core via docker):
 install -D -m 0755 scripts/stress_test_program.py /tmp/stress_test_program.py
 docker run --rm --cpus=1 --cpuset-cpus=0 \
+    -e HOME=/tmp \
+    -e XDG_CONFIG_HOME=/tmp/chrome-config \
+    -e XDG_CACHE_HOME=/tmp/chrome-cache \
+    -e XDG_RUNTIME_DIR=/tmp/chrome-runtime \
     -v "$PWD/examples:/vhs" -v /tmp:/tmp \
     ghcr.io/charmbracelet/vhs:latest stress_test.tape
 
