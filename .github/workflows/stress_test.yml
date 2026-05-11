@@ -2,7 +2,9 @@ name: stress_test
 
 # Runs the stress-test benchmark for the evp PTY → encoder → renderer
 # pipeline and compares the resulting GIF (and timing) against an
-# equivalent VHS run.
+# equivalent VHS run in one containerized build flow. The runs are no
+# longer CPU-affinity pinned, so timing numbers should be treated as
+# comparative smoke-test signals rather than strict throughput baselines.
 #
 # The build environment is the bake `stress_test` target wired from split
 # Dockerfiles, with the same Rust + Zig toolchain as ci.yml / release.yml / docker.yml. The
@@ -73,6 +75,8 @@ jobs:
         with:
           files: ./docker-bake.hcl
           targets: stress_test
+          # We export generated files directly via local output, so the
+          # image itself does not need to be loaded into the daemon.
           load: false
           push: false
           set: |

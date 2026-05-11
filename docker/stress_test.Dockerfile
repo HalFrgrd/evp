@@ -47,7 +47,7 @@ RUN set -eux; \
     wall_ms=$(( (end_ns - start_ns) / 1000000 )); \
     test -s /work/stress_test.gif; \
     mv /work/stress_test.gif /out/vhs.gif; \
-    vhs_cpu=$(awk '/Cpus_allowed_list/ {print $2}' /proc/self/status | head -n1); \
+    vhs_cpu=$(awk '/Cpus_allowed_list/ {print $2}' /proc/self/status); \
     { \
       echo "=== vhs stress_test benchmark ==="; \
       echo "renderer            = vhs"; \
