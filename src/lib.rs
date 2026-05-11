@@ -166,10 +166,13 @@ pub fn run_and_render(
         .context("running script with renderer streams")?;
     for (stream, path) in streams {
         stream.join().context("finalising renderer stream")?;
-        if let Ok(meta) = std::fs::metadata(&path) {
-            info!(path = %path.display(), size_bytes = meta.len(), "render thread finished");
-        } else {
-            info!(path = %path.display(), "render thread finished");
+        match std::fs::metadata(&path) {
+            Ok(meta) => {
+                info!(path = %path.display(), size_bytes = meta.len(), "render thread finished");
+            }
+            Err(err) => {
+                info!(path = %path.display(), error = %err, "render thread finished (could not read file size)");
+            }
         }
     }
     Ok(stats)
