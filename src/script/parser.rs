@@ -362,11 +362,15 @@ fn parse_wait(tokens: &[String], settings: &Settings) -> Result<Event> {
         match tok.as_str() {
             "Line" => scope = WaitScope::Line,
             "Screen" => scope = WaitScope::Screen,
-            t if let Some(d) = t.strip_prefix('@') => timeout = parse_duration(d)?,
-            t if t.starts_with('/') && t.ends_with('/') && t.len() >= 2 => {
-                pattern = t[1..t.len() - 1].to_string();
+            t => {
+                if let Some(d) = t.strip_prefix('@') {
+                    timeout = parse_duration(d)?;
+                } else if t.starts_with('/') && t.ends_with('/') && t.len() >= 2 {
+                    pattern = t[1..t.len() - 1].to_string();
+                } else {
+                    bail!("unexpected token in Wait: `{t}`");
+                }
             }
-            other => bail!("unexpected token in Wait: `{other}`"),
         }
     }
     Ok(Event::Wait {
