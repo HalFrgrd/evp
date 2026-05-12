@@ -7,6 +7,8 @@ should help you avoid stepping on the same rakes we already found.
 
 - Workspace member of a multi-root setup; `libghostty-rs` and `vhs` live
   alongside it but `evp` builds standalone via `cargo build`.
+- If Copilot is running as a cloud agent, always open a PR for any code
+  changes it makes.
 - For Copilot/restricted builds, **always** use the prebuilt libghostty
   pkg-config artifact in `assets/libghostty`; do not rely on vendored
   Ghostty fetches from `libghostty-vt-sys`.
