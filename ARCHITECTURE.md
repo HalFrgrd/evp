@@ -8,6 +8,18 @@ configured raw-frame consumers. CLI rendering does not build a full in-memory
 recording; the opt-in `FullRecording` consumer exists for library callers that
 need one.
 
+## Build prerequisite for sandboxed environments
+
+`evp` expects a prebuilt libghostty pkg-config bundle under
+`assets/libghostty` (`lib/`, `include/`, `share/pkgconfig/`). Generate or
+refresh it with:
+
+`docker buildx bake extract-libghostty`
+
+Builds intentionally keep `GHOSTTY_SOURCE_DIR` unset so `libghostty-vt-sys`
+uses pkg-config rather than trying to fetch and build Ghostty during Cargo
+build scripts.
+
 ```
                         try_send
    +----------+   bounded(4096)   +---------------------+

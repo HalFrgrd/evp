@@ -12,23 +12,27 @@ on:
 jobs:
   copilot-setup-steps:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
 
-    env:
-      CARGO_TERM_COLOR: always
+    permissions:
+      contents: read
 
     steps:
-      - name: Install Zig
-        uses: mlugg/setup-zig@v2
-        with:
-          version: 0.15.2
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Verify toolchains
+      - name: Prebuild libghostty pkg-config artifacts
         run: |
           set -euo pipefail
-          zig version
-          rustc --version
-          cargo --version
+          rm -rf assets/libghostty
+          docker buildx bake extract-libghostty
+
+      - name: Verify prebuilt libghostty assets
+        run: |
+          set -euo pipefail
+          test -f assets/libghostty/lib/libghostty-vt.a
+          test -f assets/libghostty/include/ghostty/vt.h
+          test -f assets/libghostty/share/pkgconfig/libghostty-vt-static.pc

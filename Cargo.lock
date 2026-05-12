@@ -379,6 +379,7 @@ dependencies = [
  "gifski",
  "imgref",
  "libghostty-vt",
+ "libghostty-vt-sys",
  "lodepng",
  "nix",
  "regex",
@@ -585,6 +586,9 @@ dependencies = [
 name = "libghostty-vt-sys"
 version = "0.1.1"
 source = "git+https://github.com/uzaaft/libghostty-rs?rev=5ac47e9eb166add2c00c432bc65c279133629712#5ac47e9eb166add2c00c432bc65c279133629712"
+dependencies = [
+ "pkg-config",
+]
 
 [[package]]
 name = "libm"
@@ -756,6 +760,12 @@ name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+
+[[package]]
+name = "pkg-config"
+version = "0.3.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
 name = "powerfmt"

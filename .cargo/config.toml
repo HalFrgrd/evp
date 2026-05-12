@@ -1,0 +1,2 @@
+[env]
+PKG_CONFIG_PATH = { value = "assets/libghostty/share/pkgconfig", relative = true }

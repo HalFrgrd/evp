@@ -15,6 +15,7 @@ variable "RUNTIME_TAG"          { default = "evp:local" }
 variable "BUILD_ENV_TAG"        { default = "build-env:local" }
 variable "BUILD_ENV_IMAGE"      { default = "build-env" }
 variable "EXTRACT_BINARY_DEST"  { default = "/tmp/evp-build" }
+variable "EXTRACT_LIBGHOSTTY_DEST" { default = "assets/libghostty" }
 
 target "_common" {
   context = "."
@@ -84,4 +85,10 @@ target "extract-binary" {
     builder = "target:builder"
   }
   output = ["type=local,dest=${EXTRACT_BINARY_DEST}"]
+}
+
+target "extract-libghostty" {
+  inherits   = ["_common"]
+  dockerfile = "docker/libghostty-pkgconfig.Dockerfile"
+  output     = ["type=local,dest=${EXTRACT_LIBGHOSTTY_DEST}"]
 }

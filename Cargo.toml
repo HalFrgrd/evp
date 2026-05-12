@@ -14,17 +14,12 @@ name = "evp"
 path = "src/bin/evp.rs"
 
 [dependencies]
-# Terminal emulator. Pulled directly from the upstream git repo so this
-# crate is fully self-contained (no sibling checkout required). The
-# crates.io 0.1.1 release predates the `link-static` feature, so we
-# pin to a known-good commit on `main` instead.
-#
-# `link-static` vendors `libghostty-vt.a` into the final binary; the
-# resulting `evp` does not need `libghostty-vt.so` on `LD_LIBRARY_PATH`
-# at runtime. Building this crate still requires Zig 0.15.x on PATH
-# because libghostty-vt-sys's build.rs invokes `zig build` to compile
-# the upstream source.
+# Terminal emulator. We pin to a known-good libghostty-rs revision and
+# statically link libghostty-vt.
 libghostty-vt = { git = "https://github.com/uzaaft/libghostty-rs", rev = "5ac47e9eb166add2c00c432bc65c279133629712", features = ["link-static"] }
+# Force-enable libghostty-vt-sys pkg-config support so builds can use the
+# prebuilt artifact in assets/libghostty instead of fetching Ghostty.
+libghostty-vt-sys = { git = "https://github.com/uzaaft/libghostty-rs", rev = "5ac47e9eb166add2c00c432bc65c279133629712", features = ["link-static", "pkg-config"] }
 
 # CLI / errors / logging.
 anyhow = "1"

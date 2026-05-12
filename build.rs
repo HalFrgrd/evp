@@ -7,6 +7,7 @@ use std::process::Command;
 use vergen_gitcl::{Build, Cargo, Emitter, Gitcl, Rustc};
 
 fn main() -> Result<(), Box<dyn Error>> {
+    verify_prebuilt_libghostty()?;
     compress_embedded_fonts()?;
 
     // Emit build/cargo/git/rustc metadata as VERGEN_* env vars for runtime
@@ -29,6 +30,34 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     emitter.emit()?;
+
+    Ok(())
+}
+
+fn verify_prebuilt_libghostty() -> Result<(), Box<dyn Error>> {
+    if env::var_os("GHOSTTY_SOURCE_DIR").is_some() {
+        return Err("GHOSTTY_SOURCE_DIR must be unset for evp builds; evp requires prebuilt pkg-config assets in assets/libghostty. Remove GHOSTTY_SOURCE_DIR and rerun.".into());
+    }
+
+    let required = [
+        "assets/libghostty/lib/libghostty-vt.a",
+        "assets/libghostty/include/ghostty/vt.h",
+        "assets/libghostty/share/pkgconfig/libghostty-vt-static.pc",
+    ];
+
+    let missing = required
+        .iter()
+        .filter(|p| !Path::new(p).exists())
+        .copied()
+        .collect::<Vec<_>>();
+
+    if !missing.is_empty() {
+        let joined = missing.join(", ");
+        return Err(format!(
+            "missing prebuilt libghostty assets: {joined}. Run `docker buildx bake extract-libghostty` from the evp repo root before building."
+        )
+        .into());
+    }
 
     Ok(())
 }

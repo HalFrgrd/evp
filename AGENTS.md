@@ -7,6 +7,12 @@ should help you avoid stepping on the same rakes we already found.
 
 - Workspace member of a multi-root setup; `libghostty-rs` and `vhs` live
   alongside it but `evp` builds standalone via `cargo build`.
+- For Copilot/restricted builds, **always** use the prebuilt libghostty
+  pkg-config artifact in `assets/libghostty`; do not rely on vendored
+  Ghostty fetches from `libghostty-vt-sys`.
+- Refresh that artifact with:
+  `docker buildx bake extract-libghostty`
+- Keep `GHOSTTY_SOURCE_DIR` unset when building `evp`.
 - Release build is required for any timing or smoke testing — debug is
   ~15-20× slower because of glyph rasterization and gifski quantization.
   - Debug: ~200ms/frame
@@ -150,10 +156,7 @@ section.
 
 - Dockerfiles are split under `docker/` and connected via `docker-bake.hcl`
   `contexts` (`build-env -> builder -> test/runtime/stress_test/extract-binary`).
-- `docker/build-env.Dockerfile` is just the local Rust+Zig base image used by
-  bake; it is not published or pre-warmed.
-- `.github/workflows/copilot-setup-steps.yml` should stay minimal and only
-  install Zig 0.15.2 for the Copilot agent.
-- Restricted environments that need clean host-side builds must allow
-  `ziglang.org`, `github.com`, `deps.files.ghostty.org`, and
-  `gitlab.freedesktop.org`.
+- `extract-libghostty` bakes a prebuilt `libghostty-vt` static library,
+  headers, and pkg-config files into `assets/libghostty`.
+- Copilot setup should run `docker buildx bake extract-libghostty` so
+  sandboxed builds do not need network access for Zig/Ghostty fetches.
