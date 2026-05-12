@@ -643,7 +643,7 @@ mod tests {
         match &s.events[3] {
             Event::Key { key, .. } => {
                 assert!(key.mods.ctrl);
-                assert_eq!(key.key, NamedKey::Char('c'));
+                assert_eq!(key.key, NamedKey::Char('C'));
             }
             _ => panic!(),
         }
