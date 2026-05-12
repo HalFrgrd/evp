@@ -22,6 +22,7 @@ use anyhow::{Context, Result};
 use crossbeam_channel::{Sender, TrySendError};
 use libghostty_vt::{
     Terminal, TerminalOptions,
+    key::KittyKeyFlags,
     render::{CellIterator, RenderState, RowIterator},
     style::RgbColor,
 };
@@ -34,7 +35,7 @@ use crate::{
     keys::KeyTranslator,
     pty::{Pty, PtyError, PtySize},
     recording::{CellSnap, RawFrame, style_flags},
-    script::{Event, NamedKey, Script, Settings, WaitScope},
+    script::{Event, KeyAction, NamedKey, Script, Settings, WaitScope},
 };
 
 /// Output of [`crate::run_and_return_recording`].
@@ -532,7 +533,12 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Dur
                 }
             }
             Event::Sleep(d) => cursor += scale(*d),
-            Event::Key { key, count, delay } => {
+            Event::Key {
+                key,
+                action,
+                count,
+                delay,
+            } => {
                 let per = scale(*delay);
                 for i in 0..(*count).max(1) {
                     if i > 0 {
@@ -542,6 +548,7 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Dur
                         at: cursor,
                         event: Event::Key {
                             key: key.clone(),
+                            action: *action,
                             count: 1,
                             delay: Duration::ZERO,
                         },
@@ -589,8 +596,9 @@ fn execute_event(
             // Each character is one expanded event – just send it.
             pty.write(text.as_bytes());
         }
-        Event::Key { key, .. } => {
-            let bytes = translator.encode(key, terminal)?;
+        Event::Key { key, action, .. } => {
+            warn_if_kitty_extended_required(key, *action, terminal)?;
+            let bytes = translator.encode(key, *action, terminal)?;
             // The `Space` key shouldn't be sent through the encoder when
             // we're inside `Type` semantics, but for top‑level Space presses
             // a literal " " is the right thing.
@@ -625,6 +633,29 @@ fn execute_event(
         Event::Paste => pty.write(clipboard.as_bytes()),
         Event::Hide => *hidden = true,
         Event::Show => *hidden = false,
+    }
+    Ok(())
+}
+
+fn key_requires_kitty_extended(spec: &crate::script::KeySpec, action: KeyAction) -> bool {
+    action == KeyAction::Release || spec.mods.super_key
+}
+
+fn warn_if_kitty_extended_required(
+    spec: &crate::script::KeySpec,
+    action: KeyAction,
+    terminal: &Terminal<'_, '_>,
+) -> Result<()> {
+    if !key_requires_kitty_extended(spec, action) {
+        return Ok(());
+    }
+    let kitty_flags = terminal.kitty_keyboard_flags()?;
+    if kitty_flags.is_empty() || kitty_flags == KittyKeyFlags::DISABLED {
+        warn!(
+            ?spec,
+            ?action,
+            "key event likely requires kitty extended keyboard protocol, but kitty mode is disabled"
+        );
     }
     Ok(())
 }
@@ -844,6 +875,115 @@ impl std::fmt::Debug for WaitState {
 // `_re` is used at runtime through `matches_wait`.
 fn _silence_warnings(w: &WaitState) -> &Regex {
     &w.re
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        io,
+        sync::{Arc, Mutex},
+    };
+
+    use libghostty_vt::{Terminal, TerminalOptions};
+    use tracing_subscriber::fmt::MakeWriter;
+
+    use crate::script::{KeySpec, ModSet, NamedKey};
+
+    use super::{KeyAction, key_requires_kitty_extended, warn_if_kitty_extended_required};
+
+    #[derive(Clone, Default)]
+    struct SharedLogBuffer(Arc<Mutex<Vec<u8>>>);
+
+    impl SharedLogBuffer {
+        fn snapshot(&self) -> String {
+            String::from_utf8(self.0.lock().expect("lock log buffer").clone())
+                .expect("utf8 log buffer")
+        }
+    }
+
+    struct SharedLogWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl io::Write for SharedLogWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0
+                .lock()
+                .expect("lock log buffer")
+                .extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> MakeWriter<'a> for SharedLogBuffer {
+        type Writer = SharedLogWriter;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            SharedLogWriter(self.0.clone())
+        }
+    }
+
+    #[test]
+    fn detects_kitty_dependent_key_events() {
+        let plain_press = KeySpec {
+            key: NamedKey::Enter,
+            mods: ModSet::NONE,
+        };
+        assert!(!key_requires_kitty_extended(&plain_press, KeyAction::Press));
+
+        let release = KeySpec {
+            key: NamedKey::Char('k'),
+            mods: ModSet::NONE,
+        };
+        assert!(key_requires_kitty_extended(&release, KeyAction::Release));
+
+        let super_mod = KeySpec {
+            key: NamedKey::Right,
+            mods: ModSet {
+                super_key: true,
+                ..ModSet::NONE
+            },
+        };
+        assert!(key_requires_kitty_extended(&super_mod, KeyAction::Press));
+    }
+
+    #[test]
+    fn emits_warning_for_kitty_dependent_keys_when_kitty_disabled() {
+        let terminal = Terminal::new(TerminalOptions {
+            cols: 80,
+            rows: 24,
+            max_scrollback: 100,
+        })
+        .expect("terminal");
+
+        let spec = KeySpec {
+            key: NamedKey::Right,
+            mods: ModSet {
+                super_key: true,
+                ..ModSet::NONE
+            },
+        };
+
+        let logs = SharedLogBuffer::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(logs.clone())
+            .with_ansi(false)
+            .without_time()
+            .finish();
+
+        tracing::subscriber::with_default(subscriber, || {
+            warn_if_kitty_extended_required(&spec, KeyAction::Press, &terminal)
+                .expect("warn check");
+        });
+
+        assert!(
+            logs.snapshot()
+                .contains("key event likely requires kitty extended keyboard protocol"),
+            "expected kitty warning to be emitted"
+        );
+    }
 }
 
 #[allow(unsafe_code)]
