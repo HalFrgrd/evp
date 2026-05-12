@@ -14,7 +14,7 @@ variable "VERGEN_GIT_DIRTY"                { default = "unknown" }
 variable "RUNTIME_TAG"          { default = "evp:local" }
 variable "EXTRACT_BINARY_DEST"  { default = "/tmp/evp-build" }
 variable "EXTRACT_LIBGHOSTTY_DEST" { default = "assets/libghostty" }
-variable "BUILD_ENV_IMAGE"      { default = "ghcr.io/halfrgrd/evp-build-env:latest" }
+variable "BUILD_ENV_IMAGE"      { default = "ghcr.io/halfrgrd/evp-build-env@sha256:875b93b248811fea00fe945dd8ae5a855719dc712a891d5b5daa369b931fc988" }
 variable "TEST_TARGET"          { default = "x86_64-unknown-linux-gnu" }
 
 target "_common" {
