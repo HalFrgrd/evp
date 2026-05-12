@@ -24,6 +24,14 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Refresh and cache build-env image locally
+        run: |
+          set -euo pipefail
+          docker pull ghcr.io/halfrgrd/evp-build-env:latest
+          docker tag ghcr.io/halfrgrd/evp-build-env:latest evp-build-env:local
+          docker image inspect ghcr.io/halfrgrd/evp-build-env:latest >/dev/null
+          docker image inspect evp-build-env:local >/dev/null
+
       - name: Prebuild libghostty pkg-config artifacts
         run: |
           set -euo pipefail
