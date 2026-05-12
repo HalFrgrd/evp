@@ -150,39 +150,26 @@ on the host via buildx's local output writer — no `docker create` /
 ```bash
 docker buildx bake test       # workspace cargo test (CI parity)
 docker buildx bake runtime    # builds evp:local container image
-docker buildx bake build-env   # Rust+Zig base image
+docker buildx bake build-env  # Rust+Zig base image
 docker buildx bake builder     # intermediate builder image
-# If ziglang.org is blocked, reuse a published build-env image:
-docker buildx bake test --set builder.args.BUILD_ENV_IMAGE=ghcr.io/<owner>/evp-build-env:latest
 ```
 
 #### Restricted-network environments (Copilot cloud agent etc.)
 
-A clean checkout needs network access to two places:
+`.github/workflows/copilot-setup-steps.yml` now does one thing only:
+install Zig 0.15.2 into the Copilot environment.
 
-- `https://ziglang.org/...` for the Zig 0.15.x toolchain, and
-- the upstream Ghostty source + Zig package mirror, fetched lazily
-  by `libghostty-vt-sys`'s `build.rs` the first time `zig build`
-  runs.
+For clean builds inside a restricted environment, whitelist these
+domains:
 
-Sandboxed environments (notably the GitHub Copilot cloud agent's
-firewall) typically block the Zig hosts. Two ways to cope:
+- `ziglang.org` — Zig 0.15.2 toolchain downloads.
+- `github.com` — Cargo's `libghostty-rs` git dependency and
+  `libghostty-vt-sys` cloning the pinned Ghostty commit.
+- `deps.files.ghostty.org` — most Ghostty Zig package tarballs.
+- `gitlab.freedesktop.org` — the `wayland-protocols` Zig dependency.
 
-- **Cargo / native builds.** A `.github/workflows/copilot-setup-steps.yml`
-  is included that installs Zig and runs `cargo fetch` + `cargo build`
-  on a vanilla GitHub-hosted runner — i.e. *before* the agent
-  firewall engages — so `~/.cargo` and `target/` are fully warmed
-  for the agent. No further changes are required to use the agent
-  on this repo.
-- **Docker builds.** Use the published Rust+Zig image as shown
-  above (`--set builder.args.BUILD_ENV_IMAGE=ghcr.io/<owner>/evp-build-env:latest`),
-  or simply run `scripts/bake-offline.sh <target>` which injects that
-  override plus the matching `build-env` context against a locally
-  tagged `evp-build-env:local`. The image bakes in the pinned Ghostty
-  source and Zig package cache, so the subsequent `cargo build` inside
-  the builder never needs to reach `ghostty.org` or the Zig package
-  mirror. Cargo still needs `https://github.com` (allowed by the
-  default Copilot firewall) to resolve the `libghostty-rs` git dep.
+Those hosts come directly from the pinned dependency sources in
+`crates/libghostty-vt-sys/build.rs` and Ghostty's `build.zig.zon`.
 
 ### As a library
 

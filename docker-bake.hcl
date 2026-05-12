@@ -12,7 +12,7 @@ variable "VERGEN_GIT_DESCRIBE"             { default = "unknown" }
 variable "VERGEN_GIT_DIRTY"                { default = "unknown" }
 
 variable "RUNTIME_TAG"          { default = "evp:local" }
-variable "BUILD_ENV_TAG"        { default = "evp-build-env:local" }
+variable "BUILD_ENV_TAG"        { default = "build-env:local" }
 variable "BUILD_ENV_IMAGE"      { default = "build-env" }
 variable "EXTRACT_BINARY_DEST"  { default = "/tmp/evp-build" }
 

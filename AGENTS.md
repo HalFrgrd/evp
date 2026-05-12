@@ -150,32 +150,10 @@ section.
 
 - Dockerfiles are split under `docker/` and connected via `docker-bake.hcl`
   `contexts` (`build-env -> builder -> test/runtime/stress_test/extract-binary`).
-- The reusable Rust+Zig image is `docker/build-env.Dockerfile` and is published
-  by `.github/workflows/build-env.yml` to `ghcr.io/<owner>/evp-build-env`.
-  The image bakes in two warmed caches in addition to the toolchain:
-  * `/opt/ghostty-src` — the upstream Ghostty source at the commit pinned
-    inside `libghostty-vt-sys`'s `build.rs`, exported as
-    `GHOSTTY_SOURCE_DIR` so `cargo build` skips the git fetch.
-  * `/opt/zig-global-cache` — every Zig package the build needs,
-    exported as `ZIG_GLOBAL_CACHE_DIR` so `zig build` never goes out to
-    the package mirror.
-  Warming is driven by the tiny fixture crate at `docker/cache-warmer/`.
-  Its `libghostty-vt` git rev MUST stay in lockstep with the rev in the
-  workspace-root `Cargo.toml`; the `build-env` workflow re-publishes the
-  image whenever either file changes.
-- If an environment cannot resolve `ziglang.org`, point bake at the published
-  image instead of rebuilding Zig:
-  `docker buildx bake test --set builder.args.BUILD_ENV_IMAGE=ghcr.io/<owner>/evp-build-env:latest`.
-  The convenience wrapper `scripts/bake-offline.sh` injects the same
-  `BUILD_ENV_IMAGE` + `build-env` context overrides against a locally-tagged
-  `evp-build-env:local` image and is what the Copilot cloud agent uses.
-- For non-Docker restricted environments (e.g. the Copilot cloud agent's
-  firewall), `.github/workflows/copilot-setup-steps.yml` installs Zig and
-  pre-warms `~/.cargo` + `target/` (including the Ghostty source and Zig
-  package cache that `libghostty-vt-sys`'s `build.rs` would otherwise
-  fetch) on a vanilla GitHub-hosted runner before the agent starts.
-  The same workflow also `docker pull`s the published `evp-build-env`
-  image and tags it as `evp-build-env:local` so subsequent
-  `scripts/bake-offline.sh <target>` invocations from inside the agent
-  never need outbound network access for Zig or Ghostty.
-  Keep its `ZIG_VERSION` in sync with `docker/build-env.Dockerfile`.
+- `docker/build-env.Dockerfile` is just the local Rust+Zig base image used by
+  bake; it is not published or pre-warmed.
+- `.github/workflows/copilot-setup-steps.yml` should stay minimal and only
+  install Zig 0.15.2 for the Copilot agent.
+- Restricted environments that need clean host-side builds must allow
+  `ziglang.org`, `github.com`, `deps.files.ghostty.org`, and
+  `gitlab.freedesktop.org`.

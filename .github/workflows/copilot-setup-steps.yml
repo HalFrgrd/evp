@@ -1,21 +1,5 @@
 name: "Copilot Setup Steps"
 
-# Pre-warm the Copilot cloud-agent environment so that subsequent
-# `cargo build` / `cargo test` invocations succeed even after the
-# agent firewall blocks `ziglang.org` and the Zig package CDN.
-#
-# Two things need network access to build this project from a clean
-# checkout:
-#   1. Zig 0.15.x — currently hosted on https://ziglang.org. The
-#      Copilot firewall does not allow this host by default.
-#   2. The pinned upstream Ghostty source plus its Zig package
-#      dependencies. These are fetched lazily by
-#      `libghostty-vt-sys`'s build.rs via `zig build`, which goes
-#      out to GitHub + the Zig package mirror.
-#
-# Both happen here, while the runner still has open internet, so the
-# agent itself never needs to reach those hosts.
-
 on:
   workflow_dispatch:
   push:
@@ -26,28 +10,15 @@ on:
       - .github/workflows/copilot-setup-steps.yml
 
 jobs:
-  # The job MUST be called `copilot-setup-steps` or Copilot will not
-  # pick it up.
   copilot-setup-steps:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    permissions:
-      contents: read
+    timeout-minutes: 10
 
     env:
       CARGO_TERM_COLOR: always
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Install Zig 0.15.2
-        # Mirrors the curl-from-ziglang.org logic in
-        # docker/build-env.Dockerfile so the toolchain pinning stays
-        # in one place. Installs to /opt/zig and exports the path
-        # for every later step (and for the agent that runs after
-        # these setup steps complete).
         run: |
           set -euo pipefail
           arch="$(uname -m)"
@@ -65,104 +36,3 @@ jobs:
           rm "/tmp/${tarball}"
           echo "/opt/zig" >> "$GITHUB_PATH"
           /opt/zig/zig version
-
-      - name: Install Rust toolchain (matches Cargo.toml edition)
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry, git checkouts, and target/
-        # Caching `target/` matters here: libghostty-vt-sys's build.rs
-        # drops the fetched Ghostty source and Zig package cache
-        # under target/<profile>/build/libghostty-vt-sys-*/out/, and
-        # we want the agent to reuse it instead of re-fetching.
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: copilot-setup-${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            copilot-setup-${{ runner.os }}-cargo-
-
-      - name: Pre-fetch Cargo dependencies
-        # Pulls every crate in Cargo.lock into ~/.cargo/registry +
-        # ~/.cargo/git so cargo never needs the network at agent
-        # time. This is what makes the libghostty-rs git dep
-        # available offline.
-        run: cargo fetch --locked
-
-      - name: Pre-build to populate libghostty-vt-sys download cache
-        # Runs build.rs end-to-end so:
-        #   * the Ghostty source pinned in libghostty-vt-sys is
-        #     downloaded into target/.../out/,
-        #   * `zig build` resolves and caches all upstream Zig
-        #     package dependencies under the same out/ tree,
-        #   * the libghostty-vt static archive is compiled.
-        #
-        # We explicitly clean the Ghostty crates before rebuilding so we
-        # don't reuse stale native artifacts restored from actions/cache.
-        # Zig's native-target auto-detection can emit CPU-specific code;
-        # re-emitting on the current runner avoids SIGILL when the agent
-        # later executes `cargo test`.
-        # After this step the agent can `cargo build` / `cargo
-        # test` with no outbound network access.
-        env:
-          CARGO_NET_OFFLINE: "false"
-        run: |
-          cargo clean -p libghostty-vt-sys -p libghostty-vt
-          cargo build --workspace --all-targets --locked
-
-      # ----------------------------------------------------------------
-      # Docker bake pre-warm.
-      #
-      # Even with the host cargo + Zig toolchain warmed above, anything
-      # that drives `docker buildx bake` (CI parity tests, the stress
-      # test rig, `extract-binary`) still runs inside an isolated
-      # network namespace. The Dockerfiles in `docker/` would otherwise
-      # try to download Zig from `ziglang.org` and the pinned Ghostty
-      # source / Zig package mirror — both blocked by the agent
-      # firewall.
-      #
-      # The published `ghcr.io/<owner>/evp-build-env:latest` image
-      # already bakes in:
-      #   * Rust + Zig 0.15.x, and
-      #   * a pre-fetched `/opt/ghostty-src` + `/opt/zig-global-cache`
-      #     warmed by `docker/cache-warmer` against the same
-      #     `libghostty-vt` git rev pinned in `Cargo.toml`.
-      #
-      # Pulling it here (and tagging it as `evp-build-env:local` so
-      # `docker-bake.hcl`'s defaults pick it up) means later `bake`
-      # invocations from inside the agent never need network access to
-      # rebuild the toolchain.
-      # ----------------------------------------------------------------
-      - name: Pre-pull evp-build-env image for offline bake
-        # Skip cleanly if this runner image happens to ship without
-        # docker — the cargo-only path above is enough to unblock the
-        # agent for non-bake tasks.
-        if: success()
-        run: |
-          set -euo pipefail
-          if ! command -v docker >/dev/null 2>&1; then
-              echo "docker not available on this runner; skipping bake pre-warm"
-              exit 0
-          fi
-          if ! docker info >/dev/null 2>&1; then
-              echo "docker daemon not reachable; skipping bake pre-warm"
-              exit 0
-          fi
-          owner_lc="${GITHUB_REPOSITORY_OWNER,,}"
-          remote="ghcr.io/${owner_lc}/evp-build-env:latest"
-          echo "Pulling ${remote}"
-          if ! docker pull "${remote}"; then
-              echo "::warning::failed to pull ${remote}; bake-based smoke tests will need to rebuild build-env"
-              exit 0
-          fi
-          docker tag "${remote}" evp-build-env:local
-          # Sanity: confirm the warmed cache landed where the
-          # builder expects it.
-          docker run --rm evp-build-env:local sh -c '
-              set -e
-              test -f "${GHOSTTY_SOURCE_DIR:-/opt/ghostty-src}/build.zig"
-              test -d "${ZIG_GLOBAL_CACHE_DIR:-/opt/zig-global-cache}"
-              echo "build-env warmed cache OK"
-          '
