@@ -47,6 +47,7 @@ target "builder" {
   }
   contexts = {
     build-env = "target:build-env"
+    libghostty = "target:extract-libghostty"
   }
   tags = ["evp-builder:local"]
 }

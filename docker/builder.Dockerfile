@@ -45,6 +45,7 @@ ENV VERGEN_GIT_SHA="${VERGEN_GIT_SHA}" \
 
 WORKDIR /src
 COPY . /src
+COPY --from=libghostty / /src/assets/libghostty
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
