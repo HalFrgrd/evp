@@ -122,6 +122,8 @@ fn lookup_key(k: NamedKey) -> (Key, Option<&'static str>) {
         NamedKey::Shift => (Key::ShiftLeft, None),
         NamedKey::Control => (Key::ControlLeft, None),
         NamedKey::Alt => (Key::AltLeft, None),
+        // libghostty exposes the platform "super/command/windows" modifier
+        // as the Meta key family.
         NamedKey::Super => (Key::MetaLeft, None),
         // No native equivalent for ScrollUp/Down – fall back to PageUp/Down.
         NamedKey::ScrollUp => (Key::PageUp, None),

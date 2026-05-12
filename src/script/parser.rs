@@ -405,50 +405,58 @@ fn parse_key_event(head: &str, rest: &[String]) -> Result<Event> {
 
 /// Parse `Ctrl+Shift+Tab` / `Alt+x` / `Enter` into a [`KeySpec`].
 fn parse_key_spec(s: &str) -> Result<KeySpec> {
+    #[derive(Clone, Copy)]
+    enum Modifier {
+        Ctrl,
+        Alt,
+        Shift,
+        Super,
+    }
+
     let mut mods = ModSet::default();
     let mut last = "";
     let mut saw_key = false;
-    let mut modifier_order: Vec<&str> = Vec::new();
+    let mut last_modifier: Option<Modifier> = None;
     for part in s.split('+') {
-        match part.to_ascii_lowercase().as_str() {
-            "ctrl" | "control" => {
-                mods.ctrl = true;
-                modifier_order.push("ctrl");
-            }
-            "alt" | "option" => {
-                mods.alt = true;
-                modifier_order.push("alt");
-            }
-            "shift" => {
-                mods.shift = true;
-                modifier_order.push("shift");
-            }
-            "super" | "gui" | "windows" | "win" | "meta" | "hyper" => {
-                mods.super_key = true;
-                modifier_order.push("super");
-            }
-            _ => {
-                last = part;
-                saw_key = true;
-            }
+        if part.eq_ignore_ascii_case("ctrl") || part.eq_ignore_ascii_case("control") {
+            mods.ctrl = true;
+            last_modifier = Some(Modifier::Ctrl);
+        } else if part.eq_ignore_ascii_case("alt") || part.eq_ignore_ascii_case("option") {
+            mods.alt = true;
+            last_modifier = Some(Modifier::Alt);
+        } else if part.eq_ignore_ascii_case("shift") {
+            mods.shift = true;
+            last_modifier = Some(Modifier::Shift);
+        } else if part.eq_ignore_ascii_case("super")
+            || part.eq_ignore_ascii_case("gui")
+            || part.eq_ignore_ascii_case("windows")
+            || part.eq_ignore_ascii_case("win")
+            || part.eq_ignore_ascii_case("meta")
+            || part.eq_ignore_ascii_case("hyper")
+        {
+            mods.super_key = true;
+            last_modifier = Some(Modifier::Super);
+        } else {
+            last = part;
+            saw_key = true;
         }
     }
 
     if !saw_key {
-        let key = match modifier_order.last().copied() {
-            Some("ctrl") => {
+        let key = match last_modifier {
+            Some(Modifier::Ctrl) => {
                 mods.ctrl = false;
                 NamedKey::Control
             }
-            Some("alt") => {
+            Some(Modifier::Alt) => {
                 mods.alt = false;
                 NamedKey::Alt
             }
-            Some("shift") => {
+            Some(Modifier::Shift) => {
                 mods.shift = false;
                 NamedKey::Shift
             }
-            Some("super") => {
+            Some(Modifier::Super) => {
                 mods.super_key = false;
                 NamedKey::Super
             }
@@ -456,39 +464,64 @@ fn parse_key_spec(s: &str) -> Result<KeySpec> {
         };
         return Ok(KeySpec { key, mods });
     }
-    let key = match last.to_ascii_lowercase().as_str() {
-        "enter" | "return" => NamedKey::Enter,
-        "escape" | "esc" => NamedKey::Escape,
-        "tab" => NamedKey::Tab,
-        "backspace" => NamedKey::Backspace,
-        "delete" => NamedKey::Delete,
-        "insert" => NamedKey::Insert,
-        "space" => NamedKey::Space,
-        "up" => NamedKey::Up,
-        "down" => NamedKey::Down,
-        "left" => NamedKey::Left,
-        "right" => NamedKey::Right,
-        "pageup" => NamedKey::PageUp,
-        "pagedown" => NamedKey::PageDown,
-        "home" => NamedKey::Home,
-        "end" => NamedKey::End,
-        "scrollup" => NamedKey::ScrollUp,
-        "scrolldown" => NamedKey::ScrollDown,
-        "ctrl" | "control" => NamedKey::Control,
-        "alt" | "option" => NamedKey::Alt,
-        "shift" => NamedKey::Shift,
-        "super" | "gui" | "windows" | "win" | "meta" | "hyper" => NamedKey::Super,
+    let key = if last.eq_ignore_ascii_case("enter") || last.eq_ignore_ascii_case("return") {
+        NamedKey::Enter
+    } else if last.eq_ignore_ascii_case("escape") || last.eq_ignore_ascii_case("esc") {
+        NamedKey::Escape
+    } else if last.eq_ignore_ascii_case("tab") {
+        NamedKey::Tab
+    } else if last.eq_ignore_ascii_case("backspace") {
+        NamedKey::Backspace
+    } else if last.eq_ignore_ascii_case("delete") {
+        NamedKey::Delete
+    } else if last.eq_ignore_ascii_case("insert") {
+        NamedKey::Insert
+    } else if last.eq_ignore_ascii_case("space") {
+        NamedKey::Space
+    } else if last.eq_ignore_ascii_case("up") {
+        NamedKey::Up
+    } else if last.eq_ignore_ascii_case("down") {
+        NamedKey::Down
+    } else if last.eq_ignore_ascii_case("left") {
+        NamedKey::Left
+    } else if last.eq_ignore_ascii_case("right") {
+        NamedKey::Right
+    } else if last.eq_ignore_ascii_case("pageup") {
+        NamedKey::PageUp
+    } else if last.eq_ignore_ascii_case("pagedown") {
+        NamedKey::PageDown
+    } else if last.eq_ignore_ascii_case("home") {
+        NamedKey::Home
+    } else if last.eq_ignore_ascii_case("end") {
+        NamedKey::End
+    } else if last.eq_ignore_ascii_case("scrollup") {
+        NamedKey::ScrollUp
+    } else if last.eq_ignore_ascii_case("scrolldown") {
+        NamedKey::ScrollDown
+    } else if last.eq_ignore_ascii_case("ctrl") || last.eq_ignore_ascii_case("control") {
+        NamedKey::Control
+    } else if last.eq_ignore_ascii_case("alt") || last.eq_ignore_ascii_case("option") {
+        NamedKey::Alt
+    } else if last.eq_ignore_ascii_case("shift") {
+        NamedKey::Shift
+    } else if last.eq_ignore_ascii_case("super")
+        || last.eq_ignore_ascii_case("gui")
+        || last.eq_ignore_ascii_case("windows")
+        || last.eq_ignore_ascii_case("win")
+        || last.eq_ignore_ascii_case("meta")
+        || last.eq_ignore_ascii_case("hyper")
+    {
+        NamedKey::Super
+    } else {
         // Single character (e.g. `C` in `Ctrl+C`). We keep the character
         // verbatim – translation to the right libghostty `Key` happens in
         // the `keys` module.
-        other => {
-            let mut chars = other.chars();
-            let c = chars.next().ok_or_else(|| anyhow!("empty key in `{s}`"))?;
-            if chars.next().is_some() {
-                bail!("unknown key name `{other}`");
-            }
-            NamedKey::Char(c)
+        let mut chars = last.chars();
+        let c = chars.next().ok_or_else(|| anyhow!("empty key in `{s}`"))?;
+        if chars.next().is_some() {
+            bail!("unknown key name `{last}`");
         }
+        NamedKey::Char(c)
     };
     Ok(KeySpec { key, mods })
 }
