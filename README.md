@@ -186,9 +186,8 @@ later Cargo network steps, updates the in-image trust store, and then
 continues with the normal build. The extra fingerprint arg keeps Docker's
 cache from reusing a stale no-cert layer after the CA secret changes.
 GitHub Actions workflows also forward an optional `EXTRA_CA_CERT` secret
-into BuildKit the same way. No
-`SSL_CERT_FILE` or `RUSTUP_USE_CURL=1` override is required when the CA is
-trusted by the image.
+into BuildKit the same way. No `SSL_CERT_FILE` or `RUSTUP_USE_CURL=1`
+override is required when the CA is trusted by the image.
 
 ### As a library
 

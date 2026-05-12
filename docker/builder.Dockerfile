@@ -40,12 +40,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN --mount=type=secret,id=extra_ca_cert,required=false \
-    extra_ca_cert_fingerprint="${EXTRA_CA_CERT_FINGERPRINT}"; \
+    : "${EXTRA_CA_CERT_FINGERPRINT}"; \
     if [ -s /run/secrets/extra_ca_cert ]; then \
         install -D -m 0644 /run/secrets/extra_ca_cert /usr/local/share/ca-certificates/extra-ca.crt; \
         update-ca-certificates; \
-    else \
-        : "${extra_ca_cert_fingerprint}"; \
     fi
 
 RUN rustup target add ${TARGET}
