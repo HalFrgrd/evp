@@ -17,6 +17,7 @@ ARG VERGEN_GIT_DIRTY=unknown
 FROM rust:${RUST_VERSION}-${DEBIAN_VERSION} AS builder
 
 ARG TARGET
+ARG EXTRA_CA_CERT_FINGERPRINT=absent
 ARG VERGEN_GIT_SHA
 ARG VERGEN_GIT_BRANCH
 ARG VERGEN_GIT_COMMIT_DATE
@@ -37,6 +38,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         musl-tools \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
+
+RUN --mount=type=secret,id=extra_ca_cert,required=false \
+    : "${EXTRA_CA_CERT_FINGERPRINT}"; \
+    if [ -s /run/secrets/extra_ca_cert ]; then \
+        install -D -m 0644 /run/secrets/extra_ca_cert /usr/local/share/ca-certificates/extra-ca.crt; \
+        update-ca-certificates; \
+    fi
 
 RUN rustup target add ${TARGET}
 
