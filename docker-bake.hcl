@@ -14,6 +14,8 @@ variable "VERGEN_GIT_DIRTY"                { default = "unknown" }
 variable "RUNTIME_TAG"          { default = "evp:local" }
 variable "EXTRACT_BINARY_DEST"  { default = "/tmp/evp-build" }
 variable "EXTRACT_LIBGHOSTTY_DEST" { default = "assets/libghostty" }
+variable "BUILD_ENV_IMAGE"      { default = "ghcr.io/halfrgrd/evp-build-env:latest" }
+variable "TEST_TARGET"          { default = "x86_64-unknown-linux-gnu" }
 
 target "_common" {
   context = "."
@@ -36,6 +38,7 @@ target "builder" {
   dockerfile = "docker/builder.Dockerfile"
   contexts = {
     libghostty = "./assets/libghostty"
+    build-env  = "docker-image://${BUILD_ENV_IMAGE}"
   }
   tags = ["evp-builder:local"]
 }
@@ -44,9 +47,17 @@ target "test" {
   inherits   = ["_common"]
   dockerfile = "docker/test.Dockerfile"
   contexts = {
-    builder = "target:builder"
+    builder = "target:builder-test"
   }
   tags = ["evp-test:local"]
+}
+
+target "builder-test" {
+  inherits = ["builder"]
+  args = {
+    TARGET = TEST_TARGET
+  }
+  tags = ["evp-builder-test:local"]
 }
 
 target "stress_test" {

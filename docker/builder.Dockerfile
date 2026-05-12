@@ -14,7 +14,7 @@ ARG VERGEN_GIT_COMMIT_MESSAGE=unknown
 ARG VERGEN_GIT_DESCRIBE=unknown
 ARG VERGEN_GIT_DIRTY=unknown
 
-FROM rust:${RUST_VERSION}-${DEBIAN_VERSION} AS builder
+FROM build-env AS builder
 
 ARG TARGET
 ARG VERGEN_GIT_SHA
@@ -38,7 +38,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-RUN rustup target add ${TARGET}
+RUN rustup target list --installed | grep -qx "${TARGET}" \
+    || rustup target add ${TARGET}
 
 ENV CC_x86_64_unknown_linux_musl=musl-gcc \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-C target-feature=+crt-static -C link-self-contained=yes -C linker=rust-lld"
