@@ -98,11 +98,19 @@ jobs:
         #   * `zig build` resolves and caches all upstream Zig
         #     package dependencies under the same out/ tree,
         #   * the libghostty-vt static archive is compiled.
+        #
+        # We explicitly clean the Ghostty crates before rebuilding so we
+        # don't reuse stale native artifacts restored from actions/cache.
+        # Zig's native-target auto-detection can emit CPU-specific code;
+        # re-emitting on the current runner avoids SIGILL when the agent
+        # later executes `cargo test`.
         # After this step the agent can `cargo build` / `cargo
         # test` with no outbound network access.
         env:
           CARGO_NET_OFFLINE: "false"
-        run: cargo build --workspace --all-targets --locked
+        run: |
+          cargo clean -p libghostty-vt-sys -p libghostty-vt
+          cargo build --workspace --all-targets --locked
 
       # ----------------------------------------------------------------
       # Docker bake pre-warm.
