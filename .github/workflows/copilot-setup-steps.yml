@@ -30,7 +30,6 @@ jobs:
         run: |
           set -euo pipefail
           docker pull "${BUILD_ENV_IMAGE}"
-          docker tag "${BUILD_ENV_IMAGE}" evp-build-env:local
 
       - name: Prebuild libghostty pkg-config artifacts
         run: |
