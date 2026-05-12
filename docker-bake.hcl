@@ -14,7 +14,8 @@ variable "VERGEN_GIT_DIRTY"                { default = "unknown" }
 variable "RUNTIME_TAG"          { default = "evp:local" }
 variable "EXTRACT_BINARY_DEST"  { default = "/tmp/evp-build" }
 variable "EXTRACT_LIBGHOSTTY_DEST" { default = "assets/libghostty" }
-# Copilot setup pre-pulls this tag so buildx can reuse the local cached image.
+# Base image for the build-env context used by Docker builds.
+# Copilot setup pre-pulls this tag for local cache reuse; if not cached, buildx pulls it.
 variable "BUILD_ENV_IMAGE"      { default = "ghcr.io/halfrgrd/evp-build-env:latest" }
 variable "TEST_TARGET"          { default = "x86_64-unknown-linux-gnu" }
 
