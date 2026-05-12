@@ -98,8 +98,22 @@ jobs:
             echo "dirty=${dirty}"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Compute optional extra CA fingerprint
+        id: extra_ca
+        env:
+          EXTRA_CA_CERT: ${{ secrets.EXTRA_CA_CERT }}
+        run: |
+          set -euo pipefail
+          if [ -n "${EXTRA_CA_CERT:-}" ]; then
+            echo "fingerprint=$(printf '%s' "$EXTRA_CA_CERT" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          else
+            echo "fingerprint=absent" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build and push runtime image
         uses: docker/bake-action@v5
+        env:
+          EXTRA_CA_CERT: ${{ secrets.EXTRA_CA_CERT }}
         with:
           files: ./docker-bake.hcl
           targets: runtime
@@ -108,6 +122,7 @@ jobs:
             ${{ steps.tags.outputs.set }}
             *.cache-from=type=gha
             *.cache-to=type=gha,mode=max
+            *.args.EXTRA_CA_CERT_FINGERPRINT=${{ steps.extra_ca.outputs.fingerprint }}
             *.args.VERGEN_GIT_SHA=${{ steps.gitmeta.outputs.sha }}
             *.args.VERGEN_GIT_BRANCH=${{ steps.gitmeta.outputs.branch }}
             *.args.VERGEN_GIT_COMMIT_DATE=${{ steps.gitmeta.outputs.commit_date }}

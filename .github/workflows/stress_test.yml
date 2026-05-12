@@ -66,6 +66,18 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Compute optional extra CA fingerprint
+        id: extra_ca
+        env:
+          EXTRA_CA_CERT: ${{ secrets.EXTRA_CA_CERT }}
+        run: |
+          set -euo pipefail
+          if [ -n "${EXTRA_CA_CERT:-}" ]; then
+            echo "fingerprint=$(printf '%s' "$EXTRA_CA_CERT" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          else
+            echo "fingerprint=absent" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build + run stress_test via Dockerfile
         # The stress_test Dockerfile itself now executes:
         # - evp benchmark
@@ -73,6 +85,8 @@ jobs:
         # - frame analysis + markdown report
         # and exports the generated artifacts to `stress_test-out`.
         uses: docker/bake-action@v5
+        env:
+          EXTRA_CA_CERT: ${{ secrets.EXTRA_CA_CERT }}
         with:
           files: ./docker-bake.hcl
           targets: stress_test
@@ -84,6 +98,7 @@ jobs:
             stress_test.output=type=local,dest=./stress_test-out
             *.cache-from=type=gha
             *.cache-to=type=gha,mode=max
+            *.args.EXTRA_CA_CERT_FINGERPRINT=${{ steps.extra_ca.outputs.fingerprint }}
 
       - name: Print comparison report
         run: |

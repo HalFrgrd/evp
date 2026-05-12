@@ -17,6 +17,7 @@ variable "EXTRACT_LIBGHOSTTY_DEST" { default = "assets/libghostty" }
 
 target "_common" {
   context = "."
+  secret = ["id=extra_ca_cert,env=EXTRA_CA_CERT"]
   args = {
     VERGEN_GIT_SHA                 = VERGEN_GIT_SHA
     VERGEN_GIT_BRANCH              = VERGEN_GIT_BRANCH
