@@ -12,7 +12,7 @@ use libghostty_vt::{
     key::{self, Action, Encoder, Key, Mods},
 };
 
-use crate::script::{KeySpec, ModSet, NamedKey};
+use crate::script::{KeyAction, KeySpec, ModSet, NamedKey};
 
 /// Wraps a libghostty [`Encoder`] tied to a specific [`Terminal`]'s modes.
 ///
@@ -34,7 +34,12 @@ impl<'a> KeyTranslator<'a> {
 
     /// Encode one [`KeySpec`] into PTY bytes. The returned slice is owned by
     /// `self` and is overwritten on the next call.
-    pub fn encode(&mut self, spec: &KeySpec, terminal: &Terminal<'_, '_>) -> Result<&[u8]> {
+    pub fn encode(
+        &mut self,
+        spec: &KeySpec,
+        action: KeyAction,
+        terminal: &Terminal<'_, '_>,
+    ) -> Result<&[u8]> {
         self.encoder.set_options_from_terminal(terminal);
 
         let (lib_key, utf8) = lookup_key(spec.key);
@@ -43,7 +48,10 @@ impl<'a> KeyTranslator<'a> {
         let mut event = key::Event::new()?;
         event
             .set_key(lib_key)
-            .set_action(Action::Press)
+            .set_action(match action {
+                KeyAction::Press => Action::Press,
+                KeyAction::Release => Action::Release,
+            })
             .set_mods(mods);
 
         // The encoder uses `utf8` only for printable characters; for named
@@ -86,6 +94,9 @@ fn mods_to_lib(m: ModSet) -> Mods {
     if m.shift {
         out |= Mods::SHIFT;
     }
+    if m.super_key {
+        out |= Mods::SUPER;
+    }
     out
 }
 
@@ -108,6 +119,12 @@ fn lookup_key(k: NamedKey) -> (Key, Option<&'static str>) {
         NamedKey::PageDown => (Key::PageDown, None),
         NamedKey::Home => (Key::Home, None),
         NamedKey::End => (Key::End, None),
+        NamedKey::Shift => (Key::ShiftLeft, None),
+        NamedKey::Control => (Key::ControlLeft, None),
+        NamedKey::Alt => (Key::AltLeft, None),
+        // libghostty exposes the platform "super/command/windows" modifier
+        // as the Meta key family.
+        NamedKey::Super => (Key::MetaLeft, None),
         // No native equivalent for ScrollUp/Down – fall back to PageUp/Down.
         NamedKey::ScrollUp => (Key::PageUp, None),
         NamedKey::ScrollDown => (Key::PageDown, None),

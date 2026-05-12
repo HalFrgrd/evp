@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 
-use super::ast::{Event, KeySpec, ModSet, NamedKey, Script, Settings, WaitScope};
+use super::ast::{Event, KeyAction, KeySpec, ModSet, NamedKey, Script, Settings, WaitScope};
 use crate::style::{Theme, WindowBarStyle, parse_hex_color};
 
 /// Parse a complete script source.
@@ -254,6 +254,12 @@ fn parse_line(
             script.events.push(Event::Copy(text));
         }
         "Paste" => script.events.push(Event::Paste),
+        "Press" => script
+            .events
+            .push(parse_explicit_key_action(rest, KeyAction::Press)?),
+        "Release" => script
+            .events
+            .push(parse_explicit_key_action(rest, KeyAction::Release)?),
         // `Type[@duration] "text" ["text" ...]`
         h if h == "Type" || h.starts_with("Type@") => {
             let delay = parse_at_duration(h, "Type", script.settings.typing_speed)?;
@@ -389,55 +395,162 @@ fn parse_key_event(head: &str, rest: &[String]) -> Result<Event> {
             .with_context(|| format!("invalid repeat count `{t}`"))?,
         None => 1,
     };
-    Ok(Event::Key { key, count, delay })
+    Ok(Event::Key {
+        key,
+        action: KeyAction::Press,
+        count,
+        delay,
+    })
 }
 
 /// Parse `Ctrl+Shift+Tab` / `Alt+x` / `Enter` into a [`KeySpec`].
 fn parse_key_spec(s: &str) -> Result<KeySpec> {
+    #[derive(Clone, Copy)]
+    enum Modifier {
+        Ctrl,
+        Alt,
+        Shift,
+        Super,
+    }
+
     let mut mods = ModSet::default();
     let mut last = "";
+    let mut saw_key = false;
+    let mut last_modifier: Option<Modifier> = None;
     for part in s.split('+') {
-        match part {
-            "Ctrl" | "Control" => mods.ctrl = true,
-            "Alt" | "Option" => mods.alt = true,
-            "Shift" => mods.shift = true,
-            _ => last = part,
+        if part.eq_ignore_ascii_case("ctrl") || part.eq_ignore_ascii_case("control") {
+            mods.ctrl = true;
+            last_modifier = Some(Modifier::Ctrl);
+        } else if part.eq_ignore_ascii_case("alt") || part.eq_ignore_ascii_case("option") {
+            mods.alt = true;
+            last_modifier = Some(Modifier::Alt);
+        } else if part.eq_ignore_ascii_case("shift") {
+            mods.shift = true;
+            last_modifier = Some(Modifier::Shift);
+        } else if part.eq_ignore_ascii_case("super")
+            || part.eq_ignore_ascii_case("gui")
+            || part.eq_ignore_ascii_case("windows")
+            || part.eq_ignore_ascii_case("win")
+            || part.eq_ignore_ascii_case("meta")
+            || part.eq_ignore_ascii_case("hyper")
+        {
+            mods.super_key = true;
+            last_modifier = Some(Modifier::Super);
+        } else {
+            last = part;
+            saw_key = true;
         }
     }
-    if last.is_empty() {
-        bail!("missing key name in `{s}`");
+
+    if !saw_key {
+        let key = match last_modifier {
+            Some(Modifier::Ctrl) => {
+                mods.ctrl = false;
+                NamedKey::Control
+            }
+            Some(Modifier::Alt) => {
+                mods.alt = false;
+                NamedKey::Alt
+            }
+            Some(Modifier::Shift) => {
+                mods.shift = false;
+                NamedKey::Shift
+            }
+            Some(Modifier::Super) => {
+                mods.super_key = false;
+                NamedKey::Super
+            }
+            _ => bail!("missing key name in `{s}`"),
+        };
+        return Ok(KeySpec { key, mods });
     }
-    let key = match last {
-        "Enter" | "Return" => NamedKey::Enter,
-        "Escape" | "Esc" => NamedKey::Escape,
-        "Tab" => NamedKey::Tab,
-        "Backspace" => NamedKey::Backspace,
-        "Delete" => NamedKey::Delete,
-        "Insert" => NamedKey::Insert,
-        "Space" => NamedKey::Space,
-        "Up" => NamedKey::Up,
-        "Down" => NamedKey::Down,
-        "Left" => NamedKey::Left,
-        "Right" => NamedKey::Right,
-        "PageUp" => NamedKey::PageUp,
-        "PageDown" => NamedKey::PageDown,
-        "Home" => NamedKey::Home,
-        "End" => NamedKey::End,
-        "ScrollUp" => NamedKey::ScrollUp,
-        "ScrollDown" => NamedKey::ScrollDown,
+    let key = if last.eq_ignore_ascii_case("enter") || last.eq_ignore_ascii_case("return") {
+        NamedKey::Enter
+    } else if last.eq_ignore_ascii_case("escape") || last.eq_ignore_ascii_case("esc") {
+        NamedKey::Escape
+    } else if last.eq_ignore_ascii_case("tab") {
+        NamedKey::Tab
+    } else if last.eq_ignore_ascii_case("backspace") {
+        NamedKey::Backspace
+    } else if last.eq_ignore_ascii_case("delete") {
+        NamedKey::Delete
+    } else if last.eq_ignore_ascii_case("insert") {
+        NamedKey::Insert
+    } else if last.eq_ignore_ascii_case("space") {
+        NamedKey::Space
+    } else if last.eq_ignore_ascii_case("up") {
+        NamedKey::Up
+    } else if last.eq_ignore_ascii_case("down") {
+        NamedKey::Down
+    } else if last.eq_ignore_ascii_case("left") {
+        NamedKey::Left
+    } else if last.eq_ignore_ascii_case("right") {
+        NamedKey::Right
+    } else if last.eq_ignore_ascii_case("pageup") {
+        NamedKey::PageUp
+    } else if last.eq_ignore_ascii_case("pagedown") {
+        NamedKey::PageDown
+    } else if last.eq_ignore_ascii_case("home") {
+        NamedKey::Home
+    } else if last.eq_ignore_ascii_case("end") {
+        NamedKey::End
+    } else if last.eq_ignore_ascii_case("scrollup") {
+        NamedKey::ScrollUp
+    } else if last.eq_ignore_ascii_case("scrolldown") {
+        NamedKey::ScrollDown
+    } else if last.eq_ignore_ascii_case("ctrl") || last.eq_ignore_ascii_case("control") {
+        NamedKey::Control
+    } else if last.eq_ignore_ascii_case("alt") || last.eq_ignore_ascii_case("option") {
+        NamedKey::Alt
+    } else if last.eq_ignore_ascii_case("shift") {
+        NamedKey::Shift
+    } else if last.eq_ignore_ascii_case("super")
+        || last.eq_ignore_ascii_case("gui")
+        || last.eq_ignore_ascii_case("windows")
+        || last.eq_ignore_ascii_case("win")
+        || last.eq_ignore_ascii_case("meta")
+        || last.eq_ignore_ascii_case("hyper")
+    {
+        NamedKey::Super
+    } else {
         // Single character (e.g. `C` in `Ctrl+C`). We keep the character
         // verbatim – translation to the right libghostty `Key` happens in
         // the `keys` module.
-        other => {
-            let mut chars = other.chars();
-            let c = chars.next().ok_or_else(|| anyhow!("empty key in `{s}`"))?;
-            if chars.next().is_some() {
-                bail!("unknown key name `{other}`");
-            }
-            NamedKey::Char(c)
+        let mut chars = last.chars();
+        let c = chars.next().ok_or_else(|| anyhow!("empty key in `{s}`"))?;
+        if chars.next().is_some() {
+            bail!("unknown key name `{last}`");
         }
+        NamedKey::Char(c)
     };
     Ok(KeySpec { key, mods })
+}
+
+fn parse_explicit_key_action(tokens: &[String], action: KeyAction) -> Result<Event> {
+    let head = tokens
+        .first()
+        .ok_or_else(|| anyhow!("{action:?} requires a key spec"))?;
+    let head = unquote(head);
+    let (name_part, delay) = match head.split_once('@') {
+        Some((name, dur)) => (name, parse_duration(dur)?),
+        None => (head, Duration::ZERO),
+    };
+    let key = parse_key_spec(name_part)?;
+    let count = match tokens.get(1) {
+        Some(t) => t
+            .parse::<u32>()
+            .with_context(|| format!("invalid repeat count `{t}`"))?,
+        None => 1,
+    };
+    if tokens.len() > 2 {
+        bail!("unexpected extra tokens after key action");
+    }
+    Ok(Event::Key {
+        key,
+        action,
+        count,
+        delay,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -535,13 +648,113 @@ mod tests {
             _ => panic!(),
         }
         match &s.events[4] {
-            Event::Key { key, count, delay } => {
+            Event::Key {
+                key, count, delay, ..
+            } => {
                 assert_eq!(key.key, NamedKey::Down);
                 assert_eq!(*count, 5);
                 assert_eq!(*delay, Duration::from_millis(20));
             }
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn parses_key_aliases_modifier_only_and_actions() {
+        let src = r#"
+            Output out.gif
+            Shift+Enter
+            Super+Right
+            Meta+c
+            Gui+enter
+            Hyper+k
+            Ctrl
+            Alt
+            Press k
+            Release h
+        "#;
+        let s = parse(src).unwrap();
+        assert_eq!(s.events.len(), 9);
+
+        assert!(matches!(
+            &s.events[0],
+            Event::Key {
+                key: KeySpec {
+                    key: NamedKey::Enter,
+                    mods: ModSet { shift: true, .. }
+                },
+                action: KeyAction::Press,
+                ..
+            }
+        ));
+        assert!(matches!(
+            &s.events[1],
+            Event::Key {
+                key: KeySpec {
+                    key: NamedKey::Right,
+                    mods: ModSet {
+                        super_key: true,
+                        ..
+                    }
+                },
+                ..
+            }
+        ));
+        assert!(matches!(
+            &s.events[2],
+            Event::Key {
+                key: KeySpec {
+                    key: NamedKey::Char('c'),
+                    mods: ModSet {
+                        super_key: true,
+                        ..
+                    }
+                },
+                ..
+            }
+        ));
+        assert!(matches!(
+            &s.events[5],
+            Event::Key {
+                key: KeySpec {
+                    key: NamedKey::Control,
+                    mods: ModSet { ctrl: false, .. }
+                },
+                ..
+            }
+        ));
+        assert!(matches!(
+            &s.events[6],
+            Event::Key {
+                key: KeySpec {
+                    key: NamedKey::Alt,
+                    mods: ModSet { alt: false, .. }
+                },
+                ..
+            }
+        ));
+        assert!(matches!(
+            &s.events[7],
+            Event::Key {
+                action: KeyAction::Press,
+                key: KeySpec {
+                    key: NamedKey::Char('k'),
+                    ..
+                },
+                ..
+            }
+        ));
+        assert!(matches!(
+            &s.events[8],
+            Event::Key {
+                action: KeyAction::Release,
+                key: KeySpec {
+                    key: NamedKey::Char('h'),
+                    ..
+                },
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -99,10 +99,11 @@ pub enum Event {
     Type { text: String, delay: Duration },
     /// Sleep for `duration` without sending input.
     Sleep(Duration),
-    /// Send a single key press, optionally repeated. `delay` is the gap
-    /// between successive presses when `count > 1`.
+    /// Send a single key event (press/release), optionally repeated. `delay`
+    /// is the gap between successive events when `count > 1`.
     Key {
         key: KeySpec,
+        action: KeyAction,
         count: u32,
         delay: Duration,
     },
@@ -161,6 +162,10 @@ pub enum NamedKey {
     PageDown,
     Home,
     End,
+    Shift,
+    Control,
+    Alt,
+    Super,
     /// `ScrollUp` / `ScrollDown` – we model them as keys for simplicity even
     /// though vhs implements them as multi-frame scrolls. The runner can
     /// remap these to mouse wheel events later.
@@ -176,6 +181,7 @@ pub struct ModSet {
     pub ctrl: bool,
     pub alt: bool,
     pub shift: bool,
+    pub super_key: bool,
 }
 
 impl ModSet {
@@ -183,9 +189,17 @@ impl ModSet {
         ctrl: false,
         alt: false,
         shift: false,
+        super_key: false,
     };
 
     pub fn any(&self) -> bool {
-        self.ctrl || self.alt || self.shift
+        self.ctrl || self.alt || self.shift || self.super_key
     }
+}
+
+/// Action for a key event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum KeyAction {
+    Press,
+    Release,
 }
