@@ -184,7 +184,10 @@ pub fn spawn_gif_stream(
     let scale = PxScale::from(opts.font_size);
     let primary = &font_set.fonts[font_set.regular[0]];
     let scaled = primary.as_scaled(scale);
-    let cell_w = scaled.h_advance(primary.glyph_id('M')).ceil().max(1.0) as u32;
+    let cell_w = scaled
+        .h_advance(primary.glyph_id('M'))
+        .ceil()
+        .max(1.0) as u32;
     let cell_h = (scaled.height() + scaled.line_gap()).ceil().max(1.0) as u32;
     let baseline = scaled.ascent().ceil() as u32;
     let layout = layout_metrics(cfg.cols, cfg.rows, cell_w, cell_h, opts.frame_style);
@@ -243,7 +246,10 @@ pub fn render_png_frame(frame: &RawFrame, opts: &RenderOptions, out: &Path) -> R
     let scale = PxScale::from(opts.font_size);
     let primary = &font_set.fonts[font_set.regular[0]];
     let scaled = primary.as_scaled(scale);
-    let cell_w = scaled.h_advance(primary.glyph_id('M')).ceil().max(1.0) as u32;
+    let cell_w = scaled
+        .h_advance(primary.glyph_id('M'))
+        .ceil()
+        .max(1.0) as u32;
     let cell_h = (scaled.height() + scaled.line_gap()).ceil().max(1.0) as u32;
     let baseline = scaled.ascent().ceil() as u32;
     let mut glyph_cache = GlyphCache::new();
@@ -837,13 +843,7 @@ fn load_font_family(path: Option<&str>) -> Result<LoadedFontFamily> {
     };
 
     Ok(LoadedFontFamily {
-        font_set: FontSet {
-            fonts,
-            regular,
-            bold,
-            italic,
-            bold_italic,
-        },
+        font_set: FontSet { fonts, regular, bold, italic, bold_italic },
         description,
     })
 }
