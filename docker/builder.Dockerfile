@@ -38,8 +38,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-RUN rustup target list --installed | grep -Fqx "${TARGET}" \
-    || rustup target add ${TARGET}
+RUN rustup target list | awk '{print $1}' | grep -Fqx "${TARGET}" \
+ && (rustup target list --installed | grep -Fqx "${TARGET}" || rustup target add "${TARGET}") \
+ || (echo "invalid rust target: ${TARGET}" >&2; exit 1)
 
 ENV CC_x86_64_unknown_linux_musl=musl-gcc \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-C target-feature=+crt-static -C link-self-contained=yes -C linker=rust-lld"
