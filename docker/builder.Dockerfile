@@ -49,6 +49,7 @@ RUN --mount=type=secret,id=extra_ca_cert,required=false \
 RUN rustup target add ${TARGET}
 
 ENV CC_x86_64_unknown_linux_musl=musl-gcc \
+    PKG_CONFIG_ALLOW_CROSS=1 \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-C target-feature=+crt-static -C link-self-contained=yes -C linker=rust-lld"
 
 ENV VERGEN_GIT_SHA="${VERGEN_GIT_SHA}" \
