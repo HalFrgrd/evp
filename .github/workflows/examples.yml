@@ -69,8 +69,8 @@ jobs:
                       -v "$PWD:/work" \
                       -w /work \
                       ${{ steps.img.outputs.ref }} \
-                      "examples/$name.tape" \
-                      --output "out/$name.$ext"
+                      "/work/examples/$name.tape" \
+                      --output "/work/out/$name.$ext"
                   echo "::endgroup::"
               done
           done
