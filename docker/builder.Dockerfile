@@ -38,7 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-RUN rustup target list --installed | grep -qx "${TARGET}" \
+RUN rustup target list --installed | grep -Fqx "${TARGET}" \
     || rustup target add ${TARGET}
 
 ENV CC_x86_64_unknown_linux_musl=musl-gcc \
