@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1.7
 
+ARG RUST_VERSION=1.95
+ARG DEBIAN_VERSION=bookworm
 ARG TARGET=x86_64-unknown-linux-musl
-ARG BUILD_ENV_IMAGE=build-env
 ARG VERGEN_GIT_SHA=unknown
 ARG VERGEN_GIT_BRANCH=unknown
 ARG VERGEN_GIT_COMMIT_DATE=unknown
@@ -13,7 +14,7 @@ ARG VERGEN_GIT_COMMIT_MESSAGE=unknown
 ARG VERGEN_GIT_DESCRIBE=unknown
 ARG VERGEN_GIT_DIRTY=unknown
 
-FROM ${BUILD_ENV_IMAGE} AS builder
+FROM rust:${RUST_VERSION}-${DEBIAN_VERSION} AS builder
 
 ARG TARGET
 ARG VERGEN_GIT_SHA
@@ -26,6 +27,16 @@ ARG VERGEN_GIT_COMMIT_AUTHOR_EMAIL
 ARG VERGEN_GIT_COMMIT_MESSAGE
 ARG VERGEN_GIT_DESCRIBE
 ARG VERGEN_GIT_DIRTY
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        clang \
+        file \
+        git \
+        musl-dev \
+        musl-tools \
+        pkg-config \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN rustup target add ${TARGET}
 

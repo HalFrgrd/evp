@@ -12,8 +12,6 @@ variable "VERGEN_GIT_DESCRIBE"             { default = "unknown" }
 variable "VERGEN_GIT_DIRTY"                { default = "unknown" }
 
 variable "RUNTIME_TAG"          { default = "evp:local" }
-variable "BUILD_ENV_TAG"        { default = "build-env:local" }
-variable "BUILD_ENV_IMAGE"      { default = "build-env" }
 variable "EXTRACT_BINARY_DEST"  { default = "/tmp/evp-build" }
 variable "EXTRACT_LIBGHOSTTY_DEST" { default = "assets/libghostty" }
 
@@ -33,20 +31,10 @@ target "_common" {
   }
 }
 
-target "build-env" {
-  inherits   = ["_common"]
-  dockerfile = "docker/build-env.Dockerfile"
-  tags       = [BUILD_ENV_TAG]
-}
-
 target "builder" {
   inherits   = ["_common"]
   dockerfile = "docker/builder.Dockerfile"
-  args = {
-    BUILD_ENV_IMAGE = BUILD_ENV_IMAGE
-  }
   contexts = {
-    build-env = "target:build-env"
     libghostty = "./assets/libghostty"
   }
   tags = ["evp-builder:local"]

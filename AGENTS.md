@@ -155,7 +155,7 @@ section.
 ## Docker build environment image
 
 - Dockerfiles are split under `docker/` and connected via `docker-bake.hcl`
-  `contexts` (`build-env -> builder -> test/runtime/stress_test/extract-binary`).
+  `contexts` (`builder -> test/runtime/stress_test/extract-binary`).
 - `extract-libghostty` bakes a prebuilt `libghostty-vt` static library,
   headers, and pkg-config files into `assets/libghostty`.
 - Copilot setup should run `docker buildx bake extract-libghostty` so
