@@ -24,6 +24,12 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Prebuild libghostty pkg-config artifacts
+        run: |
+          set -euo pipefail
+          rm -rf assets/libghostty
+          docker buildx bake extract-libghostty
+
       - name: Compute optional extra CA fingerprint
         id: extra_ca
         env:
