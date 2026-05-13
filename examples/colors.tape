@@ -13,9 +13,9 @@ Set TypingSpeed 30ms
 Set Framerate 30
 
 Sleep 500ms
-Type "for c in 30 31 32 33 34 35 36 37; do printf '\\033[1;%sm  %s  \\033[0m' $c $c; done; echo"
+Type "for c in 30 31 32 33 34 35 36 37; do printf '\033[1;%sm  %s  \033[0m' $c $c; done; echo"
 Enter
 Sleep 500ms
-Type "for c in 90 91 92 93 94 95 96 97; do printf '\\033[1;%sm  %s  \\033[0m' $c $c; done; echo"
+Type "for c in 90 91 92 93 94 95 96 97; do printf '\033[1;%sm  %s  \033[0m' $c $c; done; echo"
 Enter
 Sleep 1500ms

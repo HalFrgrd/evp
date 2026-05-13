@@ -12,6 +12,6 @@ Set TypingSpeed 30ms
 Set Framerate 30
 
 Sleep 500ms
-Type "for i in 1 2 3 4 5 6 7 8 9 10; do printf '\\rprogress: [%-10s] %s%%' \"$(printf '#%.0s' $(seq 1 $i))\" $((i*10)); sleep 0.15; done; echo"
+Type "for i in 1 2 3 4 5 6 7 8 9 10; do printf '\rprogress: [%-10s] %s%%' \"$(printf '#%.0s' $(seq 1 $i))\" $((i*10)); sleep 0.15; done; echo"
 Enter
 Sleep 2s

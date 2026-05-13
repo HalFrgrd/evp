@@ -22,6 +22,6 @@ Ctrl+U
 Sleep 300ms
 
 # Now type the real command.
-Type "printf 'Modifiers work: %s\\n' OK"
+Type "printf 'Modifiers work: %s\n' OK"
 Enter
 Sleep 1s
