@@ -11,7 +11,7 @@ backend.
 | [keys.tape](keys.tape) | Modifier keys + line-editing (`Ctrl+U`). |
 | [colors.tape](colors.tape) | ANSI SGR colour table – stresses cell diffing. |
 | [progress.tape](progress.tape) | In-place line rewrites – stresses the diff path. |
-| [stress_test.tape](stress_test.tape) | 100×30 grid at 60 fps where every keystroke triggers a full-screen random-cell repaint. Used by the [`stress_test_benchmark`](stress_test_benchmark.rs) example and the `stress_test` GitHub Actions workflow. |
+| [stress_test.tape](stress_test.tape) | 100×30 grid at 50 fps where every keystroke triggers a full-screen random-cell repaint. Used by the [`stress_test_benchmark`](stress_test_benchmark.rs) example and the `stress_test` GitHub Actions workflow. |
 
 ## Running
 
@@ -77,9 +77,9 @@ docker run --rm --cpus=1 --cpuset-cpus=0 \
     /tmp/stress_test-comparison.md
 ```
 
-The [`stress_test` workflow](../.github/workflows/stress_test.yml) runs both
-sides automatically and uploads the comparison + both GIFs as a job
-artifact.
+The [`stress_test` workflow](../.github/workflows/stress_test.yml) can be run
+manually or is invoked automatically from CI, and uploads the comparison + both
+GIFs as a job artifact.
 
 ### Analyzing any GIF's frame timestamps
 
@@ -90,7 +90,7 @@ and reports how many frames look "long" given an expected framerate
 stress_test output:
 
 ```bash
-python3 scripts/gif_frame_analyzer.py path/to/anim.gif --fps 60
+python3 scripts/gif_frame_analyzer.py path/to/anim.gif --fps 50
 python3 scripts/gif_frame_analyzer.py path/to/anim.gif --fps 30 --json
 ```
 

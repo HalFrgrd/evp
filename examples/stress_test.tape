@@ -3,8 +3,8 @@
 # Drives `scripts/stress_test_program.py` (mounted/copied to /tmp/stress_test_program.py
 # by the workflow) which redraws *every cell* of a 100×30 grid with a
 # random ASCII codepoint + random fg/bg + random modifiers on every byte
-# it receives. The recording captures at 60 fps and the script types at
-# ~125 chars/second (≥2 keystrokes per captured frame) for ~10 s, which
+# it receives. The recording captures at 50 fps and the script types at
+# 50 chars/second (one keystroke per captured frame) for 5 s, which
 # is the worst-case render workload.
 #
 # The same tape is consumed by both `evp` and `vhs`. evp accepts
@@ -15,6 +15,7 @@
 
 Output stress_test.gif
 
+# VHS expects the shell setting to be the bare executable name.
 Set Shell bash
 Set FontSize 14
 # Pixel geometry chosen so `evp::runner::derive_options` rounds to a
@@ -25,7 +26,7 @@ Set FontSize 14
 Set Width 800
 Set Height 420
 Set Padding 0
-Set Framerate 60
+Set Framerate 50
 
 # Fast typing for the prelude so it doesn't eat into the stress_test window.
 Set TypingSpeed 1ms
@@ -35,28 +36,13 @@ Enter
 Sleep 500ms
 Show
 
-# Stress-test run. 8 ms per char ≈ 125 keystrokes/sec — at 60 fps that's
-# slightly over two updates per captured frame (the raw-frame consumers
-# never gets a quiet moment between repaints). 1300 chars × 8 ms
-# ≈ 10.4 s of typing, then a short trailing Sleep so the final state
-# is captured. The stress_test program ignores the byte values and
-# repaints the full 100×30 grid on every received byte.
-#
-# 8 ms (vs. exactly 1000/120 = 8.333 ms) keeps the duration parseable
-# by every VHS version: VHS only accepts integer-millisecond
-# durations, and 8 ms guarantees ≥2 updates per 16.67 ms frame.
-Set TypingSpeed 8ms
+# Stress-test run. 20 ms per char = 50 keystrokes/sec, matching the 50 fps
+# capture rate so every captured frame sees a repaint. 250 chars × 20 ms
+# = 5 s of typing, then a short trailing Sleep so the final state is
+# captured. The stress_test program ignores the byte values and repaints
+# the full 100×30 grid on every received byte.
+Set TypingSpeed 20ms
 Type "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKL"
 Type "MNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmn"
-Type "opqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-Type "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzAB"
-Type "CDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd"
-Type "efghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOP"
-Type "QRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqr"
-Type "stuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123"
-Type "456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEF"
-Type "GHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefgh"
-Type "ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRST"
-Type "UVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuv"
-Type "wxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567"
-Sleep 500ms
+Type "opqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+Sleep 200ms

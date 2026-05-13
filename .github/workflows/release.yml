@@ -62,7 +62,10 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf assets/libghostty
-          docker buildx bake extract-libghostty
+          docker buildx bake \
+            --set extract-libghostty.cache-from=type=gha,scope=libghostty-pkgconfig-${{ runner.os }}-${{ runner.arch }} \
+            --set extract-libghostty.cache-to=type=gha,scope=libghostty-pkgconfig-${{ runner.os }}-${{ runner.arch }},mode=max \
+            extract-libghostty
 
       - name: Compute git metadata for vergen
         id: gitmeta
