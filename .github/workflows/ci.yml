@@ -17,6 +17,8 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,3 +42,43 @@ jobs:
           cargo build --workspace
           cargo test --workspace --lib --bins -- --test-threads=1
           cargo test --workspace --tests -- --test-threads=1
+
+      - name: Build release evp for examples
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: cargo build --release --bin evp
+
+      - name: Render every example to a GIF and SVG
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          for tape in examples/*.tape; do
+              name=$(basename "$tape" .tape)
+              for ext in gif svg; do
+                  echo "::group::rendering $name.$ext"
+                  ./target/release/evp "$tape" --output "out/$name.$ext"
+                  echo "::endgroup::"
+              done
+          done
+          ls -lh out/
+
+      - name: Upload to the `assets` release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: assets
+          name: Example assets
+          body: |
+            Pre-rendered GIFs of every script in `examples/`.
+
+            These assets are rebuilt automatically by the
+            `ci` workflow on every push to `master`. The README links
+            to them via the stable release-download URL.
+
+            Last build: ${{ github.sha }}
+          files: |
+            out/*.gif
+            out/*.svg
+          fail_on_unmatched_files: true
+          make_latest: "false"
+          token: ${{ secrets.GITHUB_TOKEN }}
