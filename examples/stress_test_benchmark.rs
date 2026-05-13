@@ -1,7 +1,7 @@
 //! Stress-test benchmark for the evp PTY → raw-frame-consumer pipeline.
 //!
-//! Drives `examples/stress_test.tape` (100×30 grid, 60 fps, ~10 s, types at
-//! 100 chars/min) which in turn runs `scripts/stress_test_program.py`. The
+//! Drives `examples/stress_test.tape` (100×30 grid, 50 fps, 5 s, types at
+//! 50 Hz) which in turn runs `scripts/stress_test_program.py`. The
 //! stress_test program redraws *every cell* with random ASCII + random
 //! fg/bg + random modifiers on every keystroke, producing the
 //! worst-case "every cell changed" frame the renderer can be asked to

@@ -5,39 +5,12 @@ name: stress_test
 # equivalent VHS run. The evp benchmark and VHS run are executed as
 # native workflow steps rather than inside a monolithic Dockerfile.
 #
-# Trigger: manual (workflow_dispatch) or any push that touches the
-# benchmark surface.
+# Trigger: manual (workflow_dispatch) or from another workflow via
+# workflow_call.
 
 on:
   workflow_dispatch:
-  push:
-    branches: [master]
-    paths:
-      - "examples/stress_test_benchmark.rs"
-      - "examples/stress_test.tape"
-      - "scripts/stress_test_program.py"
-      - "scripts/stress_test_compare.sh"
-      - "scripts/gif_frame_analyzer.py"
-      - "src/full_recording.rs"
-      - "src/runner.rs"
-      - "src/renderer.rs"
-      - "src/render_common.rs"
-      - "src/render_gif.rs"
-      - "src/lib.rs"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "vhs.Dockerfile"
-      - ".github/workflows/stress_test.yml"
-  pull_request:
-    branches: [master]
-    paths:
-      - "examples/stress_test_benchmark.rs"
-      - "examples/stress_test.tape"
-      - "scripts/stress_test_program.py"
-      - "scripts/stress_test_compare.sh"
-      - "scripts/gif_frame_analyzer.py"
-      - "vhs.Dockerfile"
-      - ".github/workflows/stress_test.yml"
+  workflow_call:
 
 permissions:
   contents: read
@@ -51,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      STRESS_TEST_FPS: 60
+      STRESS_TEST_FPS: 50
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -68,7 +41,10 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf assets/libghostty
-          docker buildx bake extract-libghostty
+          docker buildx bake \
+            --set extract-libghostty.cache-from=type=gha,scope=libghostty-pkgconfig-${{ runner.os }}-${{ runner.arch }} \
+            --set extract-libghostty.cache-to=type=gha,scope=libghostty-pkgconfig-${{ runner.os }}-${{ runner.arch }},mode=max \
+            extract-libghostty
 
       - name: Build stress_test_benchmark
         run: cargo build --release --example stress_test_benchmark
