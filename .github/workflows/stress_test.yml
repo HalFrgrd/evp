@@ -53,7 +53,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p stress_test-out
-          EVP_STRESS_TEST_TAPE="$(pwd)/examples/stress_test.tape" \
+          EVP_STRESS_TEST_TAPE="$(pwd)/scripts/stress_test.tape" \
           EVP_STRESS_TEST_PROGRAM="$(pwd)/scripts/stress_test_program.py" \
             ./target/release/examples/stress_test_benchmark \
               stress_test-out/evp.gif \

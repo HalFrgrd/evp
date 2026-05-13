@@ -1,6 +1,6 @@
 //! Stress-test benchmark for the evp PTY → raw-frame-consumer pipeline.
 //!
-//! Drives `examples/stress_test.tape` (100×30 grid, 50 fps, 5 s, types at
+//! Drives `scripts/stress_test.tape` (100×30 grid, 50 fps, 5 s, types at
 //! 50 Hz) which in turn runs `scripts/stress_test_program.py`. The
 //! stress_test program redraws *every cell* with random ASCII + random
 //! fg/bg + random modifiers on every keystroke, producing the
@@ -177,16 +177,16 @@ fn locate_tape() -> Result<PathBuf> {
     }
     // Look up from CWD a few levels.
     let candidates = [
-        PathBuf::from("examples/stress_test.tape"),
-        PathBuf::from("../examples/stress_test.tape"),
-        PathBuf::from("/work/examples/stress_test.tape"),
+        PathBuf::from("scripts/stress_test.tape"),
+        PathBuf::from("../scripts/stress_test.tape"),
+        PathBuf::from("/work/scripts/stress_test.tape"),
     ];
     for c in &candidates {
         if c.exists() {
             return Ok(c.clone());
         }
     }
-    anyhow::bail!("couldn't find examples/stress_test.tape; set EVP_STRESS_TEST_TAPE to its path");
+    anyhow::bail!("couldn't find scripts/stress_test.tape; set EVP_STRESS_TEST_TAPE to its path");
 }
 
 fn locate_stress_test_program() -> Result<PathBuf> {

@@ -11,7 +11,6 @@ backend.
 | [keys.tape](keys.tape) | Modifier keys + line-editing (`Ctrl+U`). |
 | [colors.tape](colors.tape) | ANSI SGR colour table – stresses cell diffing. |
 | [progress.tape](progress.tape) | In-place line rewrites – stresses the diff path. |
-| [stress_test.tape](stress_test.tape) | 100×30 grid at 50 fps where every keystroke triggers a full-screen random-cell repaint. Used by the [`stress_test_benchmark`](stress_test_benchmark.rs) example and the `stress_test` GitHub Actions workflow. |
 
 ## Running
 
@@ -44,7 +43,7 @@ release named `assets` and are linked from the project [README](../README.md).
 ## Stress-test benchmark
 
 The [`stress_test_benchmark`](stress_test_benchmark.rs) example drives
-[`stress_test.tape`](stress_test.tape) end-to-end through the evp library and
+[`scripts/stress_test.tape`](../scripts/stress_test.tape) end-to-end through the evp library and
 prints a one-page report with pipeline-health counters
 (dropped raw-frame consumer frames, max queue depths, wall-clock time). It
 exits non-zero when more than **5 %** of raw-frame consumer sends were dropped.
@@ -68,7 +67,7 @@ docker run --rm --cpus=1 --cpuset-cpus=0 \
     -e XDG_CONFIG_HOME=/tmp/chrome-config \
     -e XDG_CACHE_HOME=/tmp/chrome-cache \
     -e XDG_RUNTIME_DIR=/tmp/chrome-runtime \
-    -v "$PWD/examples:/vhs" -v /tmp:/tmp \
+    -v "$PWD/scripts:/vhs" -v /tmp:/tmp \
     ghcr.io/charmbracelet/vhs:latest stress_test.tape
 
 ./scripts/stress_test_compare.sh \
