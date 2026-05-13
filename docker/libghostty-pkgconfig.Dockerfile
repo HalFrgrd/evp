@@ -1,13 +1,12 @@
 # syntax=docker/dockerfile:1.7
 
-ARG RUST_VERSION=1.95
 ARG DEBIAN_VERSION=bookworm
 ARG ZIG_VERSION=0.15.2
-ARG LIBGHOSTTY_RS_REV=5ac47e9eb166add2c00c432bc65c279133629712
+ARG GHOSTTY_COMMIT=6590196661f769dd8f2b3e85d6c98262c4ec5b3b
 
-FROM rust:${RUST_VERSION}-${DEBIAN_VERSION} AS build-libghostty
+FROM debian:${DEBIAN_VERSION} AS build-libghostty
 ARG ZIG_VERSION
-ARG LIBGHOSTTY_RS_REV
+ARG GHOSTTY_COMMIT
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -34,40 +33,32 @@ RUN set -eux; \
 
 ENV PATH="/opt/zig:${PATH}"
 
-# Build libghostty-vt-sys in release mode and keep it architecture-generic by
-# relying on the target baseline (never pass -Dcpu=native).
-WORKDIR /seed
-RUN mkdir -p /seed/src
-RUN printf '%s\n' \
-    '[package]' \
-    'name = "libghostty-seed"' \
-    'version = "0.1.0"' \
-    'edition = "2021"' \
-    '' \
-    '[dependencies]' \
-    "libghostty-vt-sys = { git = \"https://github.com/uzaaft/libghostty-rs\", rev = \"${LIBGHOSTTY_RS_REV}\", features = [\"link-static\", \"pkg-config\"] }" \
-    > /seed/Cargo.toml
-RUN printf '%s\n' \
-    'extern crate libghostty_vt_sys;' \
-    '' \
-    'pub fn seed() {}' \
-    > /seed/src/lib.rs
+# Clone ghostty at the pinned commit and build libghostty-vt directly via zig.
+# -Dcpu=baseline ensures the static library targets the generic architecture
+# baseline rather than the native CPU of the build runner, making the cached
+# artefact portable across different CI runner microarchitectures.
+RUN git clone --filter=blob:none --no-checkout \
+        https://github.com/ghostty-org/ghostty.git /ghostty && \
+    git -C /ghostty checkout "${GHOSTTY_COMMIT}"
 
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/seed/target \
+WORKDIR /ghostty
+RUN --mount=type=cache,target=/zig-cache \
         set -eux; \
-        CARGO_TARGET_DIR=/seed/target LIBGHOSTTY_VT_SYS_OPTIMIZE=ReleaseFast cargo build --release; \
-        out_dir="$(find /seed/target/release/build -maxdepth 2 -type d -path '*/libghostty-vt-sys-*/out' | head -n1)"; \
-        test -n "$out_dir"; \
-        install_root="$out_dir/ghostty-install"; \
-        test -f "$install_root/lib/libghostty-vt.a"; \
-        test -f "$install_root/include/ghostty/vt.h"; \
-        test -f "$install_root/share/pkgconfig/libghostty-vt-static.pc"; \
-        rm -rf /out && mkdir -p /out; \
-        mkdir -p /out/lib /out/include /out/share/pkgconfig; \
-        cp -a "$install_root/include/ghostty" /out/include/; \
-        cp "$install_root/lib/libghostty-vt.a" /out/lib/; \
-        cp "$install_root/share/pkgconfig/libghostty-vt-static.pc" /out/share/pkgconfig/; \
+        zig build \
+            -Demit-lib-vt \
+            -Doptimize=ReleaseFast \
+            -Demit-xcframework=false \
+            -Dapp-runtime=none \
+            -Dcpu=baseline \
+            --prefix /ghostty-install \
+            --cache-dir /zig-cache; \
+        test -f /ghostty-install/lib/libghostty-vt.a; \
+        test -f /ghostty-install/include/ghostty/vt.h; \
+        test -f /ghostty-install/share/pkgconfig/libghostty-vt-static.pc; \
+        rm -rf /out && mkdir -p /out/lib /out/include /out/share/pkgconfig; \
+        cp -a /ghostty-install/include/ghostty /out/include/; \
+        cp /ghostty-install/lib/libghostty-vt.a /out/lib/; \
+        cp /ghostty-install/share/pkgconfig/libghostty-vt-static.pc /out/share/pkgconfig/; \
         sed -i 's|^prefix=.*|prefix=${pcfiledir}/../..|' /out/share/pkgconfig/libghostty-vt-static.pc
 
 FROM scratch AS export
