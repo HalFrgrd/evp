@@ -19,7 +19,7 @@ renderer threads.
 
 ## Examples
 
-These GIFs are produced by the [`examples`](.github/workflows/examples.yml)
+These GIFs are produced by the [`ci`](.github/workflows/ci.yml)
 workflow on every push to `master` and uploaded as assets on the rolling
 [`assets` release](https://github.com/HalFrgrd/evp/releases/tag/assets).
 
