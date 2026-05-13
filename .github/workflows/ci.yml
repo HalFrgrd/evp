@@ -28,41 +28,59 @@ jobs:
         with:
           toolchain: "1.95"
 
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
 
       - name: Prebuild libghostty pkg-config artifacts
+        uses: docker/bake-action@v4
+        with:
+          files: docker-bake.hcl
+          targets: extract-libghostty
+          set: |
+            extract-libghostty.output=type=local,dest=${{ runner.temp }}/docker/libghostty
+            *.cache-from=type=gha
+            *.cache-to=type=gha,mode=max
+
+      - name: Copy prebuilt libghostty to assets
         run: |
-          set -euo pipefail
           rm -rf assets/libghostty
-          docker buildx bake \
-            --set extract-libghostty.cache-from=type=gha,scope=libghostty-pkgconfig-${{ runner.os }}-${{ runner.arch }} \
-            --set extract-libghostty.cache-to=type=gha,scope=libghostty-pkgconfig-${{ runner.os }}-${{ runner.arch }},mode=max \
-            extract-libghostty
+          mkdir -p assets
+          cp -r ${{ runner.temp }}/docker/libghostty assets/libghostty
 
-      - name: Build and test
+      - name: Build and test (release)
         run: |
-          cargo build --workspace
-          cargo test --workspace --lib --bins -- --test-threads=1
-          cargo test --workspace --tests -- --test-threads=1
+          cargo build --workspace --release
+          cargo test --workspace --release --lib --bins -- --test-threads=1
+          cargo test --workspace --release --tests -- --test-threads=1
 
-      - name: Build release evp for examples
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        run: cargo build --release --bin evp
+      - name: Upload evp binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: evp-release-bin
+          path: target/release/evp
 
-      - name: Render every example to a GIF and SVG
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+  render-examples:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        name: ["demo", "meta", "screenshot", "welcome"]
+        ext: ["gif", "svg"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download evp binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: evp-release-bin
+          path: ./evp-bin
+      - name: Render ${{ matrix.name }}.${{ matrix.ext }}
         run: |
           set -euo pipefail
           mkdir -p out
-          for tape in examples/*.tape; do
-              name=$(basename "$tape" .tape)
-              for ext in gif svg; do
-                  echo "::group::rendering $name.$ext"
-                  ./target/release/evp "$tape" --output "out/$name.$ext"
-                  echo "::endgroup::"
-              done
-          done
+          chmod +x ./evp-bin/evp
+          ./evp-bin/evp "examples/${{ matrix.name }}.tape" --output "out/${{ matrix.name }}.${{ matrix.ext }}"
           ls -lh out/
 
       - name: Upload to the `assets` release
