@@ -62,9 +62,10 @@ struct Cli {
     /// without needing any external files.
     #[arg(long)]
     run_test_script: bool,
-    /// Override the script's `Output` directive.
+    /// Override the script's `Output` directives. Repeat to write multiple
+    /// outputs in one run (for example `--output out.gif --output out.svg`).
     #[arg(short, long)]
-    output: Option<PathBuf>,
+    output: Vec<PathBuf>,
     /// Optional path to a TTF font file. If omitted, a system monospace
     /// font is auto-discovered.
     #[arg(long)]
@@ -152,9 +153,10 @@ fn real_main() -> Result<()> {
 
     info!(events = script.events.len(), "script loaded");
 
-    let mut output_paths: Vec<PathBuf> = match cli.output.clone() {
-        Some(p) => vec![p],
-        None => script.outputs.iter().map(PathBuf::from).collect(),
+    let mut output_paths: Vec<PathBuf> = if cli.output.is_empty() {
+        script.outputs.iter().map(PathBuf::from).collect()
+    } else {
+        cli.output.clone()
     };
     if output_paths.is_empty() {
         bail!("no Output directive and --output not given");
@@ -271,5 +273,22 @@ mod tests {
                 shell: CompletionShell::Bash
             })
         ));
+    }
+
+    #[test]
+    fn parses_multiple_output_flags() {
+        let cli = Cli::try_parse_from([
+            "evp",
+            "demo.tape",
+            "--output",
+            "demo.gif",
+            "--output",
+            "demo.svg",
+        ])
+        .unwrap();
+        assert_eq!(
+            cli.output,
+            vec![PathBuf::from("demo.gif"), PathBuf::from("demo.svg")]
+        );
     }
 }

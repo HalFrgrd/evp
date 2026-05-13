@@ -193,8 +193,8 @@ use this same API end-to-end.
 ## CLI
 
 ```text
-evp <script> [-o <output.gif|output.svg|output.json>] [--font <path.ttf>] [--dump-json <path.json>] [--log-level <level>]
-evp --run-test-script [-o <output.gif|output.svg|output.json>]
+evp <script> [-o <output.gif|output.svg|output.json> ...] [--font <path.ttf>] [--dump-json <path.json>] [--log-level <level>]
+evp --run-test-script [-o <output.gif|output.svg|output.json> ...]
 evp themes
 evp validate <script>
 evp completion <shell>
@@ -204,7 +204,7 @@ evp completion <shell>
 | --- | --- |
 | `<script>` | Path to a `.tape` file. Required unless `--run-test-script` is set. |
 | `--run-test-script` | Run a small built-in demo tape embedded in the binary. Writes `./evp-test.gif` by default. Useful for verifying an install end-to-end with no external files. |
-| `-o`, `--output` | Override the script's `Output` directives. Output extension picks the renderer (`.gif`, `.svg`, or `.json`). |
+| `-o`, `--output` | Override the script's `Output` directives. Repeat `-o/--output` to render multiple files in one run. Output extension picks the renderer (`.gif`, `.svg`, or `.json`). |
 | `--font` | Path to a TTF/OTF/TTC used by the GIF renderer. Defaults to embedded `JetBrains Mono` family files in `assets/fonts/`. |
 | `--dump-json` | Also render the intermediate `Recording` to JSON for later re-rendering or inspection. |
 | `--log-level` | Explicit level override: `error`, `warn`, `info`, `debug`, `trace`. |
