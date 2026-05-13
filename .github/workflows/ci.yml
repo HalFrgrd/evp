@@ -67,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        name: ["demo", "meta", "screenshot", "welcome"]
+        name: ["hello", "colors", "keys", "my_program_demo", "progress", "shell-tour", "test", "embedded-font-demo"]
         ext: ["gif", "svg"]
     steps:
       - name: Checkout
