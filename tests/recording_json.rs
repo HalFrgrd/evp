@@ -12,80 +12,11 @@
 //! pseudo-terminal, then asserts on either the in-memory `Recording` or
 //! its JSON round-trip.
 
-use evp::{Frame, Recording};
+mod common;
+
+use common::{full_haystack, json_round_trip, record, temp_json_path};
+use evp::Frame;
 use serde_json::Value;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Parse + run a tape source and return the recorded frames. A panic
-/// here means the pipeline itself is broken; individual tests assert on
-/// the returned recording's contents.
-fn record(tape: &str) -> Recording {
-    let script = evp::parse_script(tape).expect("parse tape");
-    let out = evp::run_and_return_recording(&script).expect("run script");
-    out.recording
-}
-
-/// Round-trip a [`Recording`] through JSON, asserting the result is
-/// byte-identical to a second serialisation of the deserialised value.
-/// This catches non-determinism (e.g. accidental `HashMap` use) and any
-/// silent loss of fields.
-fn json_round_trip(rec: &Recording) -> Recording {
-    let bytes = evp::recording_to_json(rec).expect("serialise");
-    let parsed = evp::recording_from_json(&bytes).expect("deserialise");
-    let bytes2 = evp::recording_to_json(&parsed).expect("serialise round-tripped");
-    assert_eq!(
-        bytes, bytes2,
-        "recording JSON serialisation is not deterministic"
-    );
-    parsed
-}
-
-/// Reconstruct row strings (whitespace-trimmed on the right) for the
-/// frame at `frame_idx` using the public reconstruction helper.
-fn rows_as_strings(rec: &Recording, frame_idx: usize) -> Vec<String> {
-    let frame = rec.reconstruct(frame_idx).expect("reconstruct frame");
-    let cols = frame.cols as usize;
-    (0..frame.rows as usize)
-        .map(|r| {
-            let mut line = String::new();
-            for c in &frame.cells[r * cols..(r + 1) * cols] {
-                if c.text.is_empty() {
-                    line.push(' ');
-                } else {
-                    line.push_str(&c.text);
-                }
-            }
-            line.trim_end().to_string()
-        })
-        .collect()
-}
-
-/// Concatenate every frame's rendered text into one big haystack for
-/// substring assertions.
-fn full_haystack(rec: &Recording) -> String {
-    let mut s = String::new();
-    for i in 0..rec.frames.len() {
-        for line in rows_as_strings(rec, i) {
-            s.push_str(&line);
-            s.push('\n');
-        }
-    }
-    s
-}
-
-fn temp_json_path(prefix: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "{prefix}-{}-{}.json",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ))
-}
 
 // ---------------------------------------------------------------------------
 // Tests
