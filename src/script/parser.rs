@@ -432,6 +432,7 @@ fn parse_key_spec(s: &str) -> Result<KeySpec> {
             mods.shift = true;
             last_modifier = Some(Modifier::Shift);
         } else if part.eq_ignore_ascii_case("super")
+            || part.eq_ignore_ascii_case("command")
             || part.eq_ignore_ascii_case("gui")
             || part.eq_ignore_ascii_case("windows")
             || part.eq_ignore_ascii_case("win")
@@ -509,6 +510,7 @@ fn parse_key_spec(s: &str) -> Result<KeySpec> {
     } else if last.eq_ignore_ascii_case("shift") {
         NamedKey::Shift
     } else if last.eq_ignore_ascii_case("super")
+        || last.eq_ignore_ascii_case("command")
         || last.eq_ignore_ascii_case("gui")
         || last.eq_ignore_ascii_case("windows")
         || last.eq_ignore_ascii_case("win")
@@ -669,6 +671,7 @@ mod tests {
             Output out.gif
             Shift+Enter
             Super+Right
+            Command+v
             Meta+c
             Gui+enter
             Hyper+k
@@ -678,7 +681,7 @@ mod tests {
             Release h
         "#;
         let s = parse(src).unwrap();
-        assert_eq!(s.events.len(), 9);
+        assert_eq!(s.events.len(), 10);
 
         assert!(matches!(
             &s.events[0],
@@ -708,7 +711,7 @@ mod tests {
             &s.events[2],
             Event::Key {
                 key: KeySpec {
-                    key: NamedKey::Char('c'),
+                    key: NamedKey::Char('v'),
                     mods: ModSet {
                         super_key: true,
                         ..
@@ -718,7 +721,7 @@ mod tests {
             }
         ));
         assert!(matches!(
-            &s.events[5],
+            &s.events[6],
             Event::Key {
                 key: KeySpec {
                     key: NamedKey::Control,
@@ -728,7 +731,7 @@ mod tests {
             }
         ));
         assert!(matches!(
-            &s.events[6],
+            &s.events[7],
             Event::Key {
                 key: KeySpec {
                     key: NamedKey::Alt,
@@ -738,7 +741,7 @@ mod tests {
             }
         ));
         assert!(matches!(
-            &s.events[7],
+            &s.events[8],
             Event::Key {
                 action: KeyAction::Press,
                 key: KeySpec {
@@ -749,7 +752,7 @@ mod tests {
             }
         ));
         assert!(matches!(
-            &s.events[8],
+            &s.events[9],
             Event::Key {
                 action: KeyAction::Release,
                 key: KeySpec {
