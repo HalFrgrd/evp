@@ -6,8 +6,8 @@ use std::{
 use crossterm::{
     cursor,
     event::{
-        self, Event, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
-        PushKeyboardEnhancementFlags,
+        self, Event, KeyCode, KeyModifiers, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::{self, ClearType},
@@ -15,11 +15,6 @@ use crossterm::{
 
 fn main() -> std::io::Result<()> {
     let mut out = stdout();
-    let max_keys = std::env::var("EVP_KITTY_KEY_EVENTS")
-        .ok()
-        .and_then(|raw| raw.parse::<usize>().ok())
-        .unwrap_or(6);
-
     terminal::enable_raw_mode()?;
     execute!(
         out,
@@ -37,13 +32,17 @@ fn main() -> std::io::Result<()> {
     out.flush()?;
 
     let mut seen = 0usize;
-    while seen < max_keys {
+    loop {
         if !event::poll(Duration::from_secs(5))? {
             continue;
         }
         let Event::Key(key) = event::read()? else {
             continue;
         };
+
+        if key.code == KeyCode::Char('q') && key.modifiers == KeyModifiers::NONE {
+            break;
+        }
 
         seen += 1;
         execute!(out, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0))?;

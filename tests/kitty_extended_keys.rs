@@ -13,7 +13,6 @@ Set Height 300
 Set FontSize 20
 Set Framerate 30
 Set Shell {key_debug_bin}
-Env EVP_KITTY_KEY_EVENTS 6
 Sleep 400ms
 Press Command
 Sleep 120ms
@@ -26,7 +25,9 @@ Sleep 120ms
 Release Command+c
 Sleep 120ms
 Alt+z
-Sleep 600ms
+Sleep 120ms
+q
+Sleep 300ms
 "#
     );
 
@@ -49,5 +50,9 @@ Sleep 600ms
     assert!(
         haystack.contains("counter=5 key=KeyEvent { code: Char('c'), modifiers: KeyModifiers(SUPER), kind: Release, state: KeyEventState(0x0) }"),
         "expected release events from kitty extended keyboard protocol"
+    );
+    assert!(
+        !haystack.contains("code: Char('q')"),
+        "expected plain q to exit without being printed"
     );
 }
