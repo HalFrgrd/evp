@@ -65,6 +65,8 @@ jobs:
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     strategy:
       matrix:
         name: ["hello", "colors", "keys", "my_program_demo", "progress", "shell-tour", "test", "embedded-font-demo"]
