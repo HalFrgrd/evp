@@ -12,7 +12,7 @@ Set FontSize 18
 Set TypingSpeed 40ms
 Set Framerate 30
 Set WaitTimeout 5s
-Set WaitPattern "\\$"
+Set WaitPattern "\$"
 
 Sleep 500ms
 Type "echo 'Welcome to evp'"

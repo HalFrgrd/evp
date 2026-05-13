@@ -262,3 +262,104 @@ Sleep 300ms
         "hidden section leaked into recording timeline; max frame gap was {max_gap}ms"
     );
 }
+
+#[test]
+fn wait_line_regex_unblocks_on_matching_output() {
+    let tape = r#"
+Output out.gif
+Set Width 800
+Set Height 300
+Set FontSize 20
+Set TypingSpeed 10ms
+Set Framerate 30
+Set Shell /bin/sh
+Set WaitTimeout 2s
+Sleep 200ms
+Type "echo wait-line-ok"
+Enter
+Wait /^wait-line-ok$/
+Type "echo after-wait-line"
+Enter
+Sleep 300ms
+"#;
+
+    let rec = record(tape);
+    let haystack = full_haystack(&rec);
+    assert!(haystack.contains("wait-line-ok"), "expected wait target output");
+    assert!(
+        haystack.contains("after-wait-line"),
+        "expected commands after Wait to run"
+    );
+
+    let last_t = rec.frames.last().expect("at least one frame").t_ms();
+    assert!(
+        last_t < 2_000,
+        "Wait likely timed out instead of matching quickly; last frame at {last_t}ms"
+    );
+}
+
+#[test]
+fn wait_screen_regex_handles_escaped_dollar_literal() {
+    let tape = r#"
+Output out.gif
+Set Width 800
+Set Height 300
+Set FontSize 20
+Set TypingSpeed 10ms
+Set Framerate 30
+Set Shell /bin/sh
+Set WaitTimeout 2s
+Sleep 200ms
+Type "printf '%s\n' 'price: $5'"
+Enter
+Wait Screen /price: \$5/
+Type "echo after-wait-screen"
+Enter
+Sleep 300ms
+"#;
+
+    let rec = record(tape);
+    let haystack = full_haystack(&rec);
+    assert!(haystack.contains("price: $5"), "expected literal `$` output");
+    assert!(
+        haystack.contains("after-wait-screen"),
+        "expected commands after Screen Wait to run"
+    );
+
+    let last_t = rec.frames.last().expect("at least one frame").t_ms();
+    assert!(
+        last_t < 2_000,
+        "Screen Wait likely timed out; last frame at {last_t}ms"
+    );
+}
+
+#[test]
+fn wait_timeout_still_advances_script() {
+    let tape = r#"
+Output out.gif
+Set Width 800
+Set Height 300
+Set FontSize 20
+Set TypingSpeed 10ms
+Set Framerate 30
+Set Shell /bin/sh
+Sleep 200ms
+Wait @400ms /__never_matches_wait_test__/
+Type "echo after-timeout"
+Enter
+Sleep 300ms
+"#;
+
+    let rec = record(tape);
+    let haystack = full_haystack(&rec);
+    assert!(
+        haystack.contains("after-timeout"),
+        "expected script to continue after Wait timeout"
+    );
+
+    let last_t = rec.frames.last().expect("at least one frame").t_ms();
+    assert!(
+        last_t >= 700,
+        "expected at least ~400ms timeout + surrounding sleeps; got {last_t}ms"
+    );
+}
