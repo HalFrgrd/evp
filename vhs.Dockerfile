@@ -9,4 +9,4 @@ COPY scripts/stress_test_program.py /tmp/stress_test_program.py
 COPY examples/stress_test.tape /stress_test.tape
 
 WORKDIR /work
-CMD ["vhs", "/stress_test.tape"]
+CMD ["/stress_test.tape"]
