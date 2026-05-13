@@ -68,7 +68,6 @@ jobs:
     strategy:
       matrix:
         name: ["hello", "colors", "keys", "my_program_demo", "progress", "shell-tour", "test", "embedded-font-demo"]
-        ext: ["gif", "svg"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -77,12 +76,14 @@ jobs:
         with:
           name: evp-release-bin
           path: ./evp-bin
-      - name: Render ${{ matrix.name }}.${{ matrix.ext }}
+      - name: Render ${{ matrix.name }} (gif + svg)
         run: |
           set -euo pipefail
           mkdir -p out
           chmod +x ./evp-bin/evp
-          ./evp-bin/evp "examples/${{ matrix.name }}.tape" --output "out/${{ matrix.name }}.${{ matrix.ext }}"
+          ./evp-bin/evp "examples/${{ matrix.name }}.tape" \
+            --output "out/${{ matrix.name }}.gif" \
+            --output "out/${{ matrix.name }}.svg"
           ls -lh out/
 
       - name: Upload to the `assets` release
