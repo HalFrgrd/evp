@@ -17,8 +17,6 @@ on:
       - "src/**"
       - "Cargo.toml"
       - "Cargo.lock"
-      - "docker/*.Dockerfile"
-      - "docker-bake.hcl"
       - ".github/workflows/examples.yml"
   workflow_dispatch:
 

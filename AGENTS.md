@@ -154,11 +154,12 @@ section.
 - Pass 1 of `benchmark_render` is consistently slower than passes 2-4.
   Font loading + allocator warmup. That's why we average across 4 passes.
 
-## Docker build environment image
+## Docker build environment
 
-- Dockerfiles are split under `docker/` and connected via `docker-bake.hcl`
-  `contexts` (`builder -> test/runtime/stress_test/extract-binary`).
-- `extract-libghostty` bakes a prebuilt `libghostty-vt` static library,
-  headers, and pkg-config files into `assets/libghostty`.
-- Copilot setup should run `docker buildx bake extract-libghostty` so
-  sandboxed builds do not need network access for Zig/Ghostty fetches.
+- `docker/libghostty-pkgconfig.Dockerfile` builds the prebuilt `libghostty-vt`
+  static library, headers, and pkg-config files into `assets/libghostty`.
+- Run `docker buildx bake extract-libghostty` to refresh `assets/libghostty`
+  so local and CI builds do not need network access for Zig/Ghostty fetches.
+- `vhs.Dockerfile` (repo root) is based on the charmbracelet VHS image and
+  bakes in `scripts/stress_test_program.py` and `examples/stress_test.tape`
+  for the stress-test comparison run.

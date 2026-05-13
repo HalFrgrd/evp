@@ -171,24 +171,6 @@ domains:
 Those hosts come directly from the pinned dependency sources in
 `crates/libghostty-vt-sys/build.rs` and Ghostty's `build.zig.zon`.
 
-If your Docker/BuildKit environment sits behind a TLS-intercepting proxy,
-pass the extra root CA into bake instead of baking a private certificate
-into this repository:
-
-```bash
-EXTRA_CA_CERT="$(cat /path/to/mycorp.crt)" \
-docker buildx bake test \
-  --set "*.args.EXTRA_CA_CERT_FINGERPRINT=$(sha256sum /path/to/mycorp.crt | cut -d' ' -f1)"
-```
-
-The builder stage consumes that secret before `rustup target add` and the
-later Cargo network steps, updates the in-image trust store, and then
-continues with the normal build. The extra fingerprint arg keeps Docker's
-cache from reusing a stale no-cert layer after the CA secret changes.
-GitHub Actions workflows also forward an optional `EXTRA_CA_CERT` secret
-into BuildKit the same way. No `SSL_CERT_FILE` or `RUSTUP_USE_CURL=1`
-override is required when the CA is trusted by the image.
-
 ### As a library
 
 `evp` ships both a `[lib]` and a `[[bin]]`. The library exposes the full

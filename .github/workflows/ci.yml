@@ -21,6 +21,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95"
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -30,28 +35,8 @@ jobs:
           rm -rf assets/libghostty
           docker buildx bake extract-libghostty
 
-      - name: Compute optional extra CA fingerprint
-        id: extra_ca
-        env:
-          EXTRA_CA_CERT: ${{ secrets.EXTRA_CA_CERT }}
+      - name: Build and test
         run: |
-          set -euo pipefail
-          if [ -n "${EXTRA_CA_CERT:-}" ]; then
-            echo "fingerprint=$(printf '%s' "$EXTRA_CA_CERT" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          else
-            echo "fingerprint=absent" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Build + test (bake `test` target)
-        uses: docker/bake-action@v5
-        env:
-          EXTRA_CA_CERT: ${{ secrets.EXTRA_CA_CERT }}
-        with:
-          files: ./docker-bake.hcl
-          targets: test
-          load: false
-          push: false
-          set: |
-            *.cache-from=type=gha
-            *.cache-to=type=gha,mode=max
-            *.args.EXTRA_CA_CERT_FINGERPRINT=${{ steps.extra_ca.outputs.fingerprint }}
+          cargo build --workspace
+          cargo test --workspace --lib --bins -- --test-threads=1
+          cargo test --workspace --tests -- --test-threads=1

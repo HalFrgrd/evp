@@ -4,10 +4,8 @@ name: release
 # the GitHub Release. The accompanying `action.yml` at the repo root
 # downloads this artifact in user workflows.
 #
-# The build runs through docker-bake's split Dockerfiles so the toolchain stays
-# identical to ci.yml and docker.yml: Rust + Zig 0.15.x targeting
-# `x86_64-unknown-linux-musl`. The result is a fully static binary
-# with mimalloc bundled in — no glibc version compat issues.
+# The build targets `x86_64-unknown-linux-musl` for a fully static binary
+# with no glibc version compat issues.
 
 on:
   push:
@@ -46,6 +44,17 @@ jobs:
             echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang musl-dev musl-tools
+
+      - name: Set up Rust with musl target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95"
+          targets: x86_64-unknown-linux-musl
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -55,37 +64,51 @@ jobs:
           rm -rf assets/libghostty
           docker buildx bake extract-libghostty
 
-      - name: Compute optional extra CA fingerprint
-        id: extra_ca
-        env:
-          EXTRA_CA_CERT: ${{ secrets.EXTRA_CA_CERT }}
+      - name: Compute git metadata for vergen
+        id: gitmeta
         run: |
           set -euo pipefail
-          if [ -n "${EXTRA_CA_CERT:-}" ]; then
-            echo "fingerprint=$(printf '%s' "$EXTRA_CA_CERT" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          else
-            echo "fingerprint=absent" >> "$GITHUB_OUTPUT"
-          fi
+          sha="${GITHUB_SHA}"
+          branch="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          commit_date="$(git show -s --format=%cs "$sha")"
+          commit_timestamp="$(git show -s --format=%cI "$sha")"
+          commit_count="$(git rev-list --count "$sha")"
+          author_name="$(git show -s --format=%an "$sha")"
+          author_email="$(git show -s --format=%ae "$sha")"
+          commit_message="$(git show -s --format=%B "$sha" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
+          describe="$(git describe --always --dirty --tags "$sha" 2>/dev/null || git rev-parse --short "$sha")"
+          {
+            echo "sha=${sha}"
+            echo "branch=${branch}"
+            echo "commit_date=${commit_date}"
+            echo "commit_timestamp=${commit_timestamp}"
+            echo "commit_count=${commit_count}"
+            echo "author_name=${author_name}"
+            echo "author_email=${author_email}"
+            echo "commit_message=${commit_message}"
+            echo "describe=${describe}"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Build evp binary via docker buildx bake
-        # `extract-binary` writes the static evp directly to
-        # /tmp/evp-build/evp on the host filesystem — no `docker create`
-        # / `docker cp` plumbing needed. The bake target is the same
-        # one local users invoke for a one-shot build.
+      - name: Build static evp binary
         env:
-          BUILDX_BAKE_ENTITLEMENTS_FS: 0
-          EXTRA_CA_CERT: ${{ secrets.EXTRA_CA_CERT }}
-        uses: docker/bake-action@v5
-        with:
-          files: ./docker-bake.hcl
-          targets: extract-binary
-          load: false
-          push: false
-          set: |
-            extract-binary.output=type=local,dest=/tmp/evp-build
-            *.cache-from=type=gha
-            *.cache-to=type=gha,mode=max
-            *.args.EXTRA_CA_CERT_FINGERPRINT=${{ steps.extra_ca.outputs.fingerprint }}
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          PKG_CONFIG_ALLOW_CROSS: "1"
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static -C link-self-contained=yes -C linker=rust-lld"
+          VERGEN_GIT_SHA: ${{ steps.gitmeta.outputs.sha }}
+          VERGEN_GIT_BRANCH: ${{ steps.gitmeta.outputs.branch }}
+          VERGEN_GIT_COMMIT_DATE: ${{ steps.gitmeta.outputs.commit_date }}
+          VERGEN_GIT_COMMIT_TIMESTAMP: ${{ steps.gitmeta.outputs.commit_timestamp }}
+          VERGEN_GIT_COMMIT_COUNT: ${{ steps.gitmeta.outputs.commit_count }}
+          VERGEN_GIT_COMMIT_AUTHOR_NAME: ${{ steps.gitmeta.outputs.author_name }}
+          VERGEN_GIT_COMMIT_AUTHOR_EMAIL: ${{ steps.gitmeta.outputs.author_email }}
+          VERGEN_GIT_COMMIT_MESSAGE: ${{ steps.gitmeta.outputs.commit_message }}
+          VERGEN_GIT_DESCRIBE: ${{ steps.gitmeta.outputs.describe }}
+          VERGEN_GIT_DIRTY: "false"
+        run: |
+          set -eux
+          cargo build --release --bin evp --target "${TARGET}"
+          mkdir -p /tmp/evp-build
+          cp "target/${TARGET}/release/evp" /tmp/evp-build/evp
 
       - name: Sanity check extracted binary
         run: |
