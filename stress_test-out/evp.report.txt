@@ -1,0 +1,13 @@
+=== evp stress_test benchmark ===
+renderer            = evp
+output_gif          = stress_test-out/evp.gif
+output_gif_bytes    = 31421517
+wall_ms             = 15907
+cpu_affinity        = 0-3
+expected_frames     = 259
+captured_frames     = 259
+consumer_count      = 1
+max_consumer_queue  = 155 / 4096
+dropped_consumer    = 0 (0.00%)
+dropped_threshold   = 5%
+result              = PASS
