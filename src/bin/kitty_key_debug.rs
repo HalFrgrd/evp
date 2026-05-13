@@ -1,8 +1,14 @@
-use std::io::{Read, Write, stdin, stdout};
+use std::{
+    io::{Write, stdout},
+    time::Duration,
+};
 
 use crossterm::{
     cursor,
-    event::{KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags},
+    event::{
+        self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags,
+        ModifierKeyCode, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    },
     execute,
     terminal::{self, ClearType},
 };
@@ -30,133 +36,110 @@ fn main() -> std::io::Result<()> {
     writeln!(out, "ready")?;
     out.flush()?;
 
-    let mut input = stdin().lock();
     let mut seen = 0usize;
     while seen < max_keys {
-        let Some(seq) = read_one_sequence(&mut input)? else {
-            break;
+        if !event::poll(Duration::from_secs(5))? {
+            continue;
+        }
+        let Event::Key(key) = event::read()? else {
+            continue;
         };
-        let escaped = escape_bytes(&seq);
-        let info = decode_key(&seq);
-        writeln!(
-            out,
-            "key codepoint={} mods={} kind={} raw={}",
-            info.codepoint, info.mods, info.kind, escaped
-        )?;
-        out.flush()?;
+
         seen += 1;
+        execute!(out, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0))?;
+        writeln!(out, "ready")?;
+        writeln!(out, "{}", format_key_debug_line(&key, seen))?;
+        out.flush()?;
     }
 
     execute!(out, PopKeyboardEnhancementFlags)?;
     terminal::disable_raw_mode()
 }
 
-struct KeyInfo {
-    codepoint: u32,
-    mods: String,
-    kind: &'static str,
-}
-
-fn decode_key(seq: &[u8]) -> KeyInfo {
-    if seq == b"\r" || seq == b"\n" {
-        return KeyInfo {
-            codepoint: 13,
-            mods: "NONE".to_string(),
-            kind: "Press",
-        };
-    }
-
-    if seq.len() >= 4 && seq[0] == 0x1b && seq[1] == b'[' && *seq.last().unwrap_or(&0) == b'u' {
-        let body = std::str::from_utf8(&seq[2..seq.len() - 1]).unwrap_or_default();
-        let mut parts = body.split(';');
-        let codepoint = parts
-            .next()
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or_default();
-        let mods_and_kind = parts.next().unwrap_or("1");
-        let (mods_encoded, kind_encoded) = mods_and_kind
-            .split_once(':')
-            .map_or((mods_and_kind, "1"), |(m, k)| (m, k));
-        let mods_bits = mods_encoded
-            .parse::<u32>()
-            .ok()
-            .and_then(|n| n.checked_sub(1))
-            .unwrap_or(0);
-        return KeyInfo {
-            codepoint,
-            mods: mods_to_string(mods_bits),
-            kind: match kind_encoded {
-                "2" => "Repeat",
-                "3" => "Release",
-                _ => "Press",
-            },
-        };
-    }
-
-    let codepoint = seq.first().copied().map(u32::from).unwrap_or_default();
-    KeyInfo {
-        codepoint,
-        mods: "NONE".to_string(),
-        kind: "Press",
-    }
-}
-
-fn mods_to_string(bits: u32) -> String {
-    let mut mods = Vec::new();
-    if bits & 0b0001 != 0 {
-        mods.push("SHIFT");
-    }
-    if bits & 0b0010 != 0 {
-        mods.push("ALT");
-    }
-    if bits & 0b0100 != 0 {
-        mods.push("CTRL");
-    }
-    if bits & 0b1000 != 0 {
-        mods.push("SUPER");
-    }
-    if mods.is_empty() {
-        "NONE".to_string()
+fn format_key_debug_line(key: &KeyEvent, counter: usize) -> String {
+    let code = key_code_name(key.code);
+    let modifiers = key_modifiers_name(key.modifiers);
+    let kind = key_kind_name(key.kind);
+    if kind == "Press" {
+        format!("key code({code}, modifiers={modifiers}) counter={counter}")
     } else {
-        mods.join("|")
+        format!("key code({code}, modifiers={modifiers}, kind={kind}) counter={counter}")
     }
 }
 
-fn read_one_sequence(input: &mut impl Read) -> std::io::Result<Option<Vec<u8>>> {
-    let mut first = [0u8; 1];
-    match input.read(&mut first)? {
-        0 => Ok(None),
-        _ => {
-            if first[0] != 0x1b {
-                return Ok(Some(vec![first[0]]));
+fn key_code_name(code: KeyCode) -> String {
+    match code {
+        KeyCode::Char(c) => c.to_ascii_lowercase().to_string(),
+        KeyCode::Enter => "enter".to_string(),
+        KeyCode::Tab => "tab".to_string(),
+        KeyCode::BackTab => "backtab".to_string(),
+        KeyCode::Backspace => "backspace".to_string(),
+        KeyCode::Esc => "escape".to_string(),
+        KeyCode::Left => "left".to_string(),
+        KeyCode::Right => "right".to_string(),
+        KeyCode::Up => "up".to_string(),
+        KeyCode::Down => "down".to_string(),
+        KeyCode::Home => "home".to_string(),
+        KeyCode::End => "end".to_string(),
+        KeyCode::PageUp => "pageup".to_string(),
+        KeyCode::PageDown => "pagedown".to_string(),
+        KeyCode::Delete => "delete".to_string(),
+        KeyCode::Insert => "insert".to_string(),
+        KeyCode::F(n) => format!("f{n}"),
+        KeyCode::Null => "null".to_string(),
+        KeyCode::CapsLock => "capslock".to_string(),
+        KeyCode::ScrollLock => "scrolllock".to_string(),
+        KeyCode::NumLock => "numlock".to_string(),
+        KeyCode::PrintScreen => "printscreen".to_string(),
+        KeyCode::Pause => "pause".to_string(),
+        KeyCode::Menu => "menu".to_string(),
+        KeyCode::KeypadBegin => "keypadbegin".to_string(),
+        KeyCode::Media(_) => "media".to_string(),
+        KeyCode::Modifier(modifier) => match modifier {
+            ModifierKeyCode::LeftShift | ModifierKeyCode::RightShift => "shift".to_string(),
+            ModifierKeyCode::LeftControl | ModifierKeyCode::RightControl => "control".to_string(),
+            ModifierKeyCode::LeftAlt | ModifierKeyCode::RightAlt => "alt".to_string(),
+            ModifierKeyCode::LeftSuper | ModifierKeyCode::RightSuper => "super".to_string(),
+            ModifierKeyCode::LeftHyper | ModifierKeyCode::RightHyper => "hyper".to_string(),
+            ModifierKeyCode::LeftMeta | ModifierKeyCode::RightMeta => "meta".to_string(),
+            ModifierKeyCode::IsoLevel3Shift | ModifierKeyCode::IsoLevel5Shift => {
+                "isolevelshift".to_string()
             }
-            let mut seq = vec![first[0]];
-            let mut next = [0u8; 1];
-            loop {
-                match input.read(&mut next)? {
-                    0 => return Ok(Some(seq)),
-                    _ => {
-                        seq.push(next[0]);
-                        if (0x40..=0x7e).contains(&next[0]) && seq.len() >= 3 {
-                            return Ok(Some(seq));
-                        }
-                    }
-                }
-            }
-        }
+        },
     }
 }
 
-fn escape_bytes(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .map(|b| match b {
-            b'\x1b' => "\\x1b".to_string(),
-            b'\r' => "\\r".to_string(),
-            b'\n' => "\\n".to_string(),
-            0x20..=0x7e => (*b as char).to_string(),
-            _ => format!("\\x{b:02x}"),
-        })
-        .collect::<Vec<_>>()
-        .join("")
+fn key_modifiers_name(mods: KeyModifiers) -> String {
+    let mut parts = Vec::new();
+    if mods.contains(KeyModifiers::SHIFT) {
+        parts.push("Shift");
+    }
+    if mods.contains(KeyModifiers::CONTROL) {
+        parts.push("Ctrl");
+    }
+    if mods.contains(KeyModifiers::ALT) {
+        parts.push("Alt");
+    }
+    if mods.contains(KeyModifiers::SUPER) {
+        parts.push("Super");
+    }
+    if mods.contains(KeyModifiers::HYPER) {
+        parts.push("Hyper");
+    }
+    if mods.contains(KeyModifiers::META) {
+        parts.push("Meta");
+    }
+    if parts.is_empty() {
+        "None".to_string()
+    } else {
+        parts.join("+")
+    }
+}
+
+fn key_kind_name(kind: KeyEventKind) -> &'static str {
+    match kind {
+        KeyEventKind::Press => "Press",
+        KeyEventKind::Repeat => "Repeat",
+        KeyEventKind::Release => "Release",
+    }
 }

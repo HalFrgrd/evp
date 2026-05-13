@@ -8,7 +8,7 @@ fn kitty_extended_keys_are_recorded_from_shell_program() {
     let tape = format!(
         r#"
 Output out.gif
-Set Width 800
+Set Width 1400
 Set Height 300
 Set FontSize 20
 Set Framerate 30
@@ -38,16 +38,16 @@ Sleep 600ms
         "expected key debug app readiness"
     );
     assert!(
-        haystack.contains("codepoint=13") && haystack.contains("mods=CTRL"),
+        haystack.contains("key code(enter, modifiers=Ctrl) counter=3"),
         "expected Ctrl+Enter event in output; haystack tail:\n{}",
         &haystack[haystack.len().saturating_sub(2_000)..]
     );
     assert!(
-        haystack.contains("codepoint=99") && haystack.contains("mods=SUPER"),
+        haystack.contains("key code(c, modifiers=Super) counter=4"),
         "expected Command+c event in output"
     );
     assert!(
-        haystack.contains("kind=Release") && haystack.contains("raw=\\x1b["),
+        haystack.contains("key code(c, modifiers=Super, kind=Release) counter=5"),
         "expected release events from kitty extended keyboard protocol"
     );
 }
