@@ -18,6 +18,9 @@ use common::{full_haystack, json_round_trip, record, temp_json_path};
 use evp::Frame;
 use serde_json::Value;
 
+const WAIT_MATCH_MAX_MS: u32 = 2_500;
+const WAIT_TIMEOUT_MIN_MS: u32 = 700;
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -292,7 +295,7 @@ Sleep 300ms
 
     let last_t = rec.frames.last().expect("at least one frame").t_ms();
     assert!(
-        last_t < 2_500,
+        last_t < WAIT_MATCH_MAX_MS,
         "Wait likely timed out instead of matching quickly; last frame at {last_t}ms"
     );
 }
@@ -326,7 +329,7 @@ Sleep 300ms
 
     let last_t = rec.frames.last().expect("at least one frame").t_ms();
     assert!(
-        last_t < 2_500,
+        last_t < WAIT_MATCH_MAX_MS,
         "Screen Wait likely timed out; last frame at {last_t}ms"
     );
 }
@@ -357,7 +360,7 @@ Sleep 300ms
 
     let last_t = rec.frames.last().expect("at least one frame").t_ms();
     assert!(
-        last_t >= 700,
+        last_t >= WAIT_TIMEOUT_MIN_MS,
         "expected at least ~400ms timeout + surrounding sleeps; got {last_t}ms"
     );
 }
