@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use evp::Recording;
 
 /// Parse + run a tape source and return the recorded frames.

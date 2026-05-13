@@ -16,10 +16,15 @@ Set Shell {key_debug_bin}
 Env EVP_KITTY_KEY_EVENTS 6
 Sleep 400ms
 Press Command
+Sleep 120ms
 Release Command
+Sleep 120ms
 Ctrl+Enter
+Sleep 120ms
 Command+c
+Sleep 120ms
 Release Command+c
+Sleep 120ms
 Alt+z
 Sleep 600ms
 "#
@@ -28,18 +33,21 @@ Sleep 600ms
     let rec = record(&tape);
     let haystack = full_haystack(&rec);
 
-    assert!(haystack.contains("ready"), "expected key debug app readiness");
     assert!(
-        haystack.contains("code=Enter") && haystack.contains("mods=KeyModifiers(CONTROL)"),
+        haystack.contains("ready"),
+        "expected key debug app readiness"
+    );
+    assert!(
+        haystack.contains("codepoint=13") && haystack.contains("mods=CTRL"),
         "expected Ctrl+Enter event in output; haystack tail:\n{}",
         &haystack[haystack.len().saturating_sub(2_000)..]
     );
     assert!(
-        haystack.contains("code=Char('c')") && haystack.contains("mods=KeyModifiers(SUPER)"),
+        haystack.contains("codepoint=99") && haystack.contains("mods=SUPER"),
         "expected Command+c event in output"
     );
     assert!(
-        haystack.contains("kind=Release"),
+        haystack.contains("kind=Release") && haystack.contains("raw=\\x1b["),
         "expected release events from kitty extended keyboard protocol"
     );
 }
