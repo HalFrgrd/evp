@@ -67,31 +67,6 @@ jobs:
             --set extract-libghostty.cache-to=type=gha,scope=libghostty-pkgconfig-${{ runner.os }}-${{ runner.arch }},mode=max \
             extract-libghostty
 
-      - name: Compute git metadata for vergen
-        id: gitmeta
-        run: |
-          set -euo pipefail
-          sha="${GITHUB_SHA}"
-          branch="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
-          commit_date="$(git show -s --format=%cs "$sha")"
-          commit_timestamp="$(git show -s --format=%cI "$sha")"
-          commit_count="$(git rev-list --count "$sha")"
-          author_name="$(git show -s --format=%an "$sha")"
-          author_email="$(git show -s --format=%ae "$sha")"
-          commit_message="$(git show -s --format=%B "$sha" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
-          describe="$(git describe --always --dirty --tags "$sha" 2>/dev/null || git rev-parse --short "$sha")"
-          {
-            echo "sha=${sha}"
-            echo "branch=${branch}"
-            echo "commit_date=${commit_date}"
-            echo "commit_timestamp=${commit_timestamp}"
-            echo "commit_count=${commit_count}"
-            echo "author_name=${author_name}"
-            echo "author_email=${author_email}"
-            echo "commit_message=${commit_message}"
-            echo "describe=${describe}"
-          } >> "$GITHUB_OUTPUT"
-
       - name: Build static evp binary
         env:
           CC_x86_64_unknown_linux_musl: musl-gcc
