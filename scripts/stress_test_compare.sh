@@ -133,7 +133,7 @@ cat >"$out_md" <<MD
 
 Both runs were pinned to a single CPU core (\`taskset -c 0\` for evp,
 \`--cpuset-cpus=0 --cpus=1\` for the VHS docker container) and rendered
-the same \`examples/stress_test.tape\` script: a 100×30 grid at 60 fps,
+the same \`scripts/stress_test.tape\` script: a 100×30 grid at 60 fps,
 typing at ~125 chars/sec (≥2 keystrokes per captured frame) for ~10 s,
 where every keystroke triggers a full-screen redraw with random ASCII
 + random fg/bg + random modifiers in every cell.

@@ -161,5 +161,5 @@ section.
 - Run `docker buildx bake extract-libghostty` to refresh `assets/libghostty`
   so local and CI builds do not need network access for Zig/Ghostty fetches.
 - `vhs.Dockerfile` (repo root) is based on the charmbracelet VHS image and
-  bakes in `scripts/stress_test_program.py` and `examples/stress_test.tape`
+  bakes in `scripts/stress_test_program.py` and `scripts/stress_test.tape`
   for the stress-test comparison run.
