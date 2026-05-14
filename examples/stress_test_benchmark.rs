@@ -86,6 +86,8 @@ fn run() -> Result<bool> {
         font_path: None,
         font_size: script.settings.font_size,
         frame_style: FrameStyle {
+            canvas_width_px: Some(script.settings.width),
+            canvas_height_px: Some(script.settings.height),
             padding_px: script.settings.padding,
             margin_px: script.settings.margin,
             margin_fill: script.settings.margin_fill,

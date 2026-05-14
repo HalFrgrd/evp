@@ -184,10 +184,7 @@ pub fn spawn_gif_stream(
     let scale = PxScale::from(opts.font_size);
     let primary = &font_set.fonts[font_set.regular[0]];
     let scaled = primary.as_scaled(scale);
-    let cell_w = scaled
-        .h_advance(primary.glyph_id('M'))
-        .ceil()
-        .max(1.0) as u32;
+    let cell_w = scaled.h_advance(primary.glyph_id('M')).ceil().max(1.0) as u32;
     let cell_h = (scaled.height() + scaled.line_gap()).ceil().max(1.0) as u32;
     let baseline = scaled.ascent().ceil() as u32;
     let layout = layout_metrics(cfg.cols, cfg.rows, cell_w, cell_h, opts.frame_style);
@@ -246,10 +243,7 @@ pub fn render_png_frame(frame: &RawFrame, opts: &RenderOptions, out: &Path) -> R
     let scale = PxScale::from(opts.font_size);
     let primary = &font_set.fonts[font_set.regular[0]];
     let scaled = primary.as_scaled(scale);
-    let cell_w = scaled
-        .h_advance(primary.glyph_id('M'))
-        .ceil()
-        .max(1.0) as u32;
+    let cell_w = scaled.h_advance(primary.glyph_id('M')).ceil().max(1.0) as u32;
     let cell_h = (scaled.height() + scaled.line_gap()).ceil().max(1.0) as u32;
     let baseline = scaled.ascent().ceil() as u32;
     let mut glyph_cache = GlyphCache::new();
@@ -561,11 +555,21 @@ fn layout_metrics(
     } else {
         0
     };
-    let frame_w = cols as u32 * cell_w + frame_style.padding_px * 2;
-    let frame_h = rows as u32 * cell_h + frame_style.padding_px * 2 + bar_h;
+    let grid_frame_w = cols as u32 * cell_w + frame_style.padding_px * 2;
+    let grid_frame_h = rows as u32 * cell_h + frame_style.padding_px * 2 + bar_h;
+    let canvas_w = frame_style
+        .canvas_width_px
+        .unwrap_or(grid_frame_w + frame_style.margin_px * 2)
+        .max(1);
+    let canvas_h = frame_style
+        .canvas_height_px
+        .unwrap_or(grid_frame_h + frame_style.margin_px * 2)
+        .max(1);
+    let frame_w = canvas_w.saturating_sub(frame_style.margin_px * 2).max(1);
+    let frame_h = canvas_h.saturating_sub(frame_style.margin_px * 2).max(1);
     LayoutMetrics {
-        canvas_w: frame_w + frame_style.margin_px * 2,
-        canvas_h: frame_h + frame_style.margin_px * 2,
+        canvas_w,
+        canvas_h,
         frame_x: frame_style.margin_px,
         frame_y: frame_style.margin_px,
         frame_w,
@@ -843,7 +847,13 @@ fn load_font_family(path: Option<&str>) -> Result<LoadedFontFamily> {
     };
 
     Ok(LoadedFontFamily {
-        font_set: FontSet { fonts, regular, bold, italic, bold_italic },
+        font_set: FontSet {
+            fonts,
+            regular,
+            bold,
+            italic,
+            bold_italic,
+        },
         description,
     })
 }

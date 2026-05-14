@@ -183,6 +183,8 @@ impl WindowBarStyle {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FrameStyle {
+    pub canvas_width_px: Option<u32>,
+    pub canvas_height_px: Option<u32>,
     pub padding_px: u32,
     pub margin_px: u32,
     pub margin_fill: [u8; 3],
@@ -194,6 +196,8 @@ pub struct FrameStyle {
 impl Default for FrameStyle {
     fn default() -> Self {
         Self {
+            canvas_width_px: None,
+            canvas_height_px: None,
             padding_px: 60,
             margin_px: 0,
             margin_fill: parse_hex_color(DEFAULT_BACKGROUND)
