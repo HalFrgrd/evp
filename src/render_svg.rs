@@ -688,9 +688,9 @@ mod tests {
         rec.frame_style.canvas_width_px = Some(1200);
         rec.frame_style.canvas_height_px = Some(600);
         let svg = render_svg_to_string(&rec, &SvgOptions::default()).unwrap();
-        assert!(
-            svg.contains(r#"<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600""#)
-        );
+        assert!(svg.contains(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" width="1200" height="600""#
+        ));
         assert!(svg.contains(r#"<rect width="1200" height="600""#));
     }
 
