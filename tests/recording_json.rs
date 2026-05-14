@@ -364,3 +364,121 @@ Sleep 300ms
         "expected at least ~400ms timeout + surrounding sleeps; got {last_t}ms"
     );
 }
+
+/// When a `Wait` takes longer than the pre-computed timeline end, the
+/// recording must extend past that timeline end so frames captured during and
+/// after the Wait period are included in the output.
+///
+/// The shell command uses variable expansion (`${M}DONE`) so the echoed
+/// command text does not contain the expected output string `EVPDONE`; Wait
+/// can only match once `echo` runs after the sleep.
+///
+/// Timeline: Sleep 50ms + Type (31 chars × 10ms) + Enter ≈ 360ms; the 200ms
+/// tail Sleep sets timeline_end to ~560ms / total_duration to ~693ms.  The
+/// command's `sleep 0.5` means output arrives at ~860ms, well past
+/// total_duration. Without the fix the recording ends before the Wait matches
+/// and the output is never captured.
+#[test]
+fn wait_extends_recording_when_command_outlasts_timeline() {
+    let tape = r#"
+Output out.gif
+Set Width 800
+Set Height 300
+Set FontSize 20
+Set TypingSpeed 10ms
+Set Framerate 30
+Set Shell /bin/sh
+Set WaitTimeout 5s
+Sleep 50ms
+Type "M=EVP; sleep 0.5; echo ${M}DONE"
+Enter
+Wait /EVPDONE/
+Sleep 200ms
+"#;
+
+    let rec = record(tape);
+    let haystack = full_haystack(&rec);
+
+    // The output must appear in the recording. Using ${M}DONE means the
+    // echoed command line shows "echo ${M}DONE" (not "EVPDONE"), so Wait
+    // cannot resolve via the echo — it resolves only when echo prints output.
+    assert!(
+        haystack.contains("EVPDONE"),
+        "expected EVPDONE output to appear in recording after Wait resolved"
+    );
+
+    // The recording must continue after the Wait (>= 700ms: ~500ms sleep +
+    // ~200ms tail).
+    let last_t = rec.frames.last().expect("at least one frame").t_ms();
+    assert!(
+        last_t >= 700,
+        "recording ended too early after Wait; last frame at {last_t}ms (expected >= 700ms)"
+    );
+}
+
+/// A `Wait` with the `+Screen` scope must also extend the recording window
+/// when the matching output arrives after the pre-computed timeline.
+#[test]
+fn wait_screen_extends_recording_when_command_outlasts_timeline() {
+    let tape = r#"
+Output out.gif
+Set Width 800
+Set Height 300
+Set FontSize 20
+Set TypingSpeed 10ms
+Set Framerate 30
+Set Shell /bin/sh
+Set WaitTimeout 5s
+Sleep 50ms
+Type "M=SCR; sleep 0.4; echo ${M}DONE"
+Enter
+Wait Screen /SCRDONE/
+Sleep 200ms
+"#;
+
+    let rec = record(tape);
+    let haystack = full_haystack(&rec);
+
+    assert!(
+        haystack.contains("SCRDONE"),
+        "expected SCRDONE output to appear in recording after Wait+Screen resolved"
+    );
+
+    let last_t = rec.frames.last().expect("at least one frame").t_ms();
+    assert!(
+        last_t >= 500,
+        "recording ended too early after Wait+Screen; last frame at {last_t}ms (expected >= 500ms)"
+    );
+}
+
+/// A timed-out Wait whose timeout is larger than the pre-computed timeline
+/// must still extend the recording so it captures at least the timeout
+/// duration of frames.
+#[test]
+fn wait_timeout_extends_recording_past_timeline() {
+    let tape = r#"
+Output out.gif
+Set Width 800
+Set Height 300
+Set FontSize 20
+Set TypingSpeed 10ms
+Set Framerate 30
+Set Shell /bin/sh
+Sleep 50ms
+Wait @600ms /__never_matches_wait_test_long__/
+Sleep 200ms
+"#;
+
+    let rec = record(tape);
+    let haystack = full_haystack(&rec);
+
+    // Script still advances after timeout.
+    let last_t = rec.frames.last().expect("at least one frame").t_ms();
+    // The 600ms timeout fires well past the 250ms timeline_end, so the
+    // recording must extend to at least 600ms.
+    assert!(
+        last_t >= 600,
+        "recording ended before timeout duration; last frame at {last_t}ms (expected >= 600ms)"
+    );
+    let _ = haystack; // used above
+}
