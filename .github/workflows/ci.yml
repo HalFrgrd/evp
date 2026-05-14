@@ -69,7 +69,7 @@ jobs:
       contents: write
     strategy:
       matrix:
-        name: ["hello", "colors", "keys", "my_program_demo", "progress", "shell-tour", "test", "embedded-font-demo"]
+        name: ["hello", "colors", "keys", "my_program_demo", "progress", "shell-tour", "test", "embedded-font-demo", "evp_demo"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
