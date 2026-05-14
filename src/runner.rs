@@ -224,6 +224,11 @@ pub fn run_with_raw_frame_consumers(
     let mut clipboard = String::new();
     let mut pending_screenshots: Vec<PathBuf> = Vec::new();
 
+    // Cursor-blink state: track when the cursor last changed screen position
+    // so we can suppress blinking while (and briefly after) it is moving.
+    let mut last_cursor_moved_at: Option<Duration> = None;
+    let mut prev_cursor_pos: Option<(u16, u16)> = None;
+
     // Wait‑for state. When we're inside a `Wait`, all later events stall
     // until the regex matches or the timeout elapses.
     let mut wait_state: Option<WaitState> = None;
@@ -320,18 +325,29 @@ pub fn run_with_raw_frame_consumers(
         // 4. Capture frames whose deadline has passed.
         while next_frame_at <= now && next_frame_at <= total_duration {
             if !hidden || !pending_screenshots.is_empty() {
-                let frame = capture(
+                let recorded_at = next_frame_at.saturating_sub(skipped_recording_time);
+                let (frame, raw_cursor_pos) = capture(
                     &mut render_state,
                     &mut row_it,
                     &mut cell_it,
                     &mut terminal,
                     // Compress timeline by subtracting wall-clock time spent
                     // hidden so rendered output doesn't stall across Hide/Show.
-                    next_frame_at.saturating_sub(skipped_recording_time),
+                    recorded_at,
                     opts.cols,
                     opts.rows,
                     script.settings.cursor_blink,
+                    last_cursor_moved_at,
                 )?;
+                // Update cursor-movement tracking: only count position changes
+                // after the first observed position so the initial cursor
+                // appearance does not suppress blinking from t=0.
+                if let Some(prev) = prev_cursor_pos {
+                    if raw_cursor_pos != Some(prev) {
+                        last_cursor_moved_at = Some(recorded_at);
+                    }
+                }
+                prev_cursor_pos = raw_cursor_pos;
                 if !pending_screenshots.is_empty() {
                     let shots = std::mem::take(&mut pending_screenshots);
                     for path in shots {
@@ -744,7 +760,8 @@ fn capture<'a>(
     cols: u16,
     rows: u16,
     cursor_blink: bool,
-) -> Result<RawFrame> {
+    last_cursor_moved_at: Option<Duration>,
+) -> Result<(RawFrame, Option<(u16, u16)>)> {
     let snap = render_state.update(terminal)?;
     let colors = snap.colors()?;
     let default_fg = rgb_to_arr(colors.foreground);
@@ -805,30 +822,59 @@ fn capture<'a>(
         row += 1;
     }
 
-    let cursor = if snap.cursor_visible()? {
-        if let Some(vp) = snap.cursor_viewport()? {
-            if !cursor_blink || cursor_visible_at(at) {
-                Some((vp.x, vp.y))
-            } else {
-                None
-            }
+    // Raw cursor position from the terminal (before blink logic).
+    let raw_cursor_pos = if snap.cursor_visible()? {
+        snap.cursor_viewport()?.map(|vp| (vp.x, vp.y))
+    } else {
+        None
+    };
+
+    let cursor = if let Some(pos) = raw_cursor_pos {
+        if !cursor_blink {
+            Some(pos)
         } else {
-            None
+            match last_cursor_moved_at {
+                None => {
+                    // Cursor has not moved since recording started; use
+                    // absolute-time blink so initial frames animate normally.
+                    if cursor_visible_at(at) { Some(pos) } else { None }
+                }
+                Some(moved_at) => {
+                    let time_since_move = at.saturating_sub(moved_at);
+                    if time_since_move < CURSOR_BLINK_RESTART_DELAY {
+                        // Cursor moved recently — keep it solid.
+                        Some(pos)
+                    } else {
+                        // Cursor has been stationary long enough; blink from
+                        // the moment it became stationary.
+                        let blink_t = time_since_move - CURSOR_BLINK_RESTART_DELAY;
+                        if cursor_visible_at(blink_t) { Some(pos) } else { None }
+                    }
+                }
+            }
         }
     } else {
         None
     };
 
-    Ok(RawFrame {
-        t_ms: at.as_millis() as u32,
-        cols,
-        rows,
-        cells,
-        cursor,
-        default_fg,
-        default_bg,
-    })
+    Ok((
+        RawFrame {
+            t_ms: at.as_millis() as u32,
+            cols,
+            rows,
+            cells,
+            cursor,
+            default_fg,
+            default_bg,
+        },
+        raw_cursor_pos,
+    ))
 }
+
+/// After the cursor has been stationary for this long, blinking resumes.
+/// Set to 0.5 × the blink period (300 ms visible + 300 ms hidden → 600 ms
+/// period → 300 ms restart delay).
+const CURSOR_BLINK_RESTART_DELAY: Duration = Duration::from_millis(300);
 
 fn cursor_visible_at(at: Duration) -> bool {
     const CURSOR_BLINK_HALF_PERIOD_MS: u128 = 300;

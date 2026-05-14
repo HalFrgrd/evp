@@ -115,8 +115,10 @@ Sleep 1s
     );
 }
 
-/// Cursor position is captured into every frame. With a vanilla `/bin/sh`
-/// and no input, the cursor must be visible and inside the grid.
+/// Cursor position is captured into frames. With a vanilla `/bin/sh`
+/// and no input, the cursor must be visible and inside the grid for at
+/// least one frame (the exact frame depends on blink phase, which depends
+/// on when the cursor last moved).
 #[test]
 fn cursor_position_is_recorded() {
     let tape = r#"
@@ -129,18 +131,24 @@ Set Shell /bin/sh
 Sleep 500ms
 "#;
     let rec = record(tape);
-    let last = rec.frames.last().expect("at least one frame");
-    let (cx, cy) = last.cursor().expect("cursor should be visible");
+    // Find every frame where the cursor is visible.
+    let visible: Vec<(u16, u16)> = rec.frames.iter().filter_map(|f| f.cursor()).collect();
     assert!(
-        cx < rec.cols,
-        "cursor x={cx} out of bounds (cols={})",
-        rec.cols
+        !visible.is_empty(),
+        "cursor was never visible in any frame (blink may have hidden it on every sampled frame)"
     );
-    assert!(
-        cy < rec.rows,
-        "cursor y={cy} out of bounds (rows={})",
-        rec.rows
-    );
+    for (cx, cy) in &visible {
+        assert!(
+            *cx < rec.cols,
+            "cursor x={cx} out of bounds (cols={})",
+            rec.cols
+        );
+        assert!(
+            *cy < rec.rows,
+            "cursor y={cy} out of bounds (rows={})",
+            rec.rows
+        );
+    }
 }
 
 /// JSON round-trip must preserve every field used by downstream
