@@ -16,5 +16,4 @@ Set WaitTimeout 120s
 Sleep 500ms
 Type "./evp-bin/evp examples/my_program_demo.tape || ./target/release/evp examples/my_program_demo.tape || evp examples/my_program_demo.tape"
 Enter
-Wait Screen /evp.*finished/
-Sleep 1s
+Sleep 20s
