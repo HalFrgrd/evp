@@ -551,11 +551,21 @@ fn layout_metrics(
     } else {
         0
     };
-    let frame_w = cols as u32 * cell_w + frame_style.padding_px * 2;
-    let frame_h = rows as u32 * cell_h + frame_style.padding_px * 2 + bar_h;
+    let grid_frame_w = cols as u32 * cell_w + frame_style.padding_px * 2;
+    let grid_frame_h = rows as u32 * cell_h + frame_style.padding_px * 2 + bar_h;
+    let canvas_w = frame_style
+        .canvas_width_px
+        .unwrap_or(grid_frame_w + frame_style.margin_px * 2)
+        .max(1);
+    let canvas_h = frame_style
+        .canvas_height_px
+        .unwrap_or(grid_frame_h + frame_style.margin_px * 2)
+        .max(1);
+    let frame_w = canvas_w.saturating_sub(frame_style.margin_px * 2).max(1);
+    let frame_h = canvas_h.saturating_sub(frame_style.margin_px * 2).max(1);
     LayoutMetrics {
-        canvas_w: frame_w + frame_style.margin_px * 2,
-        canvas_h: frame_h + frame_style.margin_px * 2,
+        canvas_w,
+        canvas_h,
         frame_x: frame_style.margin_px,
         frame_y: frame_style.margin_px,
         frame_w,
@@ -670,6 +680,18 @@ mod tests {
         // Frame group with visibility set.
         assert!(svg.contains("visibility=\"hidden\""));
         assert!(svg.contains("attributeName=\"visibility\""));
+    }
+
+    #[test]
+    fn explicit_canvas_size_controls_svg_dimensions() {
+        let mut rec = synth_recording();
+        rec.frame_style.canvas_width_px = Some(1200);
+        rec.frame_style.canvas_height_px = Some(600);
+        let svg = render_svg_to_string(&rec, &SvgOptions::default()).unwrap();
+        assert!(
+            svg.contains(r#"<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600""#)
+        );
+        assert!(svg.contains(r#"<rect width="1200" height="600""#));
     }
 
     #[test]

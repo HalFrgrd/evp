@@ -6,8 +6,8 @@ use std::{
 use crossterm::{
     cursor,
     event::{
-        self, Event, KeyCode, KeyModifiers, KeyboardEnhancementFlags,
-        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+        self, Event, KeyCode, KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+        PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::{self, ClearType},

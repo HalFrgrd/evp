@@ -106,9 +106,11 @@ pub fn derive_options(s: &Settings) -> RunOptions {
     // Approximate cell metrics – the GIF renderer measures them properly
     // from the loaded font; here we just need something non‑zero for
     // libghostty's resize call.
-    let cell_w_px = (s.font_size * 0.6).round().max(1.0) as u32;
+    let cell_w_px = (s.font_size * 0.5).round().max(1.0) as u32;
     let cell_h_px = (s.font_size * s.line_height).round().max(1.0) as u32;
     let frame_style = FrameStyle {
+        canvas_width_px: Some(s.width),
+        canvas_height_px: Some(s.height),
         padding_px: s.padding,
         margin_px: s.margin,
         margin_fill: s.margin_fill,
@@ -674,6 +676,8 @@ fn write_screenshot(frame: &RawFrame, script: &Script, path: &std::path::Path) -
         font_path: script.settings.font_family.clone(),
         font_size: script.settings.font_size,
         frame_style: FrameStyle {
+            canvas_width_px: Some(script.settings.width),
+            canvas_height_px: Some(script.settings.height),
             padding_px: script.settings.padding,
             margin_px: script.settings.margin,
             margin_fill: script.settings.margin_fill,
@@ -895,7 +899,10 @@ mod tests {
 
     use crate::script::{Event, KeySpec, ModSet, NamedKey, Settings};
 
-    use super::{KeyAction, build_timeline, key_requires_kitty_extended, warn_if_kitty_extended_required};
+    use super::{
+        KeyAction, build_timeline, derive_options, key_requires_kitty_extended,
+        warn_if_kitty_extended_required,
+    };
 
     #[derive(Clone, Default)]
     struct SharedLogBuffer(Arc<Mutex<Vec<u8>>>);
@@ -929,6 +936,24 @@ mod tests {
         fn make_writer(&'a self) -> Self::Writer {
             SharedLogWriter(self.0.clone())
         }
+    }
+
+    #[test]
+    fn default_options_use_vhs_canvas_and_jetbrains_mono_cell_width() {
+        let settings = Settings::default();
+        let opts = derive_options(&settings);
+
+        assert_eq!(settings.font_size, 22.0);
+        assert_eq!(settings.width, 1200);
+        assert_eq!(settings.height, 600);
+        assert_eq!(settings.padding, 60);
+        assert_eq!(settings.framerate, 50);
+        assert_eq!(opts.cell_w_px, 11);
+        assert_eq!(opts.cell_h_px, 22);
+        assert_eq!(opts.cols, 98);
+        assert_eq!(opts.rows, 21);
+        assert_eq!(opts.frame_style.canvas_width_px, Some(1200));
+        assert_eq!(opts.frame_style.canvas_height_px, Some(600));
     }
 
     #[test]
