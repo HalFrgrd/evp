@@ -34,9 +34,11 @@ RUN set -eux; \
 ENV PATH="/opt/zig:${PATH}"
 
 # Clone ghostty at the pinned commit and build libghostty-vt directly via zig.
-# -Dcpu=baseline ensures the static library targets the generic architecture
-# baseline rather than the native CPU of the build runner, making the cached
-# artefact portable across different CI runner microarchitectures.
+# -Dtarget=<arch>-linux-musl: build against musl libc so the .a is compatible
+#   with both glibc and musl linkers.  glibc has all musl symbols; the reverse
+#   is not true (e.g. mmap64 is glibc-only and breaks musl static linking).
+# -Dcpu=baseline: target the generic CPU baseline so the cached artefact is
+#   portable across different CI runner microarchitectures.
 RUN git clone --filter=blob:none --no-checkout \
         https://github.com/ghostty-org/ghostty.git /ghostty && \
     git -C /ghostty checkout "${GHOSTTY_COMMIT}"
@@ -44,11 +46,18 @@ RUN git clone --filter=blob:none --no-checkout \
 WORKDIR /ghostty
 RUN --mount=type=cache,target=/zig-cache \
         set -eux; \
+        arch="$(uname -m)"; \
+        case "$arch" in \
+            x86_64)  zig_target="x86_64-linux-musl" ;; \
+            aarch64) zig_target="aarch64-linux-musl" ;; \
+            *) echo "unsupported arch $arch" >&2; exit 1 ;; \
+        esac; \
         zig build \
             -Demit-lib-vt \
             -Doptimize=ReleaseFast \
             -Demit-xcframework=false \
             -Dapp-runtime=none \
+            -Dtarget="${zig_target}" \
             -Dcpu=baseline \
             --prefix /ghostty-install \
             --cache-dir /zig-cache; \
