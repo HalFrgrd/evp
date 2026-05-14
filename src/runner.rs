@@ -939,15 +939,20 @@ mod tests {
     }
 
     #[test]
-    fn default_options_use_vhs_canvas_and_jetbrains_mono_cell_width() {
+    fn default_settings_match_vhs_values() {
         let settings = Settings::default();
-        let opts = derive_options(&settings);
 
         assert_eq!(settings.font_size, 22.0);
         assert_eq!(settings.width, 1200);
         assert_eq!(settings.height, 600);
         assert_eq!(settings.padding, 60);
         assert_eq!(settings.framerate, 50);
+    }
+
+    #[test]
+    fn vhs_defaults_produce_expected_layout() {
+        let opts = derive_options(&Settings::default());
+
         assert_eq!(opts.cell_w_px, 11);
         assert_eq!(opts.cell_h_px, 22);
         assert_eq!(opts.cols, 98);
