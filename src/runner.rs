@@ -226,8 +226,10 @@ pub fn run_with_raw_frame_consumers(
 
     // Cursor-blink state: track when the cursor last changed screen position
     // so we can suppress blinking while (and briefly after) it is moving.
+    // `None` = first frame not yet seen; `Some(None)` = cursor was hidden;
+    // `Some(Some(pos))` = cursor was visible at `pos`.
     let mut last_cursor_moved_at: Option<Duration> = None;
-    let mut prev_cursor_pos: Option<(u16, u16)> = None;
+    let mut prev_cursor_capture: Option<Option<(u16, u16)>> = None;
 
     // Wait‑for state. When we're inside a `Wait`, all later events stall
     // until the regex matches or the timeout elapses.
@@ -339,15 +341,17 @@ pub fn run_with_raw_frame_consumers(
                     script.settings.cursor_blink,
                     last_cursor_moved_at,
                 )?;
-                // Update cursor-movement tracking: only count position changes
-                // after the first observed position so the initial cursor
-                // appearance does not suppress blinking from t=0.
-                if let Some(prev) = prev_cursor_pos {
-                    if raw_cursor_pos != Some(prev) {
+                // Update cursor-movement tracking: any change in cursor
+                // state (moved, appeared, or disappeared) counts as
+                // "movement" and resets the blink-restart timer. The very
+                // first captured frame is excluded from this comparison
+                // because there is no prior frame to compare against.
+                if let Some(prev) = prev_cursor_capture {
+                    if raw_cursor_pos != prev {
                         last_cursor_moved_at = Some(recorded_at);
                     }
                 }
-                prev_cursor_pos = raw_cursor_pos;
+                prev_cursor_capture = Some(raw_cursor_pos);
                 if !pending_screenshots.is_empty() {
                     let shots = std::mem::take(&mut pending_screenshots);
                     for path in shots {
@@ -872,8 +876,8 @@ fn capture<'a>(
 }
 
 /// After the cursor has been stationary for this long, blinking resumes.
-/// Set to 0.5 × the blink period (300 ms visible + 300 ms hidden → 600 ms
-/// period → 300 ms restart delay).
+/// Equals one blink half-period (same value as `CURSOR_BLINK_HALF_PERIOD_MS`
+/// inside `cursor_visible_at`), which is 0.5 × the full 600 ms blink cycle.
 const CURSOR_BLINK_RESTART_DELAY: Duration = Duration::from_millis(300);
 
 fn cursor_visible_at(at: Duration) -> bool {
