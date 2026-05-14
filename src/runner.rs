@@ -531,6 +531,11 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Dur
                         },
                     });
                 }
+                // Preserve the gap after the final typed character so the
+                // next event (e.g. `Enter`) does not share the same timestamp.
+                if !text.is_empty() {
+                    cursor += per;
+                }
             }
             Event::Sleep(d) => cursor += scale(*d),
             Event::Key {
@@ -882,14 +887,15 @@ mod tests {
     use std::{
         io,
         sync::{Arc, Mutex},
+        time::Duration,
     };
 
     use libghostty_vt::{Terminal, TerminalOptions};
     use tracing_subscriber::fmt::MakeWriter;
 
-    use crate::script::{KeySpec, ModSet, NamedKey};
+    use crate::script::{Event, KeySpec, ModSet, NamedKey, Settings};
 
-    use super::{KeyAction, key_requires_kitty_extended, warn_if_kitty_extended_required};
+    use super::{KeyAction, build_timeline, key_requires_kitty_extended, warn_if_kitty_extended_required};
 
     #[derive(Clone, Default)]
     struct SharedLogBuffer(Arc<Mutex<Vec<u8>>>);
@@ -983,6 +989,32 @@ mod tests {
                 .contains("key event likely requires kitty extended keyboard protocol"),
             "expected kitty warning to be emitted"
         );
+    }
+
+    #[test]
+    fn type_preserves_gap_before_following_event() {
+        let events = vec![
+            Event::Type {
+                text: "ab".to_string(),
+                delay: Duration::from_millis(40),
+            },
+            Event::Key {
+                key: KeySpec {
+                    key: NamedKey::Enter,
+                    mods: ModSet::NONE,
+                },
+                action: KeyAction::Press,
+                count: 1,
+                delay: Duration::from_millis(0),
+            },
+        ];
+
+        let (timeline, end) = build_timeline(&events, &Settings::default());
+        assert_eq!(timeline.len(), 3);
+        assert_eq!(timeline[0].at, Duration::from_millis(0));
+        assert_eq!(timeline[1].at, Duration::from_millis(40));
+        assert_eq!(timeline[2].at, Duration::from_millis(80));
+        assert_eq!(end, Duration::from_millis(80));
     }
 }
 
