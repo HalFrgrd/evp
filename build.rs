@@ -97,4 +97,3 @@ fn in_git_worktree() -> bool {
         .and_then(|out| String::from_utf8(out.stdout).ok())
         .is_some_and(|stdout| stdout.trim() == "true")
 }
-

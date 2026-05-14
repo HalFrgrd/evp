@@ -142,8 +142,7 @@ pub fn run_and_render(
         cell_height_px: opts.cell_h_px,
         frame_style: opts.frame_style,
     };
-    let mut streams: Vec<(renderer::RendererHandle, PathBuf)> =
-        Vec::with_capacity(renderers.len());
+    let mut streams: Vec<(renderer::RendererHandle, PathBuf)> = Vec::with_capacity(renderers.len());
     for (backend, output) in renderers {
         let stream = renderer::spawn_renderer(
             renderer::RendererConfig {
@@ -161,7 +160,10 @@ pub fn run_and_render(
         streams.push((stream, output));
     }
 
-    let raw_frame_consumers = streams.iter().map(|(stream, _)| stream.tx.clone()).collect();
+    let raw_frame_consumers = streams
+        .iter()
+        .map(|(stream, _)| stream.tx.clone())
+        .collect();
     let stats = runner::run_with_raw_frame_consumers(script, raw_frame_consumers)
         .context("running script with renderer streams")?;
     for (stream, path) in streams {
