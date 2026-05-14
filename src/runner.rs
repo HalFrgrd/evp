@@ -25,6 +25,7 @@ use libghostty_vt::{
     key::KittyKeyFlags,
     render::{CellIterator, RenderState, RowIterator},
     style::RgbColor,
+    terminal::{Point, PointCoordinate},
 };
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use regex::Regex;
@@ -201,7 +202,10 @@ pub fn run_with_raw_frame_consumers(
     // The recording continues for one full frame interval after the last
     // event so the final state is always captured.
     let frame_interval = Duration::from_secs_f64(1.0 / script.settings.framerate as f64);
-    let total_duration = timeline_end + frame_interval * 4;
+    // `total_duration` is mutable: it is extended when a `Wait` takes
+    // longer than the pre-computed timeline so the recording window always
+    // covers the full elapsed time plus the post-Wait tail.
+    let mut total_duration = timeline_end + frame_interval * 4;
 
     // Expected wall-clock duration assuming `Wait` events resolve
     // instantly (i.e. just the sum of `Sleep` + typing/key delays).
@@ -265,10 +269,16 @@ pub fn run_with_raw_frame_consumers(
 
         // 2. Resolve waits.
         if let Some(w) = &wait_state {
-            if matches_wait(&mut terminal, w)? {
+            if matches_wait(&terminal, w)? {
+                // Extend the recording window by however long the Wait
+                // actually took. Without this, `total_duration` (computed
+                // before the run) would be in the past and the loop would
+                // exit before the post-Wait tail (e.g. a `Sleep`) is shown.
+                total_duration += now.saturating_sub(w.started_at);
                 wait_state = None;
             } else if now >= w.deadline {
                 warn!(pattern = %w.pattern, "wait timed out");
+                total_duration += now.saturating_sub(w.started_at);
                 wait_state = None;
             }
         }
@@ -604,6 +614,11 @@ struct WaitState {
     scope: WaitScope,
     pattern: String,
     deadline: Duration,
+    /// Wall-clock time when this Wait was dispatched. Used to extend
+    /// `total_duration` when the Wait resolves after the pre-computed
+    /// timeline end, so frames captured during the Wait period remain
+    /// visible in the output.
+    started_at: Duration,
     re: Regex,
 }
 
@@ -644,12 +659,14 @@ fn execute_event(
             timeout,
             pattern,
         } => {
+            let now = start.elapsed();
             let re =
                 Regex::new(pattern).with_context(|| format!("invalid Wait regex `{pattern}`"))?;
             *wait_state = Some(WaitState {
                 scope: *scope,
                 pattern: pattern.clone(),
-                deadline: start.elapsed() + *timeout,
+                deadline: now + *timeout,
+                started_at: now,
                 re,
             });
         }
@@ -716,30 +733,34 @@ fn write_screenshot(frame: &RawFrame, script: &Script, path: &std::path::Path) -
         .with_context(|| format!("writing screenshot {}", path.display()))
 }
 
-fn matches_wait(term: &mut Terminal<'_, '_>, w: &WaitState) -> Result<bool> {
+fn matches_wait(term: &Terminal<'_, '_>, w: &WaitState) -> Result<bool> {
     let text = read_screen_text(term, w.scope)?;
     Ok(w.re.is_match(&text))
 }
 
-fn read_screen_text(term: &mut Terminal<'_, '_>, scope: WaitScope) -> Result<String> {
-    // Read the visible viewport via a one‑shot RenderState snapshot. This is
-    // expensive for `Wait` checks but those are rare.
-    let mut rs = RenderState::new()?;
-    let mut rit = RowIterator::new()?;
-    let mut cit = CellIterator::new()?;
-    let snap = rs.update(term)?;
-    let mut row_iter = rit.update(&snap)?;
+fn read_screen_text(term: &Terminal<'_, '_>, scope: WaitScope) -> Result<String> {
+    // Use grid_ref for direct cell access. A temporary RenderState snapshot
+    // would update the terminal's render-dirty tracking and cause the main
+    // render_state (used in `capture`) to miss subsequent cell changes,
+    // resulting in stale frames during long Wait periods.
+    let rows = term.rows()? as u32;
+    let cols = term.cols()? as u16;
     let mut last_line = String::new();
     let mut all = String::new();
-    while let Some(row) = row_iter.next() {
+    let mut buf = ['\0'; 8];
+
+    for row in 0..rows {
         let mut line = String::new();
-        let mut cell_iter = cit.update(row)?;
-        while let Some(cell) = cell_iter.next() {
-            if cell.graphemes_len()? > 0 {
-                let text: String = cell.graphemes()?.into_iter().collect();
-                line.push_str(&text);
-            } else {
-                line.push(' ');
+        for col in 0..cols {
+            let gref = term.grid_ref(Point::Viewport(PointCoordinate { x: col, y: row }))?;
+            match gref.graphemes(&mut buf) {
+                Ok(0) => line.push(' '),
+                Ok(n) => {
+                    for &ch in &buf[..n] {
+                        line.push(ch);
+                    }
+                }
+                Err(_) => line.push(' '),
             }
         }
         let trimmed = line.trim_end();
@@ -926,6 +947,7 @@ impl std::fmt::Debug for WaitState {
         f.debug_struct("WaitState")
             .field("scope", &self.scope)
             .field("pattern", &self.pattern)
+            .field("started_at", &self.started_at)
             .field("deadline", &self.deadline)
             .finish()
     }
