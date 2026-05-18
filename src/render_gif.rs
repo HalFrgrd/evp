@@ -187,12 +187,16 @@ fn css_cell_metrics(font: &FontArc, font_size: f32, line_height: f32) -> (PxScal
     let scale = PxScale::from(px_scale);
     let scaled = font.as_scaled(scale);
     let cell_w = scaled.h_advance(font.glyph_id('M')).ceil().max(1.0) as u32;
-    let cell_h = (font_size * line_height).round().max(1.0) as u32;
-    // Place the baseline at the font's ascent expressed in CSS pixels. For
-    // most monospace fonts this fits inside the cell; if the ascent is
-    // slightly larger than `cell_h` the glyph clips at the top exactly the
-    // way xterm.js / browsers handle it.
-    let baseline = (font_size * font.ascent_unscaled() / upem).round().max(0.0) as u32;
+    // xterm.js measures cell height from the font's actual bounding box
+    // (ascent - descent at the current scale), then multiplies by lineHeight.
+    // Using `font_size * line_height` instead gives a shorter cell because
+    // `font_size` equals one em-square, but the rendered bounding box
+    // (ascent + |descent|) is larger — for JetBrains Mono at 22px this is
+    // roughly 27px. Match xterm.js: use the scaled bounding box height.
+    let bbox_h = scaled.ascent() - scaled.descent();
+    let cell_h = (bbox_h * line_height).ceil().max(1.0) as u32;
+    // Baseline: ascent from the top of the cell.
+    let baseline = scaled.ascent().round().max(0.0) as u32;
     (scale, cell_w, cell_h, baseline)
 }
 
