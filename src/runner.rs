@@ -838,6 +838,9 @@ fn capture<'a>(
             if style.strikethrough {
                 flags |= style_flags::STRIKETHROUGH;
             }
+            if style.faint {
+                flags |= style_flags::DIM;
+            }
             // Underline is an enum (None/Single/Double/...) – treat anything
             // non‑None as a generic underline for now.
             if !matches!(style.underline, libghostty_vt::style::Underline::None) {

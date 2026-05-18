@@ -454,6 +454,10 @@ fn rasterize_raw_frame(
             if cell.flags & style_flags::INVERSE != 0 {
                 std::mem::swap(&mut fg, &mut bg);
             }
+            // SGR 2 dim: blend fg 50% toward bg (equivalent to opacity 0.5).
+            if cell.flags & style_flags::DIM != 0 {
+                fg = dim_color(fg, bg);
+            }
 
             if bg != frame.default_bg || cell.flags & style_flags::INVERSE != 0 {
                 fill_rect(&mut buf, cfg.canvas_w, x, y, cell_w, cell_h, bg);
@@ -716,6 +720,15 @@ fn blend_pixel(buf: &mut [u8], w: u32, x: u32, y: u32, color: [u8; 3], coverage:
         let fg = color[k] as f32;
         buf[i + k] = (fg * a + bg * inv).round().clamp(0.0, 255.0) as u8;
     }
+}
+
+/// SGR 2 dim: blend foreground 50% toward background (opacity 0.5 equivalent).
+fn dim_color(fg: [u8; 3], bg: [u8; 3]) -> [u8; 3] {
+    [
+        ((fg[0] as u16 + bg[0] as u16) / 2) as u8,
+        ((fg[1] as u16 + bg[1] as u16) / 2) as u8,
+        ((fg[2] as u16 + bg[2] as u16) / 2) as u8,
+    ]
 }
 
 /// Load the requested font set. If `path` is provided it is used as the sole

@@ -481,15 +481,29 @@ fn emit_frame_body(s: &mut String, frame: &RawFrame, cfg: ViewportConfig, font_s
 // ---------------------------------------------------------------------------
 
 fn effective_colors(cell: &crate::recording::CellSnap) -> ([u8; 3], [u8; 3]) {
-    if cell.flags & style_flags::INVERSE != 0 {
+    let (mut fg, bg) = if cell.flags & style_flags::INVERSE != 0 {
         (cell.bg, cell.fg)
     } else {
         (cell.fg, cell.bg)
+    };
+    // SGR 2 dim: blend fg 50% toward bg (equivalent to opacity 0.5).
+    if cell.flags & style_flags::DIM != 0 {
+        fg = dim_color(fg, bg);
     }
+    (fg, bg)
 }
 
 fn frames_visually_identical(a: &RawFrame, b: &RawFrame) -> bool {
     a.cells == b.cells && a.cursor == b.cursor && a.default_bg == b.default_bg
+}
+
+/// SGR 2 dim: blend foreground 50% toward background (opacity 0.5 equivalent).
+fn dim_color(fg: [u8; 3], bg: [u8; 3]) -> [u8; 3] {
+    [
+        ((fg[0] as u16 + bg[0] as u16) / 2) as u8,
+        ((fg[1] as u16 + bg[1] as u16) / 2) as u8,
+        ((fg[2] as u16 + bg[2] as u16) / 2) as u8,
+    ]
 }
 
 fn emit_window_bar(s: &mut String, cfg: ViewportConfig) {

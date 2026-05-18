@@ -3,6 +3,7 @@ Set Margin 60
 Set MarginFill "#6B50FF"
 Set Width 600
 Set Height 1000
+Set WindowBar Rings
 
 Type@1ms "PROMPT_COMMAND='' && PS1='> '"
 Sleep 100ms

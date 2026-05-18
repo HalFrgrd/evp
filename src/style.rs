@@ -23,7 +23,7 @@ const DEFAULT_WHITE: &str = "#bfbfbf";
 const DEFAULT_BRIGHT_WHITE: &str = "#e6e6e6";
 const DEFAULT_WINDOW_BAR_SIZE_PX: u32 = 30;
 pub const WINDOW_BAR_DOT_RADIUS_DIVISOR: u32 = 5;
-pub const WINDOW_BAR_DOT_MIN_RADIUS: u32 = 4;
+pub const WINDOW_BAR_DOT_MIN_RADIUS: u32 = 5;
 pub const WINDOW_BAR_DOT_MIN_GAP: u32 = 6;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

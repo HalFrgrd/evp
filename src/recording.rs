@@ -33,6 +33,8 @@ pub mod style_flags {
     pub const UNDERLINE: u8 = 1 << 2;
     pub const INVERSE: u8 = 1 << 3;
     pub const STRIKETHROUGH: u8 = 1 << 4;
+    /// SGR 2 – faint/dim: foreground blended 50% toward the background.
+    pub const DIM: u8 = 1 << 5;
 }
 
 impl CellSnap {
