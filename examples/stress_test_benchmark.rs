@@ -85,6 +85,7 @@ fn run() -> Result<bool> {
     let render_opts = crate::RenderOptions {
         font_path: None,
         font_size: script.settings.font_size,
+        line_height: script.settings.line_height,
         frame_style: FrameStyle {
             canvas_width_px: Some(script.settings.width),
             canvas_height_px: Some(script.settings.height),

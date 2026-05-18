@@ -199,6 +199,7 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, output: &Path) -> Resul
         renderer::RendererBackend::Gif(RenderOptions {
             font_path: opts.font_path.clone(),
             font_size: opts.font_size,
+            line_height: opts.line_height,
             frame_style: rec.frame_style,
         }),
         output.to_path_buf(),

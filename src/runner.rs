@@ -104,10 +104,16 @@ pub struct RunOptions {
 }
 
 pub fn derive_options(s: &Settings) -> RunOptions {
-    // Approximate cell metrics – the GIF renderer measures them properly
-    // from the loaded font; here we just need something non‑zero for
-    // libghostty's resize call.
-    let cell_w_px = (s.font_size * 0.5).round().max(1.0) as u32;
+    // Approximate cell metrics used to compute `cols`/`rows` and to give
+    // libghostty a non-zero pixel size for pixel-based queries.
+    //
+    // The GIF/SVG renderers later measure the cell width/height precisely
+    // from the loaded font using CSS-equivalent scaling (advance·font_size /
+    // upem), but we mirror that formula here so the column/row count picked
+    // here lines up with the grid the renderer will draw. JetBrains Mono —
+    // the embedded default and also VHS's default — has an advance ratio
+    // of `0.6 em`, matching xterm.js's behaviour.
+    let cell_w_px = (s.font_size * 0.6).round().max(1.0) as u32;
     let cell_h_px = (s.font_size * s.line_height).round().max(1.0) as u32;
     let frame_style = FrameStyle {
         canvas_width_px: Some(s.width),
@@ -712,6 +718,7 @@ fn write_screenshot(frame: &RawFrame, script: &Script, path: &std::path::Path) -
     let render_opts = crate::RenderOptions {
         font_path: script.settings.font_family.clone(),
         font_size: script.settings.font_size,
+        line_height: script.settings.line_height,
         frame_style: FrameStyle {
             canvas_width_px: Some(script.settings.width),
             canvas_height_px: Some(script.settings.height),
@@ -1025,9 +1032,13 @@ mod tests {
     fn vhs_defaults_produce_expected_layout() {
         let opts = derive_options(&Settings::default());
 
-        assert_eq!(opts.cell_w_px, 11);
+        // JetBrains Mono advance ratio (0.6 em) → cell_w = round(22 * 0.6) = 13.
+        // cell_h = round(22 * 1.0) = 22.
+        // cols = (1200 - 2*60) / 13 = 1080 / 13 = 83.
+        // rows = (600  - 2*60) / 22 = 480  / 22 = 21.
+        assert_eq!(opts.cell_w_px, 13);
         assert_eq!(opts.cell_h_px, 22);
-        assert_eq!(opts.cols, 98);
+        assert_eq!(opts.cols, 83);
         assert_eq!(opts.rows, 21);
         assert_eq!(opts.frame_style.canvas_width_px, Some(1200));
         assert_eq!(opts.frame_style.canvas_height_px, Some(600));
