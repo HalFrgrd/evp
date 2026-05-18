@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::FrameStyle;
+use crate::{FrameStyle, render_common::ViewportConfig};
 
 /// A single colored cell.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,12 +124,7 @@ pub struct Recording {
 /// diff-compressed [`Recording`].
 #[derive(Debug, Clone, Copy)]
 pub struct RecordingConfig {
-    pub cols: u16,
-    pub rows: u16,
-    pub framerate: u32,
-    pub cell_width_px: u32,
-    pub cell_height_px: u32,
-    pub frame_style: FrameStyle,
+    pub viewport: ViewportConfig,
     pub keyframe_interval: u32,
 }
 
@@ -197,12 +192,12 @@ impl RecordingBuilder {
 
     pub fn finish(self) -> Recording {
         Recording {
-            cols: self.cfg.cols,
-            rows: self.cfg.rows,
-            framerate: self.cfg.framerate,
-            cell_width_px: self.cfg.cell_width_px,
-            cell_height_px: self.cfg.cell_height_px,
-            frame_style: self.cfg.frame_style,
+            cols: self.cfg.viewport.cols,
+            rows: self.cfg.viewport.rows,
+            framerate: self.cfg.viewport.framerate,
+            cell_width_px: self.cfg.viewport.cell_width_px,
+            cell_height_px: self.cfg.viewport.cell_height_px,
+            frame_style: self.cfg.viewport.frame_style,
             frames: self.frames,
         }
     }

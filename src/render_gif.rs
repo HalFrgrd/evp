@@ -20,7 +20,7 @@ use woff2_patched::convert_woff2_to_ttf;
 use crate::{
     FrameStyle,
     recording::{RawFrame, Recording, style_flags},
-    render_common::{RAW_FRAME_CONSUMER_CHANNEL_CAPACITY, RenderOptions},
+    render_common::{RAW_FRAME_CONSUMER_CHANNEL_CAPACITY, RenderOptions, ViewportConfig},
     style::window_bar_dot_metrics,
 };
 
@@ -142,11 +142,6 @@ struct GlyphBitmap {
 /// can be blended with any foreground colour.
 type GlyphCache = HashMap<GlyphCacheKey, Option<GlyphBitmap>>;
 
-pub struct GifStreamConfig {
-    pub cols: u16,
-    pub rows: u16,
-}
-
 #[derive(Clone, Copy)]
 struct LayoutMetrics {
     canvas_w: u32,
@@ -205,18 +200,13 @@ fn css_cell_metrics(font: &FontArc, font_size: f32, line_height: f32) -> (PxScal
     let px_scale = font_size * height_units / upem;
     let scale = PxScale::from(px_scale);
     let scaled = font.as_scaled(scale);
-    let cell_w = scaled
-        .h_advance(font.glyph_id('M'))
-        .ceil()
-        .max(1.0) as u32;
+    let cell_w = scaled.h_advance(font.glyph_id('M')).ceil().max(1.0) as u32;
     let cell_h = (font_size * line_height).round().max(1.0) as u32;
     // Place the baseline at the font's ascent expressed in CSS pixels. For
     // most monospace fonts this fits inside the cell; if the ascent is
     // slightly larger than `cell_h` the glyph clips at the top exactly the
     // way xterm.js / browsers handle it.
-    let baseline = (font_size * font.ascent_unscaled() / upem)
-        .round()
-        .max(0.0) as u32;
+    let baseline = (font_size * font.ascent_unscaled() / upem).round().max(0.0) as u32;
     (scale, cell_w, cell_h, baseline)
 }
 
@@ -244,14 +234,14 @@ pub fn measure_cell_px(font_path: Option<&str>, font_size: f32, line_height: f32
     // count that matches what a browser's font engine produces. VHS's FitAddon
     // runs in a real Chromium context and consistently renders cells roughly
     // 1.Y× wider/taller than the raw advance from the font file.
-    const CELL_SCALE: f32 = 1.1;
+    const CELL_SCALE: f32 = 1.03;
     let w = ((cell_w as f32) * CELL_SCALE).round().max(1.0) as u32;
     let h = ((cell_h as f32) * CELL_SCALE).round().max(1.0) as u32;
     (w, h)
 }
 
 pub fn spawn_gif_stream(
-    cfg: GifStreamConfig,
+    cfg: ViewportConfig,
     opts: RenderOptions,
     output: PathBuf,
 ) -> Result<GifStreamHandle> {
@@ -262,7 +252,7 @@ pub fn spawn_gif_stream(
     let primary = &font_set.fonts[font_set.regular[0]];
     let (scale, cell_w, cell_h, baseline) =
         css_cell_metrics(primary, opts.font_size, opts.line_height);
-    let layout = layout_metrics(cfg.cols, cfg.rows, cell_w, cell_h, opts.frame_style);
+    let layout = layout_metrics(cfg.cols, cfg.rows, cell_w, cell_h, cfg.frame_style);
 
     let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) =
         bounded(RAW_FRAME_CONSUMER_CHANNEL_CAPACITY);
@@ -277,7 +267,7 @@ pub fn spawn_gif_stream(
                 cell_w,
                 cell_h,
                 baseline,
-                opts.frame_style,
+                cfg.frame_style,
                 layout,
             )
         })
@@ -288,16 +278,15 @@ pub fn spawn_gif_stream(
 
 pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<()> {
     let stream = spawn_gif_stream(
-        GifStreamConfig {
+        ViewportConfig {
             cols: rec.cols,
             rows: rec.rows,
-        },
-        RenderOptions {
-            font_path: opts.font_path.clone(),
-            font_size: opts.font_size,
-            line_height: opts.line_height,
+            framerate: rec.framerate,
+            cell_width_px: rec.cell_width_px,
+            cell_height_px: rec.cell_height_px,
             frame_style: rec.frame_style,
         },
+        opts.clone(),
         out.to_path_buf(),
     )?;
 
@@ -647,12 +636,12 @@ fn layout_metrics(
     // split them evenly between the left/right (and top/bottom) padding so the
     // visible margins are symmetric — matching VHS, which centres the
     // recorded terminal inside its frame with ffmpeg `pad=...(ow-iw)/2`.
-    let inner_w = frame_w.saturating_sub(frame_style.padding_px * 2);
-    let inner_h = frame_h.saturating_sub(frame_style.padding_px * 2 + bar_h);
-    let grid_w = (cols as u32 * cell_w).min(inner_w);
-    let grid_h = (rows as u32 * cell_h).min(inner_h);
-    let extra_x = inner_w.saturating_sub(grid_w) / 2;
-    let extra_y = inner_h.saturating_sub(grid_h) / 2;
+    // let inner_w = frame_w.saturating_sub(frame_style.padding_px * 2);
+    // let inner_h = frame_h.saturating_sub(frame_style.padding_px * 2 + bar_h);
+    // let grid_w = (cols as u32 * cell_w).min(inner_w);
+    // let grid_h = (rows as u32 * cell_h).min(inner_h);
+    // let extra_x = inner_w.saturating_sub(grid_w) / 2;
+    // let extra_y = inner_h.saturating_sub(grid_h) / 2;
 
     LayoutMetrics {
         canvas_w,
@@ -662,8 +651,8 @@ fn layout_metrics(
         frame_w,
         frame_h,
         bar_h,
-        content_x: frame_style.margin_px + frame_style.padding_px + extra_x,
-        content_y: frame_style.margin_px + bar_h + frame_style.padding_px + extra_y,
+        content_x: frame_style.margin_px + frame_style.padding_px,
+        content_y: frame_style.margin_px + bar_h + frame_style.padding_px,
     }
 }
 

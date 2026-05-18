@@ -9,17 +9,7 @@ use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
 
 use crate::recording::{RawFrame, Recording, RecordingBuilder, RecordingConfig};
-use crate::render_common::RAW_FRAME_CONSUMER_CHANNEL_CAPACITY;
-
-pub struct JsonStreamConfig {
-    pub cols: u16,
-    pub rows: u16,
-    pub framerate: u32,
-    pub cell_width_px: u32,
-    pub cell_height_px: u32,
-    pub frame_style: crate::FrameStyle,
-    pub keyframe_interval: u32,
-}
+use crate::render_common::{RAW_FRAME_CONSUMER_CHANNEL_CAPACITY, ViewportConfig};
 
 pub struct JsonStreamHandle {
     pub tx: Sender<RawFrame>,
@@ -33,12 +23,16 @@ impl JsonStreamHandle {
     }
 }
 
-pub fn spawn_json_stream(cfg: JsonStreamConfig, output: PathBuf) -> Result<JsonStreamHandle> {
+pub fn spawn_json_stream(
+    cfg: ViewportConfig,
+    keyframe_interval: u32,
+    output: PathBuf,
+) -> Result<JsonStreamHandle> {
     let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) =
         bounded(RAW_FRAME_CONSUMER_CHANNEL_CAPACITY);
     let join = thread::Builder::new()
         .name("evp-json-stream".into())
-        .spawn(move || run_json_stream_worker(rx, cfg, output))
+        .spawn(move || run_json_stream_worker(rx, cfg, keyframe_interval, output))
         .expect("failed to spawn json stream worker");
     Ok(JsonStreamHandle { tx, join })
 }
@@ -50,17 +44,13 @@ pub fn render_json(rec: &Recording, out: &Path) -> Result<()> {
 
 fn run_json_stream_worker(
     rx: Receiver<RawFrame>,
-    cfg: JsonStreamConfig,
+    cfg: ViewportConfig,
+    keyframe_interval: u32,
     output: PathBuf,
 ) -> Result<()> {
     let mut builder = RecordingBuilder::new(RecordingConfig {
-        cols: cfg.cols,
-        rows: cfg.rows,
-        framerate: cfg.framerate,
-        cell_width_px: cfg.cell_width_px,
-        cell_height_px: cfg.cell_height_px,
-        frame_style: cfg.frame_style,
-        keyframe_interval: cfg.keyframe_interval,
+        viewport: cfg,
+        keyframe_interval,
     });
 
     while let Ok(frame) = rx.recv() {

@@ -133,10 +133,10 @@ pub fn derive_options(s: &Settings) -> RunOptions {
         });
     let cols = s
         .cols
-        .unwrap_or_else(|| (inner_w / cell_w_px).max(20) as u16);
+        .unwrap_or_else(|| (inner_w / cell_w_px).max(2) as u16);
     let rows = s
         .rows
-        .unwrap_or_else(|| (inner_h / cell_h_px).max(5) as u16);
+        .unwrap_or_else(|| (inner_h / cell_h_px).max(2) as u16);
     RunOptions {
         cols,
         rows,
@@ -868,7 +868,11 @@ fn capture<'a>(
                 None => {
                     // Cursor has not moved since recording started; use
                     // absolute-time blink so initial frames animate normally.
-                    if cursor_visible_at(at) { Some(pos) } else { None }
+                    if cursor_visible_at(at) {
+                        Some(pos)
+                    } else {
+                        None
+                    }
                 }
                 Some(moved_at) => {
                     let time_since_move = at.saturating_sub(moved_at);
@@ -879,7 +883,11 @@ fn capture<'a>(
                         // Cursor has been stationary long enough; blink from
                         // the moment it became stationary.
                         let blink_t = time_since_move - CURSOR_BLINK_RESTART_DELAY;
-                        if cursor_visible_at(blink_t) { Some(pos) } else { None }
+                        if cursor_visible_at(blink_t) {
+                            Some(pos)
+                        } else {
+                            None
+                        }
                     }
                 }
             }

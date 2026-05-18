@@ -6,18 +6,12 @@ use anyhow::Result;
 use crossbeam_channel::{Receiver, Sender, bounded};
 
 use crate::{
-    FrameStyle,
     recording::{RawFrame, Recording, RecordingBuilder, RecordingConfig},
-    render_common::RAW_FRAME_CONSUMER_CHANNEL_CAPACITY,
+    render_common::{RAW_FRAME_CONSUMER_CHANNEL_CAPACITY, ViewportConfig},
 };
 
 pub struct FullRecordingConfig {
-    pub cols: u16,
-    pub rows: u16,
-    pub framerate: u32,
-    pub cell_width_px: u32,
-    pub cell_height_px: u32,
-    pub frame_style: FrameStyle,
+    pub viewport: ViewportConfig,
     pub keyframe_interval: u32,
 }
 
@@ -48,12 +42,7 @@ fn run_full_recording_worker(
     cfg: FullRecordingConfig,
 ) -> Result<Recording> {
     let mut builder = RecordingBuilder::new(RecordingConfig {
-        cols: cfg.cols,
-        rows: cfg.rows,
-        framerate: cfg.framerate,
-        cell_width_px: cfg.cell_width_px,
-        cell_height_px: cfg.cell_height_px,
-        frame_style: cfg.frame_style,
+        viewport: cfg.viewport,
         keyframe_interval: cfg.keyframe_interval,
     });
 

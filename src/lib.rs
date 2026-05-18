@@ -46,7 +46,7 @@ use tracing::info;
 
 pub use full_recording::{FullRecording, FullRecordingConfig};
 pub use recording::{CellChange, CellSnap, Frame, RawFrame, Recording};
-pub use render_common::RenderOptions;
+pub use render_common::{RenderOptions, ViewportConfig};
 pub use render_svg::SvgOptions;
 pub use runner::{RunOptions, RunOutput, RunStats};
 pub use script::{Event, KeySpec, ModSet, NamedKey, Script, Settings, WaitScope};
@@ -83,12 +83,14 @@ pub fn run(script: &Script) -> Result<RunStats> {
 pub fn run_and_return_recording(script: &Script) -> Result<RunOutput> {
     let opts = runner::derive_options(&script.settings);
     let full_recording = full_recording::spawn_full_recording(FullRecordingConfig {
-        cols: opts.cols,
-        rows: opts.rows,
-        framerate: script.settings.framerate,
-        cell_width_px: opts.cell_w_px,
-        cell_height_px: opts.cell_h_px,
-        frame_style: opts.frame_style,
+        viewport: ViewportConfig {
+            cols: opts.cols,
+            rows: opts.rows,
+            framerate: script.settings.framerate,
+            cell_width_px: opts.cell_w_px,
+            cell_height_px: opts.cell_h_px,
+            frame_style: opts.frame_style,
+        },
         keyframe_interval: script.settings.framerate * 5,
     });
     let stats = runner::run_with_raw_frame_consumer(script, Some(full_recording.tx.clone()))
@@ -134,7 +136,7 @@ pub fn run_and_render(
     renderers: Vec<(renderer::RendererBackend, PathBuf)>,
 ) -> Result<RunStats> {
     let opts = runner::derive_options(&script.settings);
-    let cfg = renderer::RendererConfig {
+    let cfg = ViewportConfig {
         cols: opts.cols,
         rows: opts.rows,
         framerate: script.settings.framerate,
@@ -144,19 +146,8 @@ pub fn run_and_render(
     };
     let mut streams: Vec<(renderer::RendererHandle, PathBuf)> = Vec::with_capacity(renderers.len());
     for (backend, output) in renderers {
-        let stream = renderer::spawn_renderer(
-            renderer::RendererConfig {
-                cols: cfg.cols,
-                rows: cfg.rows,
-                framerate: cfg.framerate,
-                cell_width_px: cfg.cell_width_px,
-                cell_height_px: cfg.cell_height_px,
-                frame_style: cfg.frame_style,
-            },
-            backend,
-            output.clone(),
-        )
-        .context("spawning renderer stream")?;
+        let stream = renderer::spawn_renderer(cfg, backend, output.clone())
+            .context("spawning renderer stream")?;
         streams.push((stream, output));
     }
 
@@ -196,12 +187,7 @@ pub fn render_json(rec: &Recording, output: &Path) -> Result<()> {
 pub fn render_gif(rec: &Recording, opts: &RenderOptions, output: &Path) -> Result<()> {
     renderer::render_recording(
         rec,
-        renderer::RendererBackend::Gif(RenderOptions {
-            font_path: opts.font_path.clone(),
-            font_size: opts.font_size,
-            line_height: opts.line_height,
-            frame_style: rec.frame_style,
-        }),
+        renderer::RendererBackend::Gif(opts.clone()),
         output.to_path_buf(),
     )
     .context("rendering gif")

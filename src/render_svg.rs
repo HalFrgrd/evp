@@ -45,7 +45,7 @@ use crossbeam_channel::{Receiver, Sender, bounded};
 use crate::{
     FrameStyle,
     recording::{RawFrame, Recording, style_flags},
-    render_common::RAW_FRAME_CONSUMER_CHANNEL_CAPACITY,
+    render_common::{RAW_FRAME_CONSUMER_CHANNEL_CAPACITY, ViewportConfig},
     style::{rgb_hex, window_bar_dot_metrics},
 };
 
@@ -60,15 +60,6 @@ pub struct SvgOptions {
     /// honour them as cell sizes regardless, but `font_size` is what
     /// actually controls glyph height in the browser.
     pub font_size: f32,
-}
-
-pub struct SvgStreamConfig {
-    pub cols: u16,
-    pub rows: u16,
-    pub framerate: u32,
-    pub cell_width_px: u32,
-    pub cell_height_px: u32,
-    pub frame_style: FrameStyle,
 }
 
 #[derive(Clone, Copy)]
@@ -97,7 +88,7 @@ impl SvgStreamHandle {
 }
 
 pub fn spawn_svg_stream(
-    cfg: SvgStreamConfig,
+    cfg: ViewportConfig,
     opts: SvgOptions,
     output: PathBuf,
 ) -> Result<SvgStreamHandle> {
@@ -122,7 +113,7 @@ impl Default for SvgOptions {
 /// Render `rec` as an animated SVG written to `out`.
 pub fn render_svg(rec: &Recording, opts: &SvgOptions, out: &Path) -> Result<()> {
     let stream = spawn_svg_stream(
-        SvgStreamConfig {
+        ViewportConfig {
             cols: rec.cols,
             rows: rec.rows,
             framerate: rec.framerate,
@@ -273,7 +264,7 @@ struct Window {
 
 fn run_svg_stream_worker(
     rx: Receiver<RawFrame>,
-    cfg: SvgStreamConfig,
+    cfg: ViewportConfig,
     opts: SvgOptions,
     out: PathBuf,
 ) -> Result<()> {

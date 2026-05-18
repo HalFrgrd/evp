@@ -174,7 +174,7 @@ def run_vhs(image: str, tape: Path, out_gif: Path) -> float:
         "-v", f"{work_dir.resolve()}:/work",
         "-w", "/work",
         image,
-        "vhs", "input.tape",
+        "input.tape",
     ]
     print(f"  vhs: {shlex.join(cmd)}")
     _, elapsed = run(cmd)

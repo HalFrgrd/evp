@@ -4,25 +4,18 @@ use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::Sender;
 
 use crate::{
-    FrameStyle, RawFrame, Recording, RenderOptions, SvgOptions,
-    render_gif::{self, GifStreamConfig, GifStreamHandle},
-    render_json::{self, JsonStreamConfig, JsonStreamHandle},
-    render_svg::{self, SvgStreamConfig, SvgStreamHandle},
+    RawFrame, Recording, RenderOptions, SvgOptions,
+    render_gif::{self, GifStreamHandle},
+    render_json::{self, JsonStreamHandle},
+    render_svg::{self, SvgStreamHandle},
 };
+
+pub use crate::render_common::ViewportConfig;
 
 pub enum RendererBackend {
     Gif(RenderOptions),
     Svg(SvgOptions),
     Json,
-}
-
-pub struct RendererConfig {
-    pub cols: u16,
-    pub rows: u16,
-    pub framerate: u32,
-    pub cell_width_px: u32,
-    pub cell_height_px: u32,
-    pub frame_style: FrameStyle,
 }
 
 enum RendererJoin {
@@ -55,59 +48,30 @@ impl RendererHandle {
 }
 
 pub fn spawn_renderer(
-    cfg: RendererConfig,
+    cfg: ViewportConfig,
     backend: RendererBackend,
     output: PathBuf,
 ) -> Result<RendererHandle> {
     match backend {
         RendererBackend::Gif(opts) => {
-            let h = render_gif::spawn_gif_stream(
-                GifStreamConfig {
-                    cols: cfg.cols,
-                    rows: cfg.rows,
-                },
-                opts,
-                output,
-            )
-            .context("spawning gif renderer")?;
+            let h =
+                render_gif::spawn_gif_stream(cfg, opts, output).context("spawning gif renderer")?;
             Ok(RendererHandle {
                 tx: h.tx.clone(),
                 join: RendererJoin::Gif(h),
             })
         }
         RendererBackend::Svg(opts) => {
-            let h = render_svg::spawn_svg_stream(
-                SvgStreamConfig {
-                    cols: cfg.cols,
-                    rows: cfg.rows,
-                    framerate: cfg.framerate,
-                    cell_width_px: cfg.cell_width_px,
-                    cell_height_px: cfg.cell_height_px,
-                    frame_style: cfg.frame_style,
-                },
-                opts,
-                output,
-            )
-            .context("spawning svg renderer")?;
+            let h =
+                render_svg::spawn_svg_stream(cfg, opts, output).context("spawning svg renderer")?;
             Ok(RendererHandle {
                 tx: h.tx.clone(),
                 join: RendererJoin::Svg(h),
             })
         }
         RendererBackend::Json => {
-            let h = render_json::spawn_json_stream(
-                JsonStreamConfig {
-                    cols: cfg.cols,
-                    rows: cfg.rows,
-                    framerate: cfg.framerate,
-                    cell_width_px: cfg.cell_width_px,
-                    cell_height_px: cfg.cell_height_px,
-                    frame_style: cfg.frame_style,
-                    keyframe_interval: cfg.framerate * 5,
-                },
-                output,
-            )
-            .context("spawning json renderer")?;
+            let h = render_json::spawn_json_stream(cfg, cfg.framerate * 5, output)
+                .context("spawning json renderer")?;
             Ok(RendererHandle {
                 tx: h.tx.clone(),
                 join: RendererJoin::Json(h),
@@ -122,7 +86,7 @@ pub fn render_recording(rec: &Recording, backend: RendererBackend, output: PathB
         backend => backend,
     };
     let renderer = spawn_renderer(
-        RendererConfig {
+        ViewportConfig {
             cols: rec.cols,
             rows: rec.rows,
             framerate: rec.framerate,
