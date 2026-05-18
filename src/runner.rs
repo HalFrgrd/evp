@@ -36,6 +36,7 @@ use crate::{
     keys::KeyTranslator,
     pty::{Pty, PtyError, PtySize},
     recording::{CellSnap, RawFrame, style_flags},
+    render_common::ViewportConfig,
     render_gif::measure_cell_px,
     script::{Event, KeyAction, NamedKey, Script, Settings, WaitScope},
 };
@@ -104,7 +105,7 @@ pub struct RunOptions {
     pub frame_style: FrameStyle,
 }
 
-pub fn derive_options(s: &Settings) -> RunOptions {
+pub fn derive_options(s: &Settings) -> ViewportConfig {
     // Measure cell dimensions from the actual font using the same CSS
     // em-square semantics as the GIF/SVG renderers, so the cols/rows we
     // report to libghostty match the grid the renderer will draw.
@@ -137,13 +138,7 @@ pub fn derive_options(s: &Settings) -> RunOptions {
     let rows = s
         .rows
         .unwrap_or_else(|| (inner_h / cell_h_px).max(2) as u16);
-    RunOptions {
-        cols,
-        rows,
-        cell_w_px,
-        cell_h_px,
-        frame_style,
-    }
+    ViewportConfig::new(cols, rows, s.framerate, cell_w_px, cell_h_px, frame_style)
 }
 
 /// Run the script end-to-end. Returns only pipeline stats.
@@ -175,8 +170,8 @@ pub fn run_with_raw_frame_consumers(
     let pty_size = PtySize {
         cols: opts.cols,
         rows: opts.rows,
-        px_w: (opts.cols as u32 * opts.cell_w_px) as u16,
-        px_h: (opts.rows as u32 * opts.cell_h_px) as u16,
+        px_w: (opts.cols as u32 * opts.cell_width_px) as u16,
+        px_h: (opts.rows as u32 * opts.cell_height_px) as u16,
     };
 
     info!(cols = opts.cols, rows = opts.rows, "spawning pty");
@@ -188,7 +183,12 @@ pub fn run_with_raw_frame_consumers(
         rows: opts.rows,
         max_scrollback: 1000,
     })?;
-    terminal.resize(opts.cols, opts.rows, opts.cell_w_px, opts.cell_h_px)?;
+    terminal.resize(
+        opts.cols,
+        opts.rows,
+        opts.cell_width_px,
+        opts.cell_height_px,
+    )?;
     // Programs query terminal capabilities at startup. Without this hook,
     // those queries are dropped and applications such as vim/tmux can hang
     // waiting for a response.
@@ -1039,8 +1039,8 @@ mod tests {
         // cell_h = round(22 * 1.0) = 22.
         // cols = (1200 - 2*60) / 13 = 1080 / 13 = 83.
         // rows = (600  - 2*60) / 22 = 480  / 22 = 21.
-        assert_eq!(opts.cell_w_px, 13);
-        assert_eq!(opts.cell_h_px, 22);
+        assert_eq!(opts.cell_width_px, 13);
+        assert_eq!(opts.cell_height_px, 22);
         assert_eq!(opts.cols, 83);
         assert_eq!(opts.rows, 21);
         assert_eq!(opts.frame_style.canvas_width_px, Some(1200));

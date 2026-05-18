@@ -43,7 +43,6 @@ use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
 
 use crate::{
-    FrameStyle,
     recording::{RawFrame, Recording, style_flags},
     render_common::{RAW_FRAME_CONSUMER_CHANNEL_CAPACITY, ViewportConfig},
     style::{rgb_hex, window_bar_dot_metrics},
@@ -60,19 +59,6 @@ pub struct SvgOptions {
     /// honour them as cell sizes regardless, but `font_size` is what
     /// actually controls glyph height in the browser.
     pub font_size: f32,
-}
-
-#[derive(Clone, Copy)]
-struct LayoutMetrics {
-    canvas_w: u32,
-    canvas_h: u32,
-    frame_x: u32,
-    frame_y: u32,
-    frame_w: u32,
-    frame_h: u32,
-    bar_h: u32,
-    content_x: u32,
-    content_y: u32,
 }
 
 pub struct SvgStreamHandle {
@@ -113,14 +99,14 @@ impl Default for SvgOptions {
 /// Render `rec` as an animated SVG written to `out`.
 pub fn render_svg(rec: &Recording, opts: &SvgOptions, out: &Path) -> Result<()> {
     let stream = spawn_svg_stream(
-        ViewportConfig {
-            cols: rec.cols,
-            rows: rec.rows,
-            framerate: rec.framerate,
-            cell_width_px: rec.cell_width_px,
-            cell_height_px: rec.cell_height_px,
-            frame_style: rec.frame_style,
-        },
+        ViewportConfig::new(
+            rec.cols,
+            rec.rows,
+            rec.framerate,
+            rec.cell_width_px,
+            rec.cell_height_px,
+            rec.frame_style,
+        ),
         opts.clone(),
         out.to_path_buf(),
     )?;
@@ -140,11 +126,16 @@ pub fn render_svg(rec: &Recording, opts: &SvgOptions, out: &Path) -> Result<()> 
 /// Same as [`render_svg`] but returns the document as a `String` —
 /// useful for tests and for callers embedding the SVG inline.
 pub fn render_svg_to_string(rec: &Recording, opts: &SvgOptions) -> Result<String> {
-    let cell_w = rec.cell_width_px.max(1);
-    let cell_h = rec.cell_height_px.max(1);
-    let layout = layout_metrics(rec.cols, rec.rows, cell_w, cell_h, rec.frame_style);
-    let canvas_w = layout.canvas_w;
-    let canvas_h = layout.canvas_h;
+    let cfg = ViewportConfig::new(
+        rec.cols,
+        rec.rows,
+        rec.framerate,
+        rec.cell_width_px,
+        rec.cell_height_px,
+        rec.frame_style,
+    );
+    let canvas_w = cfg.canvas_w;
+    let canvas_h = cfg.canvas_h;
 
     // Total animation duration, in seconds, derived from the last frame's
     // timestamp plus a single frame interval so the final frame is held
@@ -214,11 +205,11 @@ pub fn render_svg_to_string(rec: &Recording, opts: &SvgOptions) -> Result<String
     if rec.frame_style.border_radius_px > 0 {
         s.push_str(&format!(
             r#"<defs><clipPath id="frame-clip"><rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}" ry="{r}"/></clipPath></defs>"#,
-            x = layout.frame_x,
-            y = layout.frame_y,
-            w = layout.frame_w,
-            h = layout.frame_h,
-            r = rec.frame_style.border_radius_px.min(layout.frame_w / 2).min(layout.frame_h / 2),
+            x = cfg.frame_x,
+            y = cfg.frame_y,
+            w = cfg.frame_w,
+            h = cfg.frame_h,
+            r = rec.frame_style.border_radius_px.min(cfg.frame_w / 2).min(cfg.frame_h / 2),
         ));
     }
 
@@ -240,15 +231,7 @@ pub fn render_svg_to_string(rec: &Recording, opts: &SvgOptions) -> Result<String
             b = begin_s,
             e = end_s,
         ));
-        emit_frame_body(
-            &mut s,
-            frame,
-            cell_w,
-            cell_h,
-            layout,
-            rec.frame_style,
-            opts.font_size,
-        );
+        emit_frame_body(&mut s, frame, cfg, opts.font_size);
         s.push_str("</g>\n");
     }
 
@@ -307,15 +290,8 @@ fn run_svg_stream_worker(
         last.end_ms = total_ms;
     }
 
-    let layout = layout_metrics(
-        cfg.cols,
-        cfg.rows,
-        cfg.cell_width_px.max(1),
-        cfg.cell_height_px.max(1),
-        cfg.frame_style,
-    );
-    let canvas_w = layout.canvas_w;
-    let canvas_h = layout.canvas_h;
+    let canvas_w = cfg.canvas_w;
+    let canvas_h = cfg.canvas_h;
     let total_s = total_ms as f32 / 1000.0;
 
     let mut s = String::with_capacity(64 * 1024);
@@ -338,11 +314,11 @@ fn run_svg_stream_worker(
     if cfg.frame_style.border_radius_px > 0 {
         s.push_str(&format!(
             r#"<defs><clipPath id="frame-clip"><rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}" ry="{r}"/></clipPath></defs>"#,
-            x = layout.frame_x,
-            y = layout.frame_y,
-            w = layout.frame_w,
-            h = layout.frame_h,
-            r = cfg.frame_style.border_radius_px.min(layout.frame_w / 2).min(layout.frame_h / 2),
+            x = cfg.frame_x,
+            y = cfg.frame_y,
+            w = cfg.frame_w,
+            h = cfg.frame_h,
+            r = cfg.frame_style.border_radius_px.min(cfg.frame_w / 2).min(cfg.frame_h / 2),
         ));
     }
     s.push_str(&format!(
@@ -360,15 +336,7 @@ fn run_svg_stream_worker(
             b = begin_s,
             e = end_s,
         ));
-        emit_frame_body(
-            &mut s,
-            frame,
-            cfg.cell_width_px.max(1),
-            cfg.cell_height_px.max(1),
-            layout,
-            cfg.frame_style,
-            opts.font_size,
-        );
+        emit_frame_body(&mut s, frame, cfg, opts.font_size);
         s.push_str("</g>\n");
     }
 
@@ -384,16 +352,10 @@ fn run_svg_stream_worker(
 // Per-frame emission
 // ---------------------------------------------------------------------------
 
-fn emit_frame_body(
-    s: &mut String,
-    frame: &RawFrame,
-    cell_w: u32,
-    cell_h: u32,
-    layout: LayoutMetrics,
-    frame_style: FrameStyle,
-    font_size: f32,
-) {
-    let clip_attr = if frame_style.border_radius_px > 0 {
+fn emit_frame_body(s: &mut String, frame: &RawFrame, cfg: ViewportConfig, font_size: f32) {
+    let cell_w = cfg.cell_width_px.max(1);
+    let cell_h = cfg.cell_height_px.max(1);
+    let clip_attr = if cfg.frame_style.border_radius_px > 0 {
         r#" clip-path="url(#frame-clip)""#
     } else {
         ""
@@ -401,14 +363,14 @@ fn emit_frame_body(
     s.push_str(&format!(
         r#"<g{clip}><rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{bg}"/>"#,
         clip = clip_attr,
-        x = layout.frame_x,
-        y = layout.frame_y,
-        w = layout.frame_w,
-        h = layout.frame_h,
+        x = cfg.frame_x,
+        y = cfg.frame_y,
+        w = cfg.frame_w,
+        h = cfg.frame_h,
         bg = rgb_hex(frame.default_bg),
     ));
-    if frame_style.window_bar.enabled() {
-        emit_window_bar(s, layout, frame_style.window_bar);
+    if cfg.frame_style.window_bar.enabled() {
+        emit_window_bar(s, cfg);
     }
     // Background rectangles: collapse runs of identical bg in the same row.
     for row in 0..frame.rows {
@@ -429,8 +391,8 @@ fn emit_frame_body(
                 }
                 run_end += 1;
             }
-            let x = layout.content_x + col as u32 * cell_w;
-            let y = layout.content_y + row as u32 * cell_h;
+            let x = cfg.content_x + col as u32 * cell_w;
+            let y = cfg.content_y + row as u32 * cell_h;
             let rw = (run_end - col) as u32 * cell_w;
             s.push_str(&format!(
                 r#"<rect x="{x}" y="{y}" width="{rw}" height="{ch}" fill="{f}"/>"#,
@@ -466,8 +428,8 @@ fn emit_frame_body(
                 run.push_str(&next.text);
                 run_end += 1;
             }
-            let x = layout.content_x + col as u32 * cell_w;
-            let y = layout.content_y + row as u32 * cell_h + baseline;
+            let x = cfg.content_x + col as u32 * cell_w;
+            let y = cfg.content_y + row as u32 * cell_h + baseline;
             let weight = if style & style_flags::BOLD != 0 {
                 " font-weight=\"bold\""
             } else {
@@ -502,8 +464,8 @@ fn emit_frame_body(
 
     // Cursor: draw an inverted block over the cell.
     if let Some((cx, cy)) = frame.cursor {
-        let x = layout.content_x + cx as u32 * cell_w;
-        let y = layout.content_y + cy as u32 * cell_h;
+        let x = cfg.content_x + cx as u32 * cell_w;
+        let y = cfg.content_y + cy as u32 * cell_h;
         s.push_str(&format!(
             r#"<rect x="{x}" y="{y}" width="{cw}" height="{ch}" fill="{c}" fill-opacity="0.7"/>"#,
             cw = cell_w,
@@ -530,65 +492,16 @@ fn frames_visually_identical(a: &RawFrame, b: &RawFrame) -> bool {
     a.cells == b.cells && a.cursor == b.cursor && a.default_bg == b.default_bg
 }
 
-fn layout_metrics(
-    cols: u16,
-    rows: u16,
-    cell_w: u32,
-    cell_h: u32,
-    frame_style: FrameStyle,
-) -> LayoutMetrics {
-    let bar_h = if frame_style.window_bar.enabled() {
-        frame_style.window_bar_size_px
-    } else {
-        0
-    };
-    let grid_frame_w = cols as u32 * cell_w + frame_style.padding_px * 2;
-    let grid_frame_h = rows as u32 * cell_h + frame_style.padding_px * 2 + bar_h;
-    let canvas_w = frame_style
-        .canvas_width_px
-        .unwrap_or(grid_frame_w + frame_style.margin_px * 2)
-        .max(1);
-    let canvas_h = frame_style
-        .canvas_height_px
-        .unwrap_or(grid_frame_h + frame_style.margin_px * 2)
-        .max(1);
-    let frame_w = canvas_w.saturating_sub(frame_style.margin_px * 2).max(1);
-    let frame_h = canvas_h.saturating_sub(frame_style.margin_px * 2).max(1);
-
-    // Centre the cell grid inside the padded content area so leftover pixels
-    // (when `canvas_w - 2*(padding+margin)` is not a multiple of cell_w) are
-    // split evenly between left/right and top/bottom — matching VHS, which
-    // centres the recorded terminal inside its frame via ffmpeg
-    // `pad=...(ow-iw)/2`.
-    let inner_w = frame_w.saturating_sub(frame_style.padding_px * 2);
-    let inner_h = frame_h.saturating_sub(frame_style.padding_px * 2 + bar_h);
-    let grid_w = (cols as u32 * cell_w).min(inner_w);
-    let grid_h = (rows as u32 * cell_h).min(inner_h);
-    let extra_x = inner_w.saturating_sub(grid_w) / 2;
-    let extra_y = inner_h.saturating_sub(grid_h) / 2;
-
-    LayoutMetrics {
-        canvas_w,
-        canvas_h,
-        frame_x: frame_style.margin_px,
-        frame_y: frame_style.margin_px,
-        frame_w,
-        frame_h,
-        bar_h,
-        content_x: frame_style.margin_px + frame_style.padding_px + extra_x,
-        content_y: frame_style.margin_px + bar_h + frame_style.padding_px + extra_y,
-    }
-}
-
-fn emit_window_bar(s: &mut String, layout: LayoutMetrics, style: crate::WindowBarStyle) {
-    let (radius, gap) = window_bar_dot_metrics(layout.bar_h);
+fn emit_window_bar(s: &mut String, cfg: ViewportConfig) {
+    let style = cfg.frame_style.window_bar;
+    let (radius, gap) = window_bar_dot_metrics(cfg.bar_h);
     let dots_w = radius * 2 * 3 + gap * 2;
     let start_x = if style.align_right() {
-        layout.frame_x + layout.frame_w.saturating_sub(dots_w + gap)
+        cfg.frame_x + cfg.frame_w.saturating_sub(dots_w + gap)
     } else {
-        layout.frame_x + gap
+        cfg.frame_x + gap
     };
-    let cy = layout.frame_y + layout.bar_h / 2;
+    let cy = cfg.frame_y + cfg.bar_h / 2;
     for (idx, color) in [[255, 95, 86], [255, 189, 46], [39, 201, 63]]
         .iter()
         .enumerate()

@@ -86,14 +86,14 @@ pub fn render_recording(rec: &Recording, backend: RendererBackend, output: PathB
         backend => backend,
     };
     let renderer = spawn_renderer(
-        ViewportConfig {
-            cols: rec.cols,
-            rows: rec.rows,
-            framerate: rec.framerate,
-            cell_width_px: rec.cell_width_px,
-            cell_height_px: rec.cell_height_px,
-            frame_style: rec.frame_style,
-        },
+        ViewportConfig::new(
+            rec.cols,
+            rec.rows,
+            rec.framerate,
+            rec.cell_width_px,
+            rec.cell_height_px,
+            rec.frame_style,
+        ),
         non_json_backend,
         output,
     )?;

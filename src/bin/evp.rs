@@ -4,6 +4,7 @@
 use std::{io, path::PathBuf, process::ExitCode, time::Instant};
 
 use anyhow::{Context, Result, bail};
+use chrono::Utc;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{Shell as CompletionShell, generate};
 use tracing::{debug, error, info};
@@ -225,6 +226,16 @@ fn run_subcommand(command: Commands) -> Result<()> {
     }
 }
 
+/// Custom timer that emits only `HH:MM:SS` (UTC) so the date is not
+/// repeated on every log line.
+struct TimeOnly;
+
+impl tracing_subscriber::fmt::time::FormatTime for TimeOnly {
+    fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
+        write!(w, "{}", Utc::now().format("%H:%M:%S%.6f"))
+    }
+}
+
 fn init_tracing(cli: &Cli) {
     let filter = cli
         .log_level
@@ -235,8 +246,9 @@ fn init_tracing(cli: &Cli) {
         });
     tracing_subscriber::fmt()
         .with_env_filter(filter.clone())
+        .with_timer(TimeOnly)
         .init();
-    info!(%filter, "initialising tracing");
+    info!(date = %Utc::now().format("%Y-%m-%d"), %filter, "initialising tracing");
 }
 
 fn log_build_info_debug() {

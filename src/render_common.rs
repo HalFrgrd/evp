@@ -10,6 +10,9 @@ pub const RAW_FRAME_CONSUMER_CHANNEL_CAPACITY: usize = 4096;
 /// recording consumer. Centralises all size / grid / style fields so they do
 /// not have to be duplicated across `GifStreamConfig`, `SvgStreamConfig`,
 /// `JsonStreamConfig`, `RendererConfig`, etc.
+///
+/// Construct via [`ViewportConfig::new`]; the derived layout fields
+/// (`canvas_w`, `canvas_h`, `frame_x`, etc.) are computed automatically.
 #[derive(Debug, Clone, Copy)]
 pub struct ViewportConfig {
     pub cols: u16,
@@ -18,6 +21,70 @@ pub struct ViewportConfig {
     pub cell_width_px: u32,
     pub cell_height_px: u32,
     pub frame_style: FrameStyle,
+    // Derived pixel-level layout geometry (computed by `new`).
+    pub canvas_w: u32,
+    pub canvas_h: u32,
+    pub frame_x: u32,
+    pub frame_y: u32,
+    pub frame_w: u32,
+    pub frame_h: u32,
+    pub bar_h: u32,
+    pub content_x: u32,
+    pub content_y: u32,
+}
+
+impl ViewportConfig {
+    pub fn new(
+        cols: u16,
+        rows: u16,
+        framerate: u32,
+        cell_width_px: u32,
+        cell_height_px: u32,
+        frame_style: FrameStyle,
+    ) -> Self {
+        let cell_w = cell_width_px.max(1);
+        let cell_h = cell_height_px.max(1);
+        let bar_h = if frame_style.window_bar.enabled() {
+            frame_style.window_bar_size_px
+        } else {
+            0
+        };
+        let grid_frame_w = cols as u32 * cell_w + frame_style.padding_px * 2;
+        let grid_frame_h = rows as u32 * cell_h + frame_style.padding_px * 2 + bar_h;
+        let canvas_w = frame_style
+            .canvas_width_px
+            .unwrap_or(grid_frame_w + frame_style.margin_px * 2)
+            .max(1);
+        let canvas_h = frame_style
+            .canvas_height_px
+            .unwrap_or(grid_frame_h + frame_style.margin_px * 2)
+            .max(1);
+        let frame_w = canvas_w.saturating_sub(frame_style.margin_px * 2).max(1);
+        let frame_h = canvas_h.saturating_sub(frame_style.margin_px * 2).max(1);
+        let inner_w = frame_w.saturating_sub(frame_style.padding_px * 2);
+        let inner_h = frame_h.saturating_sub(frame_style.padding_px * 2 + bar_h);
+        let grid_w = (cols as u32 * cell_w).min(inner_w);
+        let grid_h = (rows as u32 * cell_h).min(inner_h);
+        let extra_x = inner_w.saturating_sub(grid_w) / 2;
+        let extra_y = inner_h.saturating_sub(grid_h) / 2;
+        Self {
+            cols,
+            rows,
+            framerate,
+            cell_width_px,
+            cell_height_px,
+            frame_style,
+            canvas_w,
+            canvas_h,
+            frame_x: frame_style.margin_px,
+            frame_y: frame_style.margin_px,
+            frame_w,
+            frame_h,
+            bar_h,
+            content_x: frame_style.margin_px + frame_style.padding_px + extra_x,
+            content_y: frame_style.margin_px + bar_h + frame_style.padding_px + extra_y,
+        }
+    }
 }
 
 #[derive(Clone)]

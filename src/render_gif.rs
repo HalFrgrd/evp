@@ -18,7 +18,6 @@ use tracing::{debug, warn};
 use woff2_patched::convert_woff2_to_ttf;
 
 use crate::{
-    FrameStyle,
     recording::{RawFrame, Recording, style_flags},
     render_common::{RAW_FRAME_CONSUMER_CHANNEL_CAPACITY, RenderOptions, ViewportConfig},
     style::window_bar_dot_metrics,
@@ -142,19 +141,6 @@ struct GlyphBitmap {
 /// can be blended with any foreground colour.
 type GlyphCache = HashMap<GlyphCacheKey, Option<GlyphBitmap>>;
 
-#[derive(Clone, Copy)]
-struct LayoutMetrics {
-    canvas_w: u32,
-    canvas_h: u32,
-    frame_x: u32,
-    frame_y: u32,
-    frame_w: u32,
-    frame_h: u32,
-    bar_h: u32,
-    content_x: u32,
-    content_y: u32,
-}
-
 pub struct GifStreamHandle {
     pub tx: Sender<RawFrame>,
     join: JoinHandle<Result<()>>,
@@ -230,14 +216,7 @@ pub fn measure_cell_px(font_path: Option<&str>, font_size: f32, line_height: f32
     };
     let primary = &font_set.fonts[font_set.regular[0]];
     let (_scale, cell_w, cell_h, _baseline) = css_cell_metrics(primary, font_size, line_height);
-    // Scale up the measured cell dimensions so the runner computes a col/row
-    // count that matches what a browser's font engine produces. VHS's FitAddon
-    // runs in a real Chromium context and consistently renders cells roughly
-    // 1.Y× wider/taller than the raw advance from the font file.
-    const CELL_SCALE: f32 = 1.03;
-    let w = ((cell_w as f32) * CELL_SCALE).round().max(1.0) as u32;
-    let h = ((cell_h as f32) * CELL_SCALE).round().max(1.0) as u32;
-    (w, h)
+    (cell_w, cell_h)
 }
 
 pub fn spawn_gif_stream(
@@ -250,27 +229,13 @@ pub fn spawn_gif_stream(
 
     let font_set = loaded.font_set;
     let primary = &font_set.fonts[font_set.regular[0]];
-    let (scale, cell_w, cell_h, baseline) =
-        css_cell_metrics(primary, opts.font_size, opts.line_height);
-    let layout = layout_metrics(cfg.cols, cfg.rows, cell_w, cell_h, cfg.frame_style);
+    let (scale, _, _, baseline) = css_cell_metrics(primary, opts.font_size, opts.line_height);
 
     let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) =
         bounded(RAW_FRAME_CONSUMER_CHANNEL_CAPACITY);
     let join = thread::Builder::new()
         .name("evp-gif-stream".into())
-        .spawn(move || {
-            run_gif_stream_worker(
-                rx,
-                output,
-                font_set,
-                scale,
-                cell_w,
-                cell_h,
-                baseline,
-                cfg.frame_style,
-                layout,
-            )
-        })
+        .spawn(move || run_gif_stream_worker(rx, output, font_set, scale, baseline, cfg))
         .expect("failed to spawn gif stream worker");
 
     Ok(GifStreamHandle { tx, join })
@@ -278,14 +243,14 @@ pub fn spawn_gif_stream(
 
 pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<()> {
     let stream = spawn_gif_stream(
-        ViewportConfig {
-            cols: rec.cols,
-            rows: rec.rows,
-            framerate: rec.framerate,
-            cell_width_px: rec.cell_width_px,
-            cell_height_px: rec.cell_height_px,
-            frame_style: rec.frame_style,
-        },
+        ViewportConfig::new(
+            rec.cols,
+            rec.rows,
+            rec.framerate,
+            rec.cell_width_px,
+            rec.cell_height_px,
+            rec.frame_style,
+        ),
         opts.clone(),
         out.to_path_buf(),
     )?;
@@ -308,25 +273,11 @@ pub fn render_png_frame(frame: &RawFrame, opts: &RenderOptions, out: &Path) -> R
     let primary = &font_set.fonts[font_set.regular[0]];
     let (scale, cell_w, cell_h, baseline) =
         css_cell_metrics(primary, opts.font_size, opts.line_height);
+    let cfg = ViewportConfig::new(frame.cols, frame.rows, 0, cell_w, cell_h, opts.frame_style);
     let mut glyph_cache = GlyphCache::new();
-    let buf = rasterize_raw_frame(
-        frame,
-        &font_set,
-        scale,
-        cell_w,
-        cell_h,
-        baseline,
-        opts.frame_style,
-        &mut glyph_cache,
-    );
-    let layout = layout_metrics(frame.cols, frame.rows, cell_w, cell_h, opts.frame_style);
-    lodepng::encode24_file(
-        out,
-        &buf,
-        layout.canvas_w as usize,
-        layout.canvas_h as usize,
-    )
-    .with_context(|| format!("encoding {}", out.display()))
+    let buf = rasterize_raw_frame(frame, &font_set, scale, baseline, cfg, &mut glyph_cache);
+    lodepng::encode24_file(out, &buf, cfg.canvas_w as usize, cfg.canvas_h as usize)
+        .with_context(|| format!("encoding {}", out.display()))
 }
 
 /// Convert RGB (3-byte) to RGBA (4-byte) with full alpha.
@@ -349,15 +300,12 @@ fn run_gif_stream_worker(
     out: PathBuf,
     font_set: FontSet,
     scale: PxScale,
-    cell_w: u32,
-    cell_h: u32,
     baseline: u32,
-    frame_style: FrameStyle,
-    layout: LayoutMetrics,
+    cfg: ViewportConfig,
 ) -> Result<()> {
     let (collector, writer) = gifski::new(Settings {
-        width: Some(layout.canvas_w),
-        height: Some(layout.canvas_h),
+        width: Some(cfg.canvas_w),
+        height: Some(cfg.canvas_h),
         quality: 100,
         fast: false,
         repeat: gifski::Repeat::Infinite,
@@ -388,16 +336,7 @@ fn run_gif_stream_worker(
         .expect("failed to spawn gif writer thread");
 
     while let Ok(frame) = rx.recv() {
-        let buf = rasterize_raw_frame(
-            &frame,
-            &font_set,
-            scale,
-            cell_w,
-            cell_h,
-            baseline,
-            frame_style,
-            &mut glyph_cache,
-        );
+        let buf = rasterize_raw_frame(&frame, &font_set, scale, baseline, cfg, &mut glyph_cache);
 
         last_seen_t_ms = frame.t_ms;
 
@@ -406,8 +345,7 @@ fn run_gif_stream_worker(
             // frame at t=0. Emit the very first captured frame unconditionally
             // so leading sleeps are represented correctly.
             let rgba = rgb_to_rgba(&buf);
-            let frame_img =
-                imgref::ImgVec::new(rgba, layout.canvas_w as usize, layout.canvas_h as usize);
+            let frame_img = imgref::ImgVec::new(rgba, cfg.canvas_w as usize, cfg.canvas_h as usize);
             collector
                 .add_frame_rgba(frame_index, frame_img, 0.0)
                 .context("add first frame to gifski")?;
@@ -422,8 +360,7 @@ fn run_gif_stream_worker(
         }
 
         let rgba = rgb_to_rgba(&buf);
-        let frame_img =
-            imgref::ImgVec::new(rgba, layout.canvas_w as usize, layout.canvas_h as usize);
+        let frame_img = imgref::ImgVec::new(rgba, cfg.canvas_w as usize, cfg.canvas_h as usize);
         collector
             .add_frame_rgba(frame_index, frame_img, frame.t_ms as f64 / 1000.0)
             .context("add frame to gifski")?;
@@ -440,8 +377,7 @@ fn run_gif_stream_worker(
         && let Some(buf) = prev_buf.as_ref()
     {
         let rgba = rgb_to_rgba(buf);
-        let frame_img =
-            imgref::ImgVec::new(rgba, layout.canvas_w as usize, layout.canvas_h as usize);
+        let frame_img = imgref::ImgVec::new(rgba, cfg.canvas_w as usize, cfg.canvas_h as usize);
         collector
             .add_frame_rgba(frame_index, frame_img, last_seen_t_ms as f64 / 1000.0)
             .context("add trailing delay frame to gifski")?;
@@ -459,43 +395,42 @@ fn rasterize_raw_frame(
     frame: &RawFrame,
     font_set: &FontSet,
     scale: PxScale,
-    cell_w: u32,
-    cell_h: u32,
     baseline: u32,
-    frame_style: FrameStyle,
+    cfg: ViewportConfig,
     glyph_cache: &mut GlyphCache,
 ) -> Vec<u8> {
-    let layout = layout_metrics(frame.cols, frame.rows, cell_w, cell_h, frame_style);
-    let mut buf = vec![0u8; (layout.canvas_w * layout.canvas_h * 3) as usize];
+    let cell_w = cfg.cell_width_px.max(1);
+    let cell_h = cfg.cell_height_px.max(1);
+    let mut buf = vec![0u8; (cfg.canvas_w * cfg.canvas_h * 3) as usize];
 
     fill_rect(
         &mut buf,
-        layout.canvas_w,
+        cfg.canvas_w,
         0,
         0,
-        layout.canvas_w,
-        layout.canvas_h,
-        frame_style.margin_fill,
+        cfg.canvas_w,
+        cfg.canvas_h,
+        cfg.frame_style.margin_fill,
     );
     fill_rect(
         &mut buf,
-        layout.canvas_w,
-        layout.frame_x,
-        layout.frame_y,
-        layout.frame_w,
-        layout.frame_h,
+        cfg.canvas_w,
+        cfg.frame_x,
+        cfg.frame_y,
+        cfg.frame_w,
+        cfg.frame_h,
         frame.default_bg,
     );
-    if frame_style.window_bar.enabled() {
-        draw_window_bar(&mut buf, layout.canvas_w, layout, frame_style.window_bar);
+    if cfg.frame_style.window_bar.enabled() {
+        draw_window_bar(&mut buf, cfg.canvas_w, cfg);
     }
 
     for row in 0..frame.rows {
         for col in 0..frame.cols {
             let idx = row as usize * frame.cols as usize + col as usize;
             let cell = &frame.cells[idx];
-            let x = layout.content_x + col as u32 * cell_w;
-            let y = layout.content_y + row as u32 * cell_h;
+            let x = cfg.content_x + col as u32 * cell_w;
+            let y = cfg.content_y + row as u32 * cell_h;
 
             let (mut fg, mut bg) = (cell.fg, cell.bg);
             if cell.flags & style_flags::INVERSE != 0 {
@@ -503,7 +438,7 @@ fn rasterize_raw_frame(
             }
 
             if bg != frame.default_bg || cell.flags & style_flags::INVERSE != 0 {
-                fill_rect(&mut buf, layout.canvas_w, x, y, cell_w, cell_h, bg);
+                fill_rect(&mut buf, cfg.canvas_w, x, y, cell_w, cell_h, bg);
             }
 
             if cell.text.is_empty() {
@@ -567,10 +502,10 @@ fn rasterize_raw_frame(
                                 continue;
                             }
                             let (px, py) = (px as u32, py as u32);
-                            if px >= layout.canvas_w || py >= layout.canvas_h {
+                            if px >= cfg.canvas_w || py >= cfg.canvas_h {
                                 continue;
                             }
-                            blend_pixel(&mut buf, layout.canvas_w, px, py, fg, coverage);
+                            blend_pixel(&mut buf, cfg.canvas_w, px, py, fg, coverage);
                         }
                     }
                 }
@@ -581,91 +516,41 @@ fn rasterize_raw_frame(
 
             if cell.flags & style_flags::UNDERLINE != 0 {
                 let uy = y + cell_h.saturating_sub(2);
-                fill_rect(&mut buf, layout.canvas_w, x, uy, cell_w, 1, fg);
+                fill_rect(&mut buf, cfg.canvas_w, x, uy, cell_w, 1, fg);
             }
         }
     }
 
     if let Some((cx, cy)) = frame.cursor {
-        let x = layout.content_x + cx as u32 * cell_w;
-        let y = layout.content_y + cy as u32 * cell_h;
-        invert_rect(&mut buf, layout.canvas_w, x, y, cell_w, cell_h);
+        let x = cfg.content_x + cx as u32 * cell_w;
+        let y = cfg.content_y + cy as u32 * cell_h;
+        invert_rect(&mut buf, cfg.canvas_w, x, y, cell_w, cell_h);
     }
 
-    if frame_style.border_radius_px > 0 {
+    if cfg.frame_style.border_radius_px > 0 {
         mask_outside_rounded_rect(
             &mut buf,
-            layout.canvas_w,
-            layout,
-            frame_style.border_radius_px,
-            frame_style.margin_fill,
+            cfg.canvas_w,
+            cfg,
+            cfg.frame_style.border_radius_px,
+            cfg.frame_style.margin_fill,
         );
     }
 
     buf
 }
 
-fn layout_metrics(
-    cols: u16,
-    rows: u16,
-    cell_w: u32,
-    cell_h: u32,
-    frame_style: FrameStyle,
-) -> LayoutMetrics {
-    let bar_h = if frame_style.window_bar.enabled() {
-        frame_style.window_bar_size_px
-    } else {
-        0
-    };
-    let grid_frame_w = cols as u32 * cell_w + frame_style.padding_px * 2;
-    let grid_frame_h = rows as u32 * cell_h + frame_style.padding_px * 2 + bar_h;
-    let canvas_w = frame_style
-        .canvas_width_px
-        .unwrap_or(grid_frame_w + frame_style.margin_px * 2)
-        .max(1);
-    let canvas_h = frame_style
-        .canvas_height_px
-        .unwrap_or(grid_frame_h + frame_style.margin_px * 2)
-        .max(1);
-    let frame_w = canvas_w.saturating_sub(frame_style.margin_px * 2).max(1);
-    let frame_h = canvas_h.saturating_sub(frame_style.margin_px * 2).max(1);
-
-    // Centre the cell grid inside the padded content area. If the user-supplied
-    // canvas size leaves a few stray pixels after the grid (because
-    // `canvas_w - 2*(padding+margin)` is not an exact multiple of cell_w),
-    // split them evenly between the left/right (and top/bottom) padding so the
-    // visible margins are symmetric — matching VHS, which centres the
-    // recorded terminal inside its frame with ffmpeg `pad=...(ow-iw)/2`.
-    // let inner_w = frame_w.saturating_sub(frame_style.padding_px * 2);
-    // let inner_h = frame_h.saturating_sub(frame_style.padding_px * 2 + bar_h);
-    // let grid_w = (cols as u32 * cell_w).min(inner_w);
-    // let grid_h = (rows as u32 * cell_h).min(inner_h);
-    // let extra_x = inner_w.saturating_sub(grid_w) / 2;
-    // let extra_y = inner_h.saturating_sub(grid_h) / 2;
-
-    LayoutMetrics {
-        canvas_w,
-        canvas_h,
-        frame_x: frame_style.margin_px,
-        frame_y: frame_style.margin_px,
-        frame_w,
-        frame_h,
-        bar_h,
-        content_x: frame_style.margin_px + frame_style.padding_px,
-        content_y: frame_style.margin_px + bar_h + frame_style.padding_px,
-    }
-}
-
-fn draw_window_bar(buf: &mut [u8], w: u32, layout: LayoutMetrics, style: crate::WindowBarStyle) {
-    let bar_h = layout.bar_h;
+fn draw_window_bar(buf: &mut [u8], w: u32, cfg: ViewportConfig) {
+    let bar_h = cfg.bar_h;
     let (radius, gap) = window_bar_dot_metrics(bar_h);
     let dots_w = radius * 2 * 3 + gap * 2;
+    let style = cfg.frame_style.window_bar;
     let start_x = if style.align_right() {
-        layout.frame_x + layout.frame_w.saturating_sub(dots_w + gap)
+        cfg.frame_x + cfg.frame_w.saturating_sub(dots_w + gap)
     } else {
-        layout.frame_x + gap
+        cfg.frame_x + gap
     };
-    let cy = layout.frame_y + bar_h / 2;
+    let cy = cfg.frame_y + bar_h / 2;
     for (idx, color) in [[255, 95, 86], [255, 189, 46], [39, 201, 63]]
         .iter()
         .enumerate()
@@ -729,14 +614,14 @@ fn draw_circle_outline(
 fn mask_outside_rounded_rect(
     buf: &mut [u8],
     w: u32,
-    layout: LayoutMetrics,
+    cfg: ViewportConfig,
     radius: u32,
     fill: [u8; 3],
 ) {
-    let radius = radius.min(layout.frame_w / 2).min(layout.frame_h / 2) as i64;
-    for y in layout.frame_y..layout.frame_y + layout.frame_h {
-        for x in layout.frame_x..layout.frame_x + layout.frame_w {
-            if !inside_rounded_rect(x, y, layout, radius) {
+    let radius = radius.min(cfg.frame_w / 2).min(cfg.frame_h / 2) as i64;
+    for y in cfg.frame_y..cfg.frame_y + cfg.frame_h {
+        for x in cfg.frame_x..cfg.frame_x + cfg.frame_w {
+            if !inside_rounded_rect(x, y, cfg, radius) {
                 let i = ((y * w + x) * 3) as usize;
                 if i + 2 < buf.len() {
                     buf[i] = fill[0];
@@ -748,16 +633,16 @@ fn mask_outside_rounded_rect(
     }
 }
 
-fn inside_rounded_rect(x: u32, y: u32, layout: LayoutMetrics, radius: i64) -> bool {
+fn inside_rounded_rect(x: u32, y: u32, cfg: ViewportConfig, radius: i64) -> bool {
     if radius == 0 {
         return true;
     }
     let x = x as i64;
     let y = y as i64;
-    let left = layout.frame_x as i64;
-    let top = layout.frame_y as i64;
-    let right = (layout.frame_x + layout.frame_w - 1) as i64;
-    let bottom = (layout.frame_y + layout.frame_h - 1) as i64;
+    let left = cfg.frame_x as i64;
+    let top = cfg.frame_y as i64;
+    let right = (cfg.frame_x + cfg.frame_w - 1) as i64;
+    let bottom = (cfg.frame_y + cfg.frame_h - 1) as i64;
     if (x >= left + radius && x <= right - radius) || (y >= top + radius && y <= bottom - radius) {
         return true;
     }
