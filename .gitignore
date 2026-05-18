@@ -6,4 +6,5 @@ docker/build/
 *.code-workspace
 .vscode/
 assets/libghostty/
-scripts/compare-out
+scripts/compare-out/
+_vhs_work/
