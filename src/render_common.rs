@@ -94,10 +94,16 @@ pub struct RenderOptions {
     /// Multiplier applied to the font's bounding-box height to produce the
     /// per-cell pixel height. Mirrors VHS / xterm.js `lineHeight`. A value
     /// of `1.0` makes cells exactly one bounding-box height tall.
+    /// // lineHeight — MULTIPLIER on char height:
+    /// this.dimensions.device.cell.height =
+    ///     Math.floor(this.dimensions.device.char.height * this._optionsService.rawOptions.lineHeight);
     pub line_height: f32,
     /// Extra pixels added to each cell's width. Mirrors VHS / xterm.js
     /// `letterSpacing`. The default `1.0` adds one pixel of trailing space
     /// per column, matching the VHS default.
+    /// // letterSpacing — ADDITIVE pixels added to char advance:
+    /// this.dimensions.device.cell.width =
+    ///     this.dimensions.device.char.width + Math.round(this._optionsService.rawOptions.letterSpacing);
     pub letter_spacing: f32,
     pub frame_style: FrameStyle,
 }
