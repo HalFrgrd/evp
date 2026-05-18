@@ -489,7 +489,7 @@ dependencies = [
 
 [[package]]
 name = "evp"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "ab_glyph",
  "anyhow",
