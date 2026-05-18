@@ -9,6 +9,9 @@ on:
     paths:
       - .github/workflows/copilot-setup-steps.yml
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   copilot-setup-steps:
     runs-on: ubuntu-latest

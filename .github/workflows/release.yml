@@ -16,6 +16,9 @@ on:
         description: "Tag name to attach the release to (e.g. v0.2.0)"
         required: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 permissions:
   contents: write
 
