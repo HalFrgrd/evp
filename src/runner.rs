@@ -36,6 +36,7 @@ use crate::{
     keys::KeyTranslator,
     pty::{Pty, PtyError, PtySize},
     recording::{CellSnap, RawFrame, style_flags},
+    render_gif::measure_cell_px,
     script::{Event, KeyAction, NamedKey, Script, Settings, WaitScope},
 };
 
@@ -104,17 +105,11 @@ pub struct RunOptions {
 }
 
 pub fn derive_options(s: &Settings) -> RunOptions {
-    // Approximate cell metrics used to compute `cols`/`rows` and to give
-    // libghostty a non-zero pixel size for pixel-based queries.
-    //
-    // The GIF/SVG renderers later measure the cell width/height precisely
-    // from the loaded font using CSS-equivalent scaling (advance·font_size /
-    // upem), but we mirror that formula here so the column/row count picked
-    // here lines up with the grid the renderer will draw. JetBrains Mono —
-    // the embedded default and also VHS's default — has an advance ratio
-    // of `0.6 em`, matching xterm.js's behaviour.
-    let cell_w_px = (s.font_size * 0.6).round().max(1.0) as u32;
-    let cell_h_px = (s.font_size * s.line_height).round().max(1.0) as u32;
+    // Measure cell dimensions from the actual font using the same CSS
+    // em-square semantics as the GIF/SVG renderers, so the cols/rows we
+    // report to libghostty match the grid the renderer will draw.
+    let (cell_w_px, cell_h_px) =
+        measure_cell_px(s.font_family.as_deref(), s.font_size, s.line_height);
     let frame_style = FrameStyle {
         canvas_width_px: Some(s.width),
         canvas_height_px: Some(s.height),

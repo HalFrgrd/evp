@@ -1,0 +1,3 @@
+Type@1ms "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKL"
+Enter
+Sleep 3s

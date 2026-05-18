@@ -73,7 +73,7 @@ jobs:
               stress_test-out/evp.report.txt
 
       - name: Build VHS image
-        run: docker build -t vhs-stress -f vhs.Dockerfile .
+        run: docker build -t vhs-stress -f docker/vhs.Dockerfile .
 
       - name: Run VHS stress test
         run: |

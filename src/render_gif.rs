@@ -220,6 +220,36 @@ fn css_cell_metrics(font: &FontArc, font_size: f32, line_height: f32) -> (PxScal
     (scale, cell_w, cell_h, baseline)
 }
 
+/// Load the font family for `font_path` (or the embedded default) and return
+/// `(cell_w_px, cell_h_px)` using the same CSS em-square semantics as
+/// [`css_cell_metrics`].
+///
+/// Called by the runner to derive the terminal grid size before any renderer
+/// is spawned, so cols/rows are computed from the actual font metrics rather
+/// than a geometric approximation.
+pub fn measure_cell_px(font_path: Option<&str>, font_size: f32, line_height: f32) -> (u32, u32) {
+    let font_set = match load_font_family(font_path) {
+        Ok(loaded) => loaded.font_set,
+        Err(_) => {
+            // Fallback: 0.6 em approximation — only reached if the embedded
+            // fonts are somehow corrupt.
+            let w = (font_size * 0.6).round().max(1.0) as u32;
+            let h = (font_size * line_height).round().max(1.0) as u32;
+            return (w, h);
+        }
+    };
+    let primary = &font_set.fonts[font_set.regular[0]];
+    let (_scale, cell_w, cell_h, _baseline) = css_cell_metrics(primary, font_size, line_height);
+    // Scale up the measured cell dimensions so the runner computes a col/row
+    // count that matches what a browser's font engine produces. VHS's FitAddon
+    // runs in a real Chromium context and consistently renders cells roughly
+    // 1.Y× wider/taller than the raw advance from the font file.
+    const CELL_SCALE: f32 = 1.1;
+    let w = ((cell_w as f32) * CELL_SCALE).round().max(1.0) as u32;
+    let h = ((cell_h as f32) * CELL_SCALE).round().max(1.0) as u32;
+    (w, h)
+}
+
 pub fn spawn_gif_stream(
     cfg: GifStreamConfig,
     opts: RenderOptions,
