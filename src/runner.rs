@@ -110,7 +110,7 @@ pub fn derive_options(s: &Settings) -> ViewportConfig {
     // em-square semantics as the GIF/SVG renderers, so the cols/rows we
     // report to libghostty match the grid the renderer will draw.
     let (cell_w_px, cell_h_px) =
-        measure_cell_px(s.font_family.as_deref(), s.font_size, s.line_height);
+        measure_cell_px(s.font_family.as_deref(), s.font_size, s.line_height, s.letter_spacing);
     let frame_style = FrameStyle {
         canvas_width_px: Some(s.width),
         canvas_height_px: Some(s.height),
@@ -714,6 +714,7 @@ fn write_screenshot(frame: &RawFrame, script: &Script, path: &std::path::Path) -
         font_path: script.settings.font_family.clone(),
         font_size: script.settings.font_size,
         line_height: script.settings.line_height,
+        letter_spacing: script.settings.letter_spacing,
         frame_style: FrameStyle {
             canvas_width_px: Some(script.settings.width),
             canvas_height_px: Some(script.settings.height),
@@ -1035,14 +1036,15 @@ mod tests {
     fn vhs_defaults_produce_expected_layout() {
         let opts = derive_options(&Settings::default());
 
-        // JetBrains Mono advance ratio (0.6 em) → cell_w = round(22 * 0.6) = 13.
-        // cell_h = round(22 * 1.0) = 22.
-        // cols = (1200 - 2*60) / 13 = 1080 / 13 = 83.
-        // rows = (600  - 2*60) / 22 = 480  / 22 = 21.
-        assert_eq!(opts.cell_width_px, 13);
-        assert_eq!(opts.cell_height_px, 22);
-        assert_eq!(opts.cols, 83);
-        assert_eq!(opts.rows, 21);
+        // JetBrains Mono at 22px, letterSpacing=1.0, lineHeight=1.0:
+        //   char_advance ≈ 13.2 → cell_w = round(13.2 + 1.0) = 14
+        //   bbox_h (ascent - descent) ≈ 29.x → cell_h = ceil(29.x * 1.0) = 30
+        //   cols = floor(1080 / 14) = 77
+        //   rows = floor(480  / 30) = 16
+        assert_eq!(opts.cell_width_px, 14);
+        assert_eq!(opts.cell_height_px, 30);
+        assert_eq!(opts.cols, 77);
+        assert_eq!(opts.rows, 16);
         assert_eq!(opts.frame_style.canvas_width_px, Some(1200));
         assert_eq!(opts.frame_style.canvas_height_px, Some(600));
     }

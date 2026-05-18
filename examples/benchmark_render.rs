@@ -44,6 +44,7 @@ fn main() -> anyhow::Result<()> {
         font_path: None,
         font_size: 22.0,
         line_height: 1.0,
+        letter_spacing: 1.0,
         frame_style: FrameStyle::default(),
     };
 

@@ -315,7 +315,7 @@ fn apply_set(rest: &[String], s: &mut Settings) -> Result<()> {
         // tape author isn't misled into thinking these are taking effect.
         // See README ("VHS feature parity") for the up-to-date matrix.
         "Theme" => s.theme = Theme::from_spec(&set_value(rest, key)?)?,
-        "LetterSpacing" => bail!(unsupported_set_msg("LetterSpacing")),
+        "LetterSpacing" => s.letter_spacing = set_scalar(rest, key)?.parse()?,
         "CursorBlink" => s.cursor_blink = set_scalar(rest, key)?.parse()?,
         "LoopOffset" => bail!(unsupported_set_msg("LoopOffset")),
         other => bail!("unknown Set key: {other}"),
@@ -804,7 +804,7 @@ mod tests {
 
     #[test]
     fn unsupported_set_keys_bail() {
-        for key in ["LetterSpacing", "LoopOffset"] {
+        for key in ["LoopOffset"] {
             let src = format!("Output out.gif\nSet {key} something\n");
             let err = parse(&src).unwrap_err();
             let msg = format!("{err:#}");

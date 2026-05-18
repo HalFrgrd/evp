@@ -91,11 +91,14 @@ impl ViewportConfig {
 pub struct RenderOptions {
     pub font_path: Option<String>,
     pub font_size: f32,
-    /// Multiplier applied to `font_size` to produce the per-cell pixel
-    /// height. Mirrors VHS / xterm.js `lineHeight`. A value of `1.0` makes
-    /// cells exactly `font_size` pixels tall, matching xterm.js's CSS
-    /// semantics.
+    /// Multiplier applied to the font's bounding-box height to produce the
+    /// per-cell pixel height. Mirrors VHS / xterm.js `lineHeight`. A value
+    /// of `1.0` makes cells exactly one bounding-box height tall.
     pub line_height: f32,
+    /// Extra pixels added to each cell's width. Mirrors VHS / xterm.js
+    /// `letterSpacing`. The default `1.0` adds one pixel of trailing space
+    /// per column, matching the VHS default.
+    pub letter_spacing: f32,
     pub frame_style: FrameStyle,
 }
 
@@ -105,6 +108,7 @@ impl Default for RenderOptions {
             font_path: None,
             font_size: 22.0,
             line_height: 1.0,
+            letter_spacing: 1.0,
             frame_style: FrameStyle::default(),
         }
     }
