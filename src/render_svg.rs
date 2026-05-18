@@ -563,6 +563,19 @@ fn layout_metrics(
         .max(1);
     let frame_w = canvas_w.saturating_sub(frame_style.margin_px * 2).max(1);
     let frame_h = canvas_h.saturating_sub(frame_style.margin_px * 2).max(1);
+
+    // Centre the cell grid inside the padded content area so leftover pixels
+    // (when `canvas_w - 2*(padding+margin)` is not a multiple of cell_w) are
+    // split evenly between left/right and top/bottom — matching VHS, which
+    // centres the recorded terminal inside its frame via ffmpeg
+    // `pad=...(ow-iw)/2`.
+    let inner_w = frame_w.saturating_sub(frame_style.padding_px * 2);
+    let inner_h = frame_h.saturating_sub(frame_style.padding_px * 2 + bar_h);
+    let grid_w = (cols as u32 * cell_w).min(inner_w);
+    let grid_h = (rows as u32 * cell_h).min(inner_h);
+    let extra_x = inner_w.saturating_sub(grid_w) / 2;
+    let extra_y = inner_h.saturating_sub(grid_h) / 2;
+
     LayoutMetrics {
         canvas_w,
         canvas_h,
@@ -571,8 +584,8 @@ fn layout_metrics(
         frame_w,
         frame_h,
         bar_h,
-        content_x: frame_style.margin_px + frame_style.padding_px,
-        content_y: frame_style.margin_px + bar_h + frame_style.padding_px,
+        content_x: frame_style.margin_px + frame_style.padding_px + extra_x,
+        content_y: frame_style.margin_px + bar_h + frame_style.padding_px + extra_y,
     }
 }
 

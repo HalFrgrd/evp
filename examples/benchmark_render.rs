@@ -43,6 +43,7 @@ fn main() -> anyhow::Result<()> {
     let render_opts = crate::RenderOptions {
         font_path: None,
         font_size: 22.0,
+        line_height: 1.0,
         frame_style: FrameStyle::default(),
     };
 

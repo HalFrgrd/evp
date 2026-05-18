@@ -172,6 +172,54 @@ impl GifStreamHandle {
     }
 }
 
+/// Compute cell metrics that mirror VHS / xterm.js CSS semantics.
+///
+/// xterm.js's `fontSize: N` sets the CSS em-square (i.e. `units_per_em` worth
+/// of design units) to `N` pixels. The horizontal advance of a monospace
+/// glyph is then `advance_units * N / upem` — for JetBrains Mono at `N=22`
+/// this gives `600 * 22 / 1000 = 13.2 px`.
+///
+/// `ab_glyph::PxScale::from(N)` instead scales so that the font's
+/// `ascent - descent` (NOT upem) equals `N`. For JetBrains Mono that means
+/// the same `N=22` produces only `600 * 22 / 1320 ≈ 10 px` of advance —
+/// noticeably narrower than VHS, which is what made the evp demos look
+/// "zoomed out" compared to the upstream VHS recordings.
+///
+/// This helper picks a `PxScale` such that one em-square equals `font_size`
+/// pixels, and returns:
+///   * the `PxScale` to feed to ab_glyph for rasterisation,
+///   * `cell_w`: the integer per-cell horizontal advance,
+///   * `cell_h`: `round(font_size * line_height)` to match xterm.js's
+///     `lineHeight`-driven cell height,
+///   * `baseline`: the baseline offset from the top of the cell, computed
+///     from the font's ascent in CSS pixels.
+fn css_cell_metrics(font: &FontArc, font_size: f32, line_height: f32) -> (PxScale, u32, u32, u32) {
+    // Fall back to the font's intrinsic height if upem is missing.
+    let upem = font
+        .units_per_em()
+        .unwrap_or_else(|| font.height_unscaled());
+    let height_units = font.height_unscaled().max(1.0);
+    // ab_glyph: scaled_metric = unscaled_metric * scale.x / height_units. To
+    // make an em-square render at exactly `font_size` pixels we need
+    // `scale.x = font_size * height_units / upem`.
+    let px_scale = font_size * height_units / upem;
+    let scale = PxScale::from(px_scale);
+    let scaled = font.as_scaled(scale);
+    let cell_w = scaled
+        .h_advance(font.glyph_id('M'))
+        .ceil()
+        .max(1.0) as u32;
+    let cell_h = (font_size * line_height).round().max(1.0) as u32;
+    // Place the baseline at the font's ascent expressed in CSS pixels. For
+    // most monospace fonts this fits inside the cell; if the ascent is
+    // slightly larger than `cell_h` the glyph clips at the top exactly the
+    // way xterm.js / browsers handle it.
+    let baseline = (font_size * font.ascent_unscaled() / upem)
+        .round()
+        .max(0.0) as u32;
+    (scale, cell_w, cell_h, baseline)
+}
+
 pub fn spawn_gif_stream(
     cfg: GifStreamConfig,
     opts: RenderOptions,
@@ -181,12 +229,9 @@ pub fn spawn_gif_stream(
     debug!(font = %loaded.description, "using font for gif streaming");
 
     let font_set = loaded.font_set;
-    let scale = PxScale::from(opts.font_size);
     let primary = &font_set.fonts[font_set.regular[0]];
-    let scaled = primary.as_scaled(scale);
-    let cell_w = scaled.h_advance(primary.glyph_id('M')).ceil().max(1.0) as u32;
-    let cell_h = (scaled.height() + scaled.line_gap()).ceil().max(1.0) as u32;
-    let baseline = scaled.ascent().ceil() as u32;
+    let (scale, cell_w, cell_h, baseline) =
+        css_cell_metrics(primary, opts.font_size, opts.line_height);
     let layout = layout_metrics(cfg.cols, cfg.rows, cell_w, cell_h, opts.frame_style);
 
     let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) =
@@ -220,6 +265,7 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<(
         RenderOptions {
             font_path: opts.font_path.clone(),
             font_size: opts.font_size,
+            line_height: opts.line_height,
             frame_style: rec.frame_style,
         },
         out.to_path_buf(),
@@ -240,12 +286,9 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<(
 pub fn render_png_frame(frame: &RawFrame, opts: &RenderOptions, out: &Path) -> Result<()> {
     let loaded = load_font_family(opts.font_path.as_deref())?;
     let font_set = loaded.font_set;
-    let scale = PxScale::from(opts.font_size);
     let primary = &font_set.fonts[font_set.regular[0]];
-    let scaled = primary.as_scaled(scale);
-    let cell_w = scaled.h_advance(primary.glyph_id('M')).ceil().max(1.0) as u32;
-    let cell_h = (scaled.height() + scaled.line_gap()).ceil().max(1.0) as u32;
-    let baseline = scaled.ascent().ceil() as u32;
+    let (scale, cell_w, cell_h, baseline) =
+        css_cell_metrics(primary, opts.font_size, opts.line_height);
     let mut glyph_cache = GlyphCache::new();
     let buf = rasterize_raw_frame(
         frame,
@@ -567,6 +610,20 @@ fn layout_metrics(
         .max(1);
     let frame_w = canvas_w.saturating_sub(frame_style.margin_px * 2).max(1);
     let frame_h = canvas_h.saturating_sub(frame_style.margin_px * 2).max(1);
+
+    // Centre the cell grid inside the padded content area. If the user-supplied
+    // canvas size leaves a few stray pixels after the grid (because
+    // `canvas_w - 2*(padding+margin)` is not an exact multiple of cell_w),
+    // split them evenly between the left/right (and top/bottom) padding so the
+    // visible margins are symmetric — matching VHS, which centres the
+    // recorded terminal inside its frame with ffmpeg `pad=...(ow-iw)/2`.
+    let inner_w = frame_w.saturating_sub(frame_style.padding_px * 2);
+    let inner_h = frame_h.saturating_sub(frame_style.padding_px * 2 + bar_h);
+    let grid_w = (cols as u32 * cell_w).min(inner_w);
+    let grid_h = (rows as u32 * cell_h).min(inner_h);
+    let extra_x = inner_w.saturating_sub(grid_w) / 2;
+    let extra_y = inner_h.saturating_sub(grid_h) / 2;
+
     LayoutMetrics {
         canvas_w,
         canvas_h,
@@ -575,8 +632,8 @@ fn layout_metrics(
         frame_w,
         frame_h,
         bar_h,
-        content_x: frame_style.margin_px + frame_style.padding_px,
-        content_y: frame_style.margin_px + bar_h + frame_style.padding_px,
+        content_x: frame_style.margin_px + frame_style.padding_px + extra_x,
+        content_y: frame_style.margin_px + bar_h + frame_style.padding_px + extra_y,
     }
 }
 
