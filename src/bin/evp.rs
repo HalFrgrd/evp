@@ -1,10 +1,9 @@
 //! `evp` binary entry point. All real work lives in the library crate
 //! (`evp::*`); this file is the thinnest possible CLI shim around it.
 
-use std::{io, path::PathBuf, process::ExitCode, time::Instant};
+use std::{io, path::PathBuf, process::ExitCode, time::{Instant, SystemTime}};
 
 use anyhow::{Context, Result, bail};
-use chrono::Utc;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{Shell as CompletionShell, generate};
 use tracing::{debug, error, info};
@@ -234,8 +233,9 @@ struct Uptime(Instant);
 impl tracing_subscriber::fmt::time::FormatTime for Uptime {
     fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
         let elapsed = self.0.elapsed();
-        let micros = elapsed.as_micros();
-        write!(w, "{:4}.{:03}ms", micros / 1000, micros % 1000)
+        let secs = elapsed.as_secs();
+        let micros = elapsed.subsec_micros();
+        write!(w, "{:03}.{:06}s", secs, micros)
     }
 }
 
@@ -252,7 +252,7 @@ fn init_tracing(cli: &Cli, start: Instant) {
         .with_timer(Uptime(start))
         .init();
     info!(
-        start_time = %Utc::now().format("%Y-%m-%d %H:%M:%S%.6f UTC"),
+        start_time = %humantime::format_rfc3339_micros(SystemTime::now()),
         %filter,
         "initialising tracing"
     );
