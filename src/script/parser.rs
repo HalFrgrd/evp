@@ -468,55 +468,8 @@ fn parse_key_spec(s: &str) -> Result<KeySpec> {
         };
         return Ok(KeySpec { key, mods });
     }
-    let key = if last.eq_ignore_ascii_case("enter") || last.eq_ignore_ascii_case("return") {
-        NamedKey::Enter
-    } else if last.eq_ignore_ascii_case("escape") || last.eq_ignore_ascii_case("esc") {
-        NamedKey::Escape
-    } else if last.eq_ignore_ascii_case("tab") {
-        NamedKey::Tab
-    } else if last.eq_ignore_ascii_case("backspace") {
-        NamedKey::Backspace
-    } else if last.eq_ignore_ascii_case("delete") {
-        NamedKey::Delete
-    } else if last.eq_ignore_ascii_case("insert") {
-        NamedKey::Insert
-    } else if last.eq_ignore_ascii_case("space") {
-        NamedKey::Space
-    } else if last.eq_ignore_ascii_case("up") {
-        NamedKey::Up
-    } else if last.eq_ignore_ascii_case("down") {
-        NamedKey::Down
-    } else if last.eq_ignore_ascii_case("left") {
-        NamedKey::Left
-    } else if last.eq_ignore_ascii_case("right") {
-        NamedKey::Right
-    } else if last.eq_ignore_ascii_case("pageup") {
-        NamedKey::PageUp
-    } else if last.eq_ignore_ascii_case("pagedown") {
-        NamedKey::PageDown
-    } else if last.eq_ignore_ascii_case("home") {
-        NamedKey::Home
-    } else if last.eq_ignore_ascii_case("end") {
-        NamedKey::End
-    } else if last.eq_ignore_ascii_case("scrollup") {
-        NamedKey::ScrollUp
-    } else if last.eq_ignore_ascii_case("scrolldown") {
-        NamedKey::ScrollDown
-    } else if last.eq_ignore_ascii_case("ctrl") || last.eq_ignore_ascii_case("control") {
-        NamedKey::Control
-    } else if last.eq_ignore_ascii_case("alt") || last.eq_ignore_ascii_case("option") {
-        NamedKey::Alt
-    } else if last.eq_ignore_ascii_case("shift") {
-        NamedKey::Shift
-    } else if last.eq_ignore_ascii_case("super")
-        || last.eq_ignore_ascii_case("command")
-        || last.eq_ignore_ascii_case("gui")
-        || last.eq_ignore_ascii_case("windows")
-        || last.eq_ignore_ascii_case("win")
-        || last.eq_ignore_ascii_case("meta")
-        || last.eq_ignore_ascii_case("hyper")
-    {
-        NamedKey::Super
+    let key = if let Some(named_key) = parse_named_key(last) {
+        named_key
     } else {
         // Single character (e.g. `C` in `Ctrl+C`). We keep the character
         // verbatim – translation to the right libghostty `Key` happens in
@@ -529,6 +482,61 @@ fn parse_key_spec(s: &str) -> Result<KeySpec> {
         NamedKey::Char(c)
     };
     Ok(KeySpec { key, mods })
+}
+
+fn parse_named_key(last: &str) -> Option<NamedKey> {
+    if last.eq_ignore_ascii_case("enter") || last.eq_ignore_ascii_case("return") {
+        Some(NamedKey::Enter)
+    } else if last.eq_ignore_ascii_case("escape") || last.eq_ignore_ascii_case("esc") {
+        Some(NamedKey::Escape)
+    } else if last.eq_ignore_ascii_case("tab") {
+        Some(NamedKey::Tab)
+    } else if last.eq_ignore_ascii_case("backspace") {
+        Some(NamedKey::Backspace)
+    } else if last.eq_ignore_ascii_case("delete") {
+        Some(NamedKey::Delete)
+    } else if last.eq_ignore_ascii_case("insert") {
+        Some(NamedKey::Insert)
+    } else if last.eq_ignore_ascii_case("space") {
+        Some(NamedKey::Space)
+    } else if last.eq_ignore_ascii_case("up") {
+        Some(NamedKey::Up)
+    } else if last.eq_ignore_ascii_case("down") {
+        Some(NamedKey::Down)
+    } else if last.eq_ignore_ascii_case("left") {
+        Some(NamedKey::Left)
+    } else if last.eq_ignore_ascii_case("right") {
+        Some(NamedKey::Right)
+    } else if last.eq_ignore_ascii_case("pageup") {
+        Some(NamedKey::PageUp)
+    } else if last.eq_ignore_ascii_case("pagedown") {
+        Some(NamedKey::PageDown)
+    } else if last.eq_ignore_ascii_case("home") {
+        Some(NamedKey::Home)
+    } else if last.eq_ignore_ascii_case("end") {
+        Some(NamedKey::End)
+    } else if last.eq_ignore_ascii_case("scrollup") {
+        Some(NamedKey::ScrollUp)
+    } else if last.eq_ignore_ascii_case("scrolldown") {
+        Some(NamedKey::ScrollDown)
+    } else if last.eq_ignore_ascii_case("ctrl") || last.eq_ignore_ascii_case("control") {
+        Some(NamedKey::Control)
+    } else if last.eq_ignore_ascii_case("alt") || last.eq_ignore_ascii_case("option") {
+        Some(NamedKey::Alt)
+    } else if last.eq_ignore_ascii_case("shift") {
+        Some(NamedKey::Shift)
+    } else if last.eq_ignore_ascii_case("super")
+        || last.eq_ignore_ascii_case("command")
+        || last.eq_ignore_ascii_case("gui")
+        || last.eq_ignore_ascii_case("windows")
+        || last.eq_ignore_ascii_case("win")
+        || last.eq_ignore_ascii_case("meta")
+        || last.eq_ignore_ascii_case("hyper")
+    {
+        Some(NamedKey::Super)
+    } else {
+        None
+    }
 }
 
 fn parse_explicit_key_action(tokens: &[String], action: KeyAction) -> Result<Event> {
