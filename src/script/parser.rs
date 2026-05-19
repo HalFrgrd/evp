@@ -264,15 +264,14 @@ fn parse_line(
         h if h == "Type" || h.starts_with("Type@") => {
             let delay = parse_at_duration(h, "Type", script.settings.typing_speed)?;
             if rest.is_empty() {
-                bail!("Type requires at least one quoted string");
+                bail!("Type requires at least one string");
             }
-            for t in rest {
-                let text = unquote_required(t)?;
-                script.events.push(Event::Type {
-                    text: text.to_string(),
-                    delay,
-                });
-            }
+            let text = rest
+                .iter()
+                .map(|s| unquote(s))
+                .collect::<Vec<_>>()
+                .join(" ");
+            script.events.push(Event::Type { text, delay });
         }
         // Anything else is treated as a key press, possibly with `@delay`
         // and a trailing repeat count.
@@ -621,6 +620,22 @@ fn unquote_required(s: &str) -> Result<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn type_parses_without_quotes() {
+        let src = r#"
+            Output out.gif
+            Type something "other" and finally
+        "#;
+        let s = parse(src).unwrap();
+        assert_eq!(s.events.len(), 1);
+        match &s.events[0] {
+            Event::Type { text, .. } => {
+                assert_eq!(text, "something other and finally");
+            }
+            _ => panic!(),
+        }
+    }
 
     #[test]
     fn parses_basic_script() {

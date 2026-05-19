@@ -246,8 +246,12 @@ pub fn spawn_gif_stream(
 
     let font_set = loaded.font_set;
     let primary = &font_set.fonts[font_set.regular[0]];
-    let (scale, _, _, baseline) =
-        css_cell_metrics(primary, opts.font_size, opts.line_height, opts.letter_spacing);
+    let (scale, _, _, baseline) = css_cell_metrics(
+        primary,
+        opts.font_size,
+        opts.line_height,
+        opts.letter_spacing,
+    );
 
     let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) =
         bounded(RAW_FRAME_CONSUMER_CHANNEL_CAPACITY);
@@ -289,8 +293,12 @@ pub fn render_png_frame(frame: &RawFrame, opts: &RenderOptions, out: &Path) -> R
     let loaded = load_font_family(opts.font_path.as_deref())?;
     let font_set = loaded.font_set;
     let primary = &font_set.fonts[font_set.regular[0]];
-    let (scale, cell_w, cell_h, baseline) =
-        css_cell_metrics(primary, opts.font_size, opts.line_height, opts.letter_spacing);
+    let (scale, cell_w, cell_h, baseline) = css_cell_metrics(
+        primary,
+        opts.font_size,
+        opts.line_height,
+        opts.letter_spacing,
+    );
     let cfg = ViewportConfig::new(frame.cols, frame.rows, 0, cell_w, cell_h, opts.frame_style);
     let mut glyph_cache = GlyphCache::new();
     let buf = rasterize_raw_frame(frame, &font_set, scale, baseline, cfg, &mut glyph_cache);

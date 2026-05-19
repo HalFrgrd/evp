@@ -109,8 +109,12 @@ pub fn derive_options(s: &Settings) -> ViewportConfig {
     // Measure cell dimensions from the actual font using the same CSS
     // em-square semantics as the GIF/SVG renderers, so the cols/rows we
     // report to libghostty match the grid the renderer will draw.
-    let (cell_w_px, cell_h_px) =
-        measure_cell_px(s.font_family.as_deref(), s.font_size, s.line_height, s.letter_spacing);
+    let (cell_w_px, cell_h_px) = measure_cell_px(
+        s.font_family.as_deref(),
+        s.font_size,
+        s.line_height,
+        s.letter_spacing,
+    );
     let frame_style = FrameStyle {
         canvas_width_px: Some(s.width),
         canvas_height_px: Some(s.height),

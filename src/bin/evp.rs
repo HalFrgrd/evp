@@ -1,7 +1,12 @@
 //! `evp` binary entry point. All real work lives in the library crate
 //! (`evp::*`); this file is the thinnest possible CLI shim around it.
 
-use std::{io, path::PathBuf, process::ExitCode, time::{Instant, SystemTime}};
+use std::{
+    io,
+    path::PathBuf,
+    process::ExitCode,
+    time::{Instant, SystemTime},
+};
 
 use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
