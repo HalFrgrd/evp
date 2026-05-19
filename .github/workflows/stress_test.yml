@@ -30,7 +30,7 @@ jobs:
       STRESS_TEST_FPS: 50
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@master
