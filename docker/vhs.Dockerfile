@@ -1,4 +1,4 @@
-FROM ghcr.io/charmbracelet/vhs:v0.10.0
+FROM ghcr.io/charmbracelet/vhs:v0.11.0
 
 ENV HOME=/tmp \
     XDG_CONFIG_HOME=/tmp/chrome-config \
