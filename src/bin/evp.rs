@@ -1,10 +1,9 @@
 //! `evp` binary entry point. All real work lives in the library crate
 //! (`evp::*`); this file is the thinnest possible CLI shim around it.
 
-use std::{io, path::PathBuf, process::ExitCode, time::Instant};
+use std::{io, path::PathBuf, process::ExitCode, time::{Instant, SystemTime}};
 
 use anyhow::{Context, Result, bail};
-use chrono::Utc;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{Shell as CompletionShell, generate};
 use tracing::{debug, error, info};
@@ -127,7 +126,7 @@ fn real_main() -> Result<()> {
         return run_subcommand(command);
     }
 
-    init_tracing(&cli);
+    init_tracing(&cli, evp_start);
     log_build_info_debug();
 
     // Either parse the user's script file, or use the embedded demo.
@@ -227,17 +226,20 @@ fn run_subcommand(command: Commands) -> Result<()> {
     }
 }
 
-/// Custom timer that emits only `HH:MM:SS` (UTC) so the date is not
-/// repeated on every log line.
-struct TimeOnly;
+/// Custom timer that emits the uptime in milliseconds (down to
+/// microseconds) since the program started.
+struct Uptime(Instant);
 
-impl tracing_subscriber::fmt::time::FormatTime for TimeOnly {
+impl tracing_subscriber::fmt::time::FormatTime for Uptime {
     fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
-        write!(w, "{}", Utc::now().format("%H:%M:%S%.6f"))
+        let elapsed = self.0.elapsed();
+        let secs = elapsed.as_secs();
+        let micros = elapsed.subsec_micros();
+        write!(w, "{:03}.{:06}s", secs, micros)
     }
 }
 
-fn init_tracing(cli: &Cli) {
+fn init_tracing(cli: &Cli, start: Instant) {
     let filter = cli
         .log_level
         .map(LogLevel::as_str)
@@ -247,9 +249,13 @@ fn init_tracing(cli: &Cli) {
         });
     tracing_subscriber::fmt()
         .with_env_filter(filter.clone())
-        .with_timer(TimeOnly)
+        .with_timer(Uptime(start))
         .init();
-    info!(date = %Utc::now().format("%Y-%m-%d"), %filter, "initialising tracing");
+    info!(
+        start_time = %humantime::format_rfc3339_micros(SystemTime::now()),
+        %filter,
+        "initialising tracing"
+    );
 }
 
 fn log_build_info_debug() {
