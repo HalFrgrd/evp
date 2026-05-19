@@ -754,10 +754,11 @@ fn read_screen_text(term: &Terminal<'_, '_>, scope: WaitScope) -> Result<String>
     let cols = term.cols()? as u16;
     let mut last_line = String::new();
     let mut all = String::new();
+    let mut line = String::new();
     let mut buf = ['\0'; 8];
 
     for row in 0..rows {
-        let mut line = String::new();
+        line.clear();
         for col in 0..cols {
             let gref = term.grid_ref(Point::Viewport(PointCoordinate { x: col, y: row }))?;
             match gref.graphemes(&mut buf) {
