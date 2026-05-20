@@ -43,11 +43,109 @@ use crate::render_common::is_box_drawing;
 use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
 
+use std::collections::HashSet;
+use base64::prelude::*;
+use subsetter::{subset, GlyphRemapper};
+use ttf_parser::Face;
+use woff2_patched::convert_woff2_to_ttf;
+
 use crate::{
     recording::{RawFrame, Recording, style_flags},
     render_common::{RAW_FRAME_CONSUMER_CHANNEL_CAPACITY, ViewportConfig},
     style::{rgb_hex, window_bar_dot_metrics},
 };
+
+const EMBEDDED_JETBRAINS_NERD_MONO_REGULAR_WOFF2: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/JetBrainsMonoNerdFontMono-Regular.woff2"
+));
+const EMBEDDED_JETBRAINS_NERD_MONO_BOLD_WOFF2: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/JetBrainsMonoNerdFontMono-Bold.woff2"
+));
+const EMBEDDED_JETBRAINS_NERD_MONO_ITALIC_WOFF2: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/JetBrainsMonoNerdFontMono-Italic.woff2"
+));
+const EMBEDDED_JETBRAINS_NERD_MONO_BOLD_ITALIC_WOFF2: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/JetBrainsMonoNerdFontMono-BoldItalic.woff2"
+));
+const EMBEDDED_UNIFONT_UPPER_WOFF2: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/unifont_upper-17.0.04.woff2"));
+const EMBEDDED_UNIFONT_CSUR_WOFF2: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/unifont_csur-17.0.04.woff2"));
+const EMBEDDED_NOTO_SANS_MONO_REGULAR_WOFF2: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/NotoSansMono-Regular.woff2"));
+const EMBEDDED_NOTO_SANS_SYMBOLS2_REGULAR_WOFF2: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/NotoSansSymbols2-Regular.woff2"));
+const EMBEDDED_NOTO_SANS_MONO_CJK_JP_SUBSET_WOFF2: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/NotoSansMonoCJKjp-Subset.woff2"));
+
+fn subset_font(woff2_data: &[u8], chars: &HashSet<char>) -> Option<Vec<u8>> {
+    let ttf = convert_woff2_to_ttf(&mut std::io::Cursor::new(woff2_data)).ok()?;
+    let face = Face::parse(&ttf, 0).ok()?;
+
+    let mut glyphs = Vec::new();
+    glyphs.push(0); // .notdef
+    for c in chars {
+        if let Some(glyph_id) = face.glyph_index(*c) {
+            glyphs.push(glyph_id.0);
+        }
+    }
+
+    glyphs.sort_unstable();
+    glyphs.dedup();
+
+    let mapper = GlyphRemapper::new_from_glyphs_sorted(&glyphs);
+    subset(&ttf, 0, &mapper).ok()
+}
+
+fn generate_style_block(frames: &[RawFrame]) -> String {
+    let mut used_chars = HashSet::new();
+    for frame in frames {
+        for cell in &frame.cells {
+            for c in cell.text.chars() {
+                used_chars.insert(c);
+            }
+        }
+    }
+
+    let subset = |data: &[u8]| -> String {
+        match subset_font(data, &used_chars) {
+            Some(subset_data) => format!("url(data:font/ttf;base64,{}) format('truetype')", BASE64_STANDARD.encode(&subset_data)),
+            None => format!("url(data:font/woff2;base64,{}) format('woff2')", BASE64_STANDARD.encode(data)),
+        }
+    };
+
+    // Note: We decode the embedded WOFF2 files to TTF, subset them, and then
+    // embed the resulting TTF instead of WOFF2. This is because a pure-Rust WOFF2
+    // encoder is currently not readily available, making it hard to compress the
+    // subsetted data back to WOFF2 without adding complex C dependencies to the build.
+    format!(
+        r#"<style>
+@font-face {{ font-family: 'JetBrainsMono Nerd Font Mono'; src: {jb_reg}; font-weight: normal; font-style: normal; }}
+@font-face {{ font-family: 'JetBrainsMono Nerd Font Mono'; src: {jb_bold}; font-weight: bold; font-style: normal; }}
+@font-face {{ font-family: 'JetBrainsMono Nerd Font Mono'; src: {jb_ital}; font-weight: normal; font-style: italic; }}
+@font-face {{ font-family: 'JetBrainsMono Nerd Font Mono'; src: {jb_bold_ital}; font-weight: bold; font-style: italic; }}
+@font-face {{ font-family: 'Noto Sans Mono'; src: {ns_mono}; }}
+@font-face {{ font-family: 'Noto Sans Symbols 2'; src: {ns_sym2}; }}
+@font-face {{ font-family: 'Noto Sans Mono CJK JP'; src: {ns_cjk}; }}
+@font-face {{ font-family: 'unifont_upper'; src: {uni_upper}; }}
+@font-face {{ font-family: 'unifont_csur'; src: {uni_csur}; }}
+</style>
+"#,
+        jb_reg = subset(EMBEDDED_JETBRAINS_NERD_MONO_REGULAR_WOFF2),
+        jb_bold = subset(EMBEDDED_JETBRAINS_NERD_MONO_BOLD_WOFF2),
+        jb_ital = subset(EMBEDDED_JETBRAINS_NERD_MONO_ITALIC_WOFF2),
+        jb_bold_ital = subset(EMBEDDED_JETBRAINS_NERD_MONO_BOLD_ITALIC_WOFF2),
+        ns_mono = subset(EMBEDDED_NOTO_SANS_MONO_REGULAR_WOFF2),
+        ns_sym2 = subset(EMBEDDED_NOTO_SANS_SYMBOLS2_REGULAR_WOFF2),
+        ns_cjk = subset(EMBEDDED_NOTO_SANS_MONO_CJK_JP_SUBSET_WOFF2),
+        uni_upper = subset(EMBEDDED_UNIFONT_UPPER_WOFF2),
+        uni_csur = subset(EMBEDDED_UNIFONT_CSUR_WOFF2),
+    )
+}
 
 /// Tunables for the SVG renderer.
 #[derive(Debug, Clone)]
@@ -91,7 +189,7 @@ pub fn spawn_svg_stream(
 impl Default for SvgOptions {
     fn default() -> Self {
         Self {
-            font_family: "ui-monospace, Menlo, Consolas, 'DejaVu Sans Mono', monospace".to_string(),
+            font_family: "'JetBrainsMono Nerd Font Mono', 'Noto Sans Mono', 'Noto Sans Symbols 2', 'Noto Sans Mono CJK JP', 'unifont_upper', 'unifont_csur', ui-monospace, Menlo, Consolas, 'DejaVu Sans Mono', monospace".to_string(),
             font_size: 16.0,
         }
     }
@@ -188,11 +286,12 @@ pub fn render_svg_to_string(rec: &Recording, opts: &SvgOptions) -> Result<String
     s.push_str(&format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" font-family="{font}" font-size="{fs}" xml:space="preserve">
-"#,
+{style}"#,
         w = canvas_w,
         h = canvas_h,
         font = escape_attr(&opts.font_family),
         fs = opts.font_size,
+        style = generate_style_block(&frames)
     ));
 
     // Canvas background.
@@ -299,11 +398,12 @@ fn run_svg_stream_worker(
     s.push_str(&format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" font-family="{font}" font-size="{fs}" xml:space="preserve">
-"#,
+{style}"#,
         w = canvas_w,
         h = canvas_h,
         font = escape_attr(&opts.font_family),
         fs = opts.font_size,
+        style = generate_style_block(&frames)
     ));
     s.push_str(&format!(
         r#"<rect width="{w}" height="{h}" fill="{bg}"/>

@@ -53,6 +53,10 @@ ab_glyph = "0.2"
 fontdb = "0.23"
 woff2-patched = "0.4"
 lodepng = "3.12.2"
+base64 = "0.22.1"
+subsetter = "0.2.3"
+ttf-parser = "0.25.1"
+rustybuzz = "0.20.1"
 
 
 
