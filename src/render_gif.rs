@@ -548,7 +548,13 @@ fn rasterize_raw_frame(
                                 continue;
                             }
                             let px = pen_x as i32 + bm.offset_x + gx as i32;
-                            let py = pen_y_baseline + bm.offset_y + gy as i32;
+                            let mut py = pen_y_baseline + bm.offset_y + gy as i32;
+                            if is_box_drawing(ch) {
+                                // Center the stretched bitmap within the cell vertically.
+                                let cell_center_y = y as i32 + (cell_h as i32) / 2;
+                                let box_center_y = pen_y_baseline + bm.offset_y + (bm.height as i32) / 2;
+                                py += cell_center_y - box_center_y;
+                            }
                             if px < 0 || py < 0 {
                                 continue;
                             }

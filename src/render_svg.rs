@@ -465,10 +465,12 @@ fn emit_frame_body(s: &mut String, frame: &RawFrame, cfg: ViewportConfig, font_s
                 let transform = if scale_y > 1.0 {
                     // SVG text coordinates are roughly on the baseline. Scaling by Y will stretch the ascent and descent.
                     // To keep the character centered vertically in the cell, we scale it relative to its vertical center.
-                    let cy = y as f32 - (font_size * 0.3); // Approximate vertical center of the character, closer to baseline
+                    let cell_center_y = (y as f32 - baseline as f32) + (cell_h as f32 / 2.0);
+                    let char_center_y = y as f32 - (font_size * 0.3); // Approximate vertical center of the character, closer to baseline
                     format!(
-                        r#" transform="translate(0, {cy}) scale(1, {scale_y}) translate(0, -{cy})""#,
-                        cy = cy,
+                        r#" transform="translate(0, {cy}) scale(1, {scale_y}) translate(0, -{char_center_y})""#,
+                        cy = cell_center_y,
+                        char_center_y = char_center_y,
                         scale_y = scale_y
                     )
                 } else {
