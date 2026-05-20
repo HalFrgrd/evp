@@ -12,6 +12,8 @@ use std::{
 
 use ab_glyph::{Font, FontArc, Glyph, GlyphId, PxScale, ScaleFont};
 use anyhow::{Context, Result, anyhow};
+
+use crate::render_common::is_box_drawing;
 use crossbeam_channel::{Receiver, Sender, bounded};
 use gifski::{Settings, progress};
 use tracing::{debug, warn};
@@ -114,7 +116,8 @@ struct GlyphCacheKey {
     /// ab_glyph glyph identifier within the face.
     glyph_id: u16,
     /// Uniform px-scale as `f32` bits (we only use uniform scales).
-    scale_bits: u32,
+    scale_bits_x: u32,
+    scale_bits_y: u32,
 }
 
 /// Colour-independent coverage mask for one rasterised glyph.
@@ -491,13 +494,31 @@ fn rasterize_raw_frame(
                     font_idx <= u16::MAX as usize,
                     "font_idx {font_idx} exceeds u16 range"
                 );
+                let mut glyph_scale = scale;
+
+                if is_box_drawing(ch) {
+                    let scaled = font.as_scaled(scale);
+                    let advance = scaled.h_advance(glyph_id);
+                    let bbox_w = cell_w as f32;
+                    let bbox_h = cell_h as f32;
+
+                    let glyph_w = advance.max(1.0);
+                    let glyph_h = (scaled.ascent() - scaled.descent()).max(1.0);
+
+                    // We want the box drawing character to exactly fill the cell width and height,
+                    // so we stretch it accordingly.
+                    glyph_scale.x = scale.x * (bbox_w / glyph_w);
+                    glyph_scale.y = scale.y * (bbox_h / glyph_h);
+                }
+
                 let cache_key = GlyphCacheKey {
                     font_idx: font_idx as u16,
                     glyph_id: glyph_id.0,
-                    scale_bits: scale.x.to_bits(),
+                    scale_bits_x: glyph_scale.x.to_bits(),
+                    scale_bits_y: glyph_scale.y.to_bits(),
                 };
                 let bitmap = glyph_cache.entry(cache_key).or_insert_with(|| {
-                    let glyph: Glyph = glyph_id.with_scale(scale);
+                    let glyph: Glyph = glyph_id.with_scale(glyph_scale);
                     font.outline_glyph(glyph).map(|outline| {
                         let bounds = outline.px_bounds();
                         let w = (bounds.max.x - bounds.min.x).ceil() as u32;

@@ -39,6 +39,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+use crate::render_common::is_box_drawing;
 use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
 
@@ -418,11 +419,14 @@ fn emit_frame_body(s: &mut String, frame: &RawFrame, cfg: ViewportConfig, font_s
             let style = cell.flags;
             let mut run = String::new();
             run.push_str(&cell.text);
+            let is_box = cell.text.chars().any(is_box_drawing);
             let mut run_end = col + 1;
             while run_end < frame.cols {
                 let next = &frame.cells[row as usize * frame.cols as usize + run_end as usize];
                 let (nfg, _) = effective_colors(next);
-                if next.text.is_empty() || nfg != fg || next.flags != style {
+                let next_is_box = next.text.chars().any(is_box_drawing);
+                if next.text.is_empty() || nfg != fg || next.flags != style || is_box != next_is_box
+                {
                     break;
                 }
                 run.push_str(&next.text);
@@ -450,14 +454,47 @@ fn emit_frame_body(s: &mut String, frame: &RawFrame, cfg: ViewportConfig, font_s
                 } else {
                     ""
                 };
-            s.push_str(&format!(
-                r#"<text x="{x}" y="{y}" fill="{fg}"{w}{i}{d}>{txt}</text>"#,
-                fg = rgb_hex(fg),
-                w = weight,
-                i = italic,
-                d = decoration,
-                txt = escape_text(&run),
-            ));
+            if is_box {
+                let run_len = (run_end - col) as u32;
+                let text_length = run_len * cell_w;
+                let bbox_h = font_size * 0.8; // approximate bbox height
+                let scale_y = (cell_h as f32 / bbox_h).max(1.0);
+
+                // We use lengthAdjust="spacingAndGlyphs" combined with a vertical scale
+                // to make the box drawing glyphs fill the cell boundary.
+                let transform = if scale_y > 1.0 {
+                    // SVG text coordinates are roughly on the baseline. Scaling by Y will stretch the ascent and descent.
+                    // To keep the character centered vertically in the cell, we scale it relative to its vertical center.
+                    let cy = y as f32 - (font_size * 0.3); // Approximate vertical center of the character, closer to baseline
+                    format!(
+                        r#" transform="translate(0, {cy}) scale(1, {scale_y}) translate(0, -{cy})""#,
+                        cy = cy,
+                        scale_y = scale_y
+                    )
+                } else {
+                    String::new()
+                };
+
+                s.push_str(&format!(
+                    r#"<text x="{x}" y="{y}" fill="{fg}"{w}{i}{d}{transform} textLength="{text_length}" lengthAdjust="spacingAndGlyphs">{txt}</text>"#,
+                    fg = rgb_hex(fg),
+                    w = weight,
+                    i = italic,
+                    d = decoration,
+                    transform = transform,
+                    text_length = text_length,
+                    txt = escape_text(&run),
+                ));
+            } else {
+                s.push_str(&format!(
+                    r#"<text x="{x}" y="{y}" fill="{fg}"{w}{i}{d}>{txt}</text>"#,
+                    fg = rgb_hex(fg),
+                    w = weight,
+                    i = italic,
+                    d = decoration,
+                    txt = escape_text(&run),
+                ));
+            }
             col = run_end;
         }
     }

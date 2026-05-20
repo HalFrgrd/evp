@@ -33,6 +33,16 @@ pub struct ViewportConfig {
     pub content_y: u32,
 }
 
+/// Returns `true` if the character is a box drawing character.
+/// This includes the Box Drawing block (U+2500..=U+257F), Block Elements (U+2580..=U+259F),
+/// Symbols for Legacy Computing (U+1FB00..=U+1FBFF), and Symbols for Legacy Computing Supplement (U+1CC00..=U+1CEBF).
+pub fn is_box_drawing(c: char) -> bool {
+    let cp = c as u32;
+    (0x2500..=0x259F).contains(&cp) ||
+    (0x1FB00..=0x1FBFF).contains(&cp) ||
+    (0x1CC00..=0x1CEBF).contains(&cp)
+}
+
 impl ViewportConfig {
     pub fn new(
         cols: u16,
@@ -117,5 +127,21 @@ impl Default for RenderOptions {
             letter_spacing: 1.0,
             frame_style: FrameStyle::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_box_drawing() {
+        assert!(is_box_drawing('╭')); // Box Drawing
+        assert!(is_box_drawing('█')); // Block Elements
+        assert!(is_box_drawing('\u{1FB00}')); // Legacy Computing
+        assert!(is_box_drawing('\u{1CC00}')); // Legacy Computing Supplement
+
+        assert!(!is_box_drawing('A'));
+        assert!(!is_box_drawing(' '));
     }
 }
