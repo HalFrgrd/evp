@@ -290,32 +290,33 @@ fn apply_set(rest: &[String], s: &mut Settings) -> Result<()> {
         .ok_or_else(|| anyhow!("Set requires a key"))?
         .as_str();
     match key {
-        "Shell" => s.shell = Some(set_scalar(rest, key)?),
-        "FontFamily" => s.font_family = Some(set_scalar(rest, key)?),
-        "FontSize" => s.font_size = set_scalar(rest, key)?.parse()?,
-        "Width" => s.width = set_scalar(rest, key)?.parse()?,
-        "Height" => s.height = set_scalar(rest, key)?.parse()?,
+        // Some Set keys intentionally accept multi-token values without quotes.
+        "Shell" => s.shell = Some(set_value(rest, key)?),
+        "FontFamily" => s.font_family = Some(set_value(rest, key)?),
+        "FontSize" => s.font_size = set_scalar_strict(rest, key)?.parse()?,
+        "Width" => s.width = set_scalar_strict(rest, key)?.parse()?,
+        "Height" => s.height = set_scalar_strict(rest, key)?.parse()?,
         // vhs has no native cell-grid setting; we expose them for convenience.
-        "Cols" | "Columns" => s.cols = Some(set_scalar(rest, key)?.parse()?),
-        "Rows" => s.rows = Some(set_scalar(rest, key)?.parse()?),
-        "Padding" => s.padding = set_scalar(rest, key)?.parse()?,
-        "Margin" => s.margin = set_scalar(rest, key)?.parse()?,
-        "MarginFill" => s.margin_fill = parse_hex_color(&set_scalar(rest, key)?)?,
-        "WindowBar" => s.window_bar = WindowBarStyle::parse(&set_scalar(rest, key)?)?,
-        "WindowBarSize" => s.window_bar_size = set_scalar(rest, key)?.parse()?,
-        "BorderRadius" => s.border_radius = set_scalar(rest, key)?.parse()?,
-        "LineHeight" => s.line_height = set_scalar(rest, key)?.parse()?,
-        "Framerate" | "FrameRate" | "FPS" => s.framerate = set_scalar(rest, key)?.parse()?,
-        "PlaybackSpeed" => s.playback_speed = set_scalar(rest, key)?.parse()?,
-        "TypingSpeed" => s.typing_speed = parse_duration(&set_scalar(rest, key)?)?,
-        "WaitTimeout" => s.wait_timeout = parse_duration(&set_scalar(rest, key)?)?,
-        "WaitPattern" => s.wait_pattern = set_scalar(rest, key)?,
+        "Cols" | "Columns" => s.cols = Some(set_scalar_strict(rest, key)?.parse()?),
+        "Rows" => s.rows = Some(set_scalar_strict(rest, key)?.parse()?),
+        "Padding" => s.padding = set_scalar_strict(rest, key)?.parse()?,
+        "Margin" => s.margin = set_scalar_strict(rest, key)?.parse()?,
+        "MarginFill" => s.margin_fill = parse_hex_color(&set_scalar_strict(rest, key)?)?,
+        "WindowBar" => s.window_bar = WindowBarStyle::parse(&set_scalar_strict(rest, key)?)?,
+        "WindowBarSize" => s.window_bar_size = set_scalar_strict(rest, key)?.parse()?,
+        "BorderRadius" => s.border_radius = set_scalar_strict(rest, key)?.parse()?,
+        "LineHeight" => s.line_height = set_scalar_strict(rest, key)?.parse()?,
+        "Framerate" | "FrameRate" | "FPS" => s.framerate = set_scalar_strict(rest, key)?.parse()?,
+        "PlaybackSpeed" => s.playback_speed = set_scalar_strict(rest, key)?.parse()?,
+        "TypingSpeed" => s.typing_speed = parse_duration(&set_scalar_strict(rest, key)?)?,
+        "WaitTimeout" => s.wait_timeout = parse_duration(&set_scalar_strict(rest, key)?)?,
+        "WaitPattern" => s.wait_pattern = set_value(rest, key)?,
         // VHS settings that evp does NOT yet implement. We bail loudly so a
         // tape author isn't misled into thinking these are taking effect.
         // See README ("VHS feature parity") for the up-to-date matrix.
         "Theme" => s.theme = Theme::from_spec(&set_value(rest, key)?)?,
-        "LetterSpacing" => s.letter_spacing = set_scalar(rest, key)?.parse()?,
-        "CursorBlink" => s.cursor_blink = set_scalar(rest, key)?.parse()?,
+        "LetterSpacing" => s.letter_spacing = set_scalar_strict(rest, key)?.parse()?,
+        "CursorBlink" => s.cursor_blink = set_scalar_strict(rest, key)?.parse()?,
         "LoopOffset" => bail!(unsupported_set_msg("LoopOffset")),
         other => bail!("unknown Set key: {other}"),
     }
@@ -333,10 +334,15 @@ fn unsupported_set_msg(key: &str) -> String {
     )
 }
 
-fn set_scalar(rest: &[String], key: &str) -> Result<String> {
-    rest.get(1)
-        .map(|t| unquote(t).to_string())
-        .ok_or_else(|| anyhow!("Set {key} requires a value"))
+fn set_scalar_strict(rest: &[String], key: &str) -> Result<String> {
+    if rest.len() < 2 {
+        bail!("Set {key} requires a value");
+    }
+    if rest.len() > 2 {
+        let extras = rest[2..].join(" ");
+        bail!("Set {key} does not accept extra tokens: `{extras}`");
+    }
+    Ok(unquote(&rest[1]).to_string())
 }
 
 fn set_value(rest: &[String], key: &str) -> Result<String> {
@@ -836,6 +842,45 @@ mod tests {
                 "expected `{key}` to bail with parity error, got: {msg}"
             );
         }
+    }
+
+    #[test]
+    fn set_shell_preserves_arguments_without_quotes() {
+        let s = parse("Output out.gif\nSet Shell bash --norc\n").unwrap();
+        assert_eq!(s.settings.shell.as_deref(), Some("bash --norc"));
+    }
+
+    #[test]
+    fn set_font_family_supports_multi_word_values() {
+        let unquoted = parse("Output out.gif\nSet FontFamily JetBrains Mono\n").unwrap();
+        assert_eq!(
+            unquoted.settings.font_family.as_deref(),
+            Some("JetBrains Mono")
+        );
+
+        let quoted = parse("Output out.gif\nSet FontFamily \"Fira Code\"\n").unwrap();
+        assert_eq!(quoted.settings.font_family.as_deref(), Some("Fira Code"));
+    }
+
+    #[test]
+    fn set_wait_pattern_supports_multi_word_values() {
+        let s = parse("Output out.gif\nSet WaitPattern ready for input$\n").unwrap();
+        assert_eq!(s.settings.wait_pattern, "ready for input$");
+    }
+
+    #[test]
+    fn strict_scalar_set_values_reject_extra_tokens() {
+        let width_err = parse("Output out.gif\nSet Width 900 extra\n").unwrap_err();
+        assert!(
+            format!("{width_err:#}").contains("does not accept extra tokens"),
+            "expected strict scalar Set error for Width"
+        );
+
+        let bar_err = parse("Output out.gif\nSet WindowBar Rings extra\n").unwrap_err();
+        assert!(
+            format!("{bar_err:#}").contains("does not accept extra tokens"),
+            "expected strict scalar Set error for WindowBar"
+        );
     }
 
     #[test]

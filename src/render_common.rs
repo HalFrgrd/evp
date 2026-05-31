@@ -38,9 +38,9 @@ pub struct ViewportConfig {
 /// Symbols for Legacy Computing (U+1FB00..=U+1FBFF), and Symbols for Legacy Computing Supplement (U+1CC00..=U+1CEBF).
 pub fn is_box_drawing(c: char) -> bool {
     let cp = c as u32;
-    (0x2500..=0x259F).contains(&cp) ||
-    (0x1FB00..=0x1FBFF).contains(&cp) ||
-    (0x1CC00..=0x1CEBF).contains(&cp)
+    (0x2500..=0x259F).contains(&cp)
+        || (0x1FB00..=0x1FBFF).contains(&cp)
+        || (0x1CC00..=0x1CEBF).contains(&cp)
 }
 
 impl ViewportConfig {

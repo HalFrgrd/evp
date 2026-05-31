@@ -21,7 +21,6 @@ renderer threads.
 - TODO: font is embedded in the SVG so that it renders the same everywhere
 - TODO: text is selectable
 
-
 ## Acknowledgments
 
 ### VHS
