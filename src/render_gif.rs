@@ -613,8 +613,6 @@ fn rasterize_raw_frame(
         }
     }
 
-
-
     if cfg.frame_style.border_radius_px > 0 {
         mask_outside_rounded_rect(
             &mut buf,
@@ -760,7 +758,6 @@ fn fill_rect(buf: &mut [u8], w: u32, x: u32, y: u32, rw: u32, rh: u32, color: [u
         }
     }
 }
-
 
 fn blend_pixel(buf: &mut [u8], w: u32, x: u32, y: u32, color: [u8; 3], coverage: f32) {
     let i = ((y * w + x) * 3) as usize;

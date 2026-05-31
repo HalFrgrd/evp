@@ -186,8 +186,14 @@ Sleep 200ms
         assert_eq!(a.t_ms, b.t_ms, "frame {i} t_ms mismatch");
         assert_eq!(a.cursor, b.cursor, "frame {i} cursor mismatch");
         assert_eq!(a.cells, b.cells, "frame {i} cells mismatch");
-        assert_eq!(a.cursor_color, b.cursor_color, "frame {i} cursor_color mismatch");
-        assert_eq!(a.cursor_accent, b.cursor_accent, "frame {i} cursor_accent mismatch");
+        assert_eq!(
+            a.cursor_color, b.cursor_color,
+            "frame {i} cursor_color mismatch"
+        );
+        assert_eq!(
+            a.cursor_accent, b.cursor_accent,
+            "frame {i} cursor_accent mismatch"
+        );
     }
 }
 

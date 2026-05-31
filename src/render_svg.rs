@@ -85,16 +85,24 @@ const EMBEDDED_NOTO_SANS_SYMBOLS2_REGULAR_WOFF2: &[u8] =
 const EMBEDDED_NOTO_SANS_MONO_CJK_JP_SUBSET_WOFF2: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/NotoSansMonoCJKjp-Subset.woff2"));
 
-fn subset_font(woff2_data: &[u8], chars: &HashSet<char>) -> Option<Vec<u8>> {
+fn subset_font(woff2_data: &[u8], chars: &HashSet<char>, force: bool) -> Option<Vec<u8>> {
     let ttf = convert_woff2_to_ttf(&mut std::io::Cursor::new(woff2_data)).ok()?;
     let face = Face::parse(&ttf, 0).ok()?;
 
     let mut glyphs = Vec::new();
     glyphs.push(0); // .notdef
+    let mut has_any = false;
     for c in chars {
         if let Some(glyph_id) = face.glyph_index(*c) {
-            glyphs.push(glyph_id.0);
+            if glyph_id.0 != 0 {
+                glyphs.push(glyph_id.0);
+                has_any = true;
+            }
         }
+    }
+
+    if !has_any && !force {
+        return None;
     }
 
     glyphs.sort_unstable();
@@ -104,7 +112,10 @@ fn subset_font(woff2_data: &[u8], chars: &HashSet<char>) -> Option<Vec<u8>> {
     subset(&ttf, 0, &mapper).ok()
 }
 
-fn generate_style_block(frames: &[RawFrame]) -> String {
+fn generate_style_block(frames: &[RawFrame], embed_fonts: bool) -> String {
+    if !embed_fonts {
+        return String::new();
+    }
     let mut used_chars = HashSet::new();
     for frame in frames {
         for cell in &frame.cells {
@@ -114,42 +125,78 @@ fn generate_style_block(frames: &[RawFrame]) -> String {
         }
     }
 
-    let subset = |data: &[u8]| -> String {
-        match subset_font(data, &used_chars) {
-            Some(subset_data) => format!(
-                "url(data:font/ttf;base64,{}) format('truetype')",
-                BASE64_STANDARD.encode(&subset_data)
-            ),
-            None => format!(
-                "url(data:font/woff2;base64,{}) format('woff2')",
-                BASE64_STANDARD.encode(data)
-            ),
+    let mut style = String::new();
+    style.push_str("<style>\n");
+
+    let mut add_font = |data: &[u8], css_template: &str, force: bool| match subset_font(
+        data,
+        &used_chars,
+        force,
+    ) {
+        Some(subset_data) => {
+            let encoded = BASE64_STANDARD.encode(&subset_data);
+            let src = format!("url(data:font/ttf;base64,{encoded}) format('truetype')");
+            style.push_str(&css_template.replace("{}", &src));
+            style.push('\n');
+        }
+        None => {
+            if force {
+                let encoded = BASE64_STANDARD.encode(data);
+                let src = format!("url(data:font/woff2;base64,{encoded}) format('woff2')");
+                style.push_str(&css_template.replace("{}", &src));
+                style.push('\n');
+            }
         }
     };
 
-    format!(
-        r#"<style>
-@font-face {{ font-family: 'JetBrainsMono Nerd Font Mono'; src: {jb_reg}; font-weight: normal; font-style: normal; }}
-@font-face {{ font-family: 'JetBrainsMono Nerd Font Mono'; src: {jb_bold}; font-weight: bold; font-style: normal; }}
-@font-face {{ font-family: 'JetBrainsMono Nerd Font Mono'; src: {jb_ital}; font-weight: normal; font-style: italic; }}
-@font-face {{ font-family: 'JetBrainsMono Nerd Font Mono'; src: {jb_bold_ital}; font-weight: bold; font-style: italic; }}
-@font-face {{ font-family: 'Noto Sans Mono'; src: {ns_mono}; }}
-@font-face {{ font-family: 'Noto Sans Symbols 2'; src: {ns_sym2}; }}
-@font-face {{ font-family: 'Noto Sans Mono CJK JP'; src: {ns_cjk}; }}
-@font-face {{ font-family: 'unifont_upper'; src: {uni_upper}; }}
-@font-face {{ font-family: 'unifont_csur'; src: {uni_csur}; }}
-</style>
-"#,
-        jb_reg = subset(EMBEDDED_JETBRAINS_NERD_MONO_REGULAR_WOFF2),
-        jb_bold = subset(EMBEDDED_JETBRAINS_NERD_MONO_BOLD_WOFF2),
-        jb_ital = subset(EMBEDDED_JETBRAINS_NERD_MONO_ITALIC_WOFF2),
-        jb_bold_ital = subset(EMBEDDED_JETBRAINS_NERD_MONO_BOLD_ITALIC_WOFF2),
-        ns_mono = subset(EMBEDDED_NOTO_SANS_MONO_REGULAR_WOFF2),
-        ns_sym2 = subset(EMBEDDED_NOTO_SANS_SYMBOLS2_REGULAR_WOFF2),
-        ns_cjk = subset(EMBEDDED_NOTO_SANS_MONO_CJK_JP_SUBSET_WOFF2),
-        uni_upper = subset(EMBEDDED_UNIFONT_UPPER_WOFF2),
-        uni_csur = subset(EMBEDDED_UNIFONT_CSUR_WOFF2),
-    )
+    add_font(
+        EMBEDDED_JETBRAINS_NERD_MONO_REGULAR_WOFF2,
+        "@font-face { font-family: 'JetBrainsMono Nerd Font Mono'; src: {}; font-weight: normal; font-style: normal; }",
+        true,
+    );
+    add_font(
+        EMBEDDED_JETBRAINS_NERD_MONO_BOLD_WOFF2,
+        "@font-face { font-family: 'JetBrainsMono Nerd Font Mono'; src: {}; font-weight: bold; font-style: normal; }",
+        false,
+    );
+    add_font(
+        EMBEDDED_JETBRAINS_NERD_MONO_ITALIC_WOFF2,
+        "@font-face { font-family: 'JetBrainsMono Nerd Font Mono'; src: {}; font-weight: normal; font-style: italic; }",
+        false,
+    );
+    add_font(
+        EMBEDDED_JETBRAINS_NERD_MONO_BOLD_ITALIC_WOFF2,
+        "@font-face { font-family: 'JetBrainsMono Nerd Font Mono'; src: {}; font-weight: bold; font-style: italic; }",
+        false,
+    );
+    add_font(
+        EMBEDDED_NOTO_SANS_MONO_REGULAR_WOFF2,
+        "@font-face { font-family: 'Noto Sans Mono'; src: {}; }",
+        false,
+    );
+    add_font(
+        EMBEDDED_NOTO_SANS_SYMBOLS2_REGULAR_WOFF2,
+        "@font-face { font-family: 'Noto Sans Symbols 2'; src: {}; }",
+        false,
+    );
+    add_font(
+        EMBEDDED_NOTO_SANS_MONO_CJK_JP_SUBSET_WOFF2,
+        "@font-face { font-family: 'Noto Sans Mono CJK JP'; src: {}; }",
+        false,
+    );
+    add_font(
+        EMBEDDED_UNIFONT_UPPER_WOFF2,
+        "@font-face { font-family: 'unifont_upper'; src: {}; }",
+        false,
+    );
+    add_font(
+        EMBEDDED_UNIFONT_CSUR_WOFF2,
+        "@font-face { font-family: 'unifont_csur'; src: {}; }",
+        false,
+    );
+
+    style.push_str("</style>\n");
+    style
 }
 
 /// Tunables for the SVG renderer.
@@ -163,6 +210,9 @@ pub struct SvgOptions {
     /// honour them as cell sizes regardless, but `font_size` is what
     /// actually controls glyph height in the browser.
     pub font_size: f32,
+    /// Whether to embed base64-encoded subset font data in the SVG.
+    /// If false, relies entirely on system fonts.
+    pub embed_fonts: bool,
 }
 
 pub struct SvgStreamHandle {
@@ -196,6 +246,7 @@ impl Default for SvgOptions {
         Self {
             font_family: "'JetBrainsMono Nerd Font Mono', 'Noto Sans Mono', 'Noto Sans Symbols 2', 'Noto Sans Mono CJK JP', 'unifont_upper', 'unifont_csur', ui-monospace, Menlo, Consolas, 'DejaVu Sans Mono', monospace".to_string(),
             font_size: 16.0,
+            embed_fonts: true,
         }
     }
 }
@@ -447,7 +498,7 @@ fn render_from_frames(frames: &[RawFrame], cfg: ViewportConfig, opts: &SvgOption
         h = canvas_h,
         font = escape_attr(&opts.font_family),
         fs = opts.font_size,
-        style = generate_style_block(frames)
+        style = generate_style_block(frames, opts.embed_fonts)
     ));
 
     // Canvas background (static).

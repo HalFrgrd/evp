@@ -78,6 +78,9 @@ struct Cli {
     /// Also render the intermediate Recording as JSON to this path.
     #[arg(long = "dump-json")]
     dump_json: Option<PathBuf>,
+    /// Do not embed base64 font data inside the generated SVG output.
+    #[arg(long = "no-embed-fonts")]
+    no_embed_fonts: bool,
     /// Explicit log level override.
     #[arg(long, value_enum)]
     log_level: Option<LogLevel>,
@@ -176,7 +179,10 @@ fn real_main() -> Result<()> {
 
     let mut renderers = Vec::with_capacity(output_paths.len());
     for path in &output_paths {
-        renderers.push((backend_for_output(path, &render_opts)?, path.clone()));
+        renderers.push((
+            backend_for_output(path, &render_opts, !cli.no_embed_fonts)?,
+            path.clone(),
+        ));
         info!(path = %path.display(), "streaming render while recording");
     }
 
@@ -190,6 +196,7 @@ fn real_main() -> Result<()> {
 fn backend_for_output(
     path: &std::path::Path,
     render_opts: &evp::RenderOptions,
+    embed_fonts: bool,
 ) -> Result<evp::renderer::RendererBackend> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if ext.eq_ignore_ascii_case("gif") {
@@ -197,6 +204,7 @@ fn backend_for_output(
     } else if ext.eq_ignore_ascii_case("svg") {
         Ok(evp::renderer::RendererBackend::Svg(evp::SvgOptions {
             font_size: render_opts.font_size,
+            embed_fonts,
             ..Default::default()
         }))
     } else if ext.eq_ignore_ascii_case("json") {
