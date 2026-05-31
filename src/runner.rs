@@ -109,7 +109,7 @@ pub fn derive_options(s: &Settings) -> ViewportConfig {
     // Measure cell dimensions from the actual font using the same CSS
     // em-square semantics as the GIF/SVG renderers, so the cols/rows we
     // report to libghostty match the grid the renderer will draw.
-    let (cell_w_px, cell_h_px) = measure_cell_px(
+    let (cell_w_px, cell_h_px, char_height_px, ascent_px) = measure_cell_px(
         s.font_family.as_deref(),
         s.font_size,
         s.line_height,
@@ -142,7 +142,17 @@ pub fn derive_options(s: &Settings) -> ViewportConfig {
     let rows = s
         .rows
         .unwrap_or_else(|| (inner_h / cell_h_px).max(2) as u16);
-    ViewportConfig::new(cols, rows, s.framerate, cell_w_px, cell_h_px, frame_style)
+    ViewportConfig::new(
+        cols,
+        rows,
+        s.framerate,
+        cell_w_px,
+        cell_h_px,
+        frame_style,
+        s.font_size,
+        char_height_px,
+        ascent_px,
+    )
 }
 
 /// Run the script end-to-end. Returns only pipeline stats.

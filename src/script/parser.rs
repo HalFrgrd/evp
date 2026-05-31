@@ -311,9 +311,6 @@ fn apply_set(rest: &[String], s: &mut Settings) -> Result<()> {
         "TypingSpeed" => s.typing_speed = parse_duration(&set_scalar_strict(rest, key)?)?,
         "WaitTimeout" => s.wait_timeout = parse_duration(&set_scalar_strict(rest, key)?)?,
         "WaitPattern" => s.wait_pattern = set_value(rest, key)?,
-        // VHS settings that evp does NOT yet implement. We bail loudly so a
-        // tape author isn't misled into thinking these are taking effect.
-        // See README ("VHS feature parity") for the up-to-date matrix.
         "Theme" => s.theme = Theme::from_spec(&set_value(rest, key)?)?,
         "LetterSpacing" => s.letter_spacing = set_scalar_strict(rest, key)?.parse()?,
         "CursorBlink" => s.cursor_blink = set_scalar_strict(rest, key)?.parse()?,

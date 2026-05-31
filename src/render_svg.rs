@@ -210,6 +210,9 @@ pub fn render_svg(rec: &Recording, opts: &SvgOptions, out: &Path) -> Result<()> 
             rec.cell_width_px,
             rec.cell_height_px,
             rec.frame_style,
+            rec.font_size_px,
+            rec.char_height_px,
+            rec.ascent_px,
         ),
         opts.clone(),
         out.to_path_buf(),
@@ -237,6 +240,9 @@ pub fn render_svg_to_string(rec: &Recording, opts: &SvgOptions) -> Result<String
         rec.cell_width_px,
         rec.cell_height_px,
         rec.frame_style,
+        rec.font_size_px,
+        rec.char_height_px,
+        rec.ascent_px,
     );
 
     // Reconstruct every frame up-front.
@@ -495,7 +501,27 @@ fn render_from_frames(frames: &[RawFrame], cfg: ViewportConfig, opts: &SvgOption
 
     let cell_w = cfg.cell_width_px.max(1);
     let cell_h = cfg.cell_height_px.max(1);
-    let baseline = (opts.font_size * 0.8).round() as u32;
+    // Compute the baseline offset from the top of the cell so that the glyph
+    // bbox is vertically centred, mirroring the GIF renderer's logic.
+    //
+    // When font metrics are available (char_height_px > 0), scale them from
+    // the GIF font size to the SVG font size and apply the same centering
+    // formula: baseline = ascent_svg + (cell_h - char_h_svg) / 2.
+    //
+    // When metrics are absent (old recordings), fall back to the historical
+    // approximation of 0.8 * font_size (no centering) — this preserves the
+    // previous behaviour for recordings that pre-date this feature.
+    assert!(
+        cfg.char_height_px > 0 && cfg.font_size_px > 0.0,
+        "font metrics are always required; ViewportConfig::with_font_metrics was never called"
+    );
+    let baseline = {
+        let scale = opts.font_size / cfg.font_size_px;
+        let char_h_svg = cfg.char_height_px as f32 * scale;
+        let ascent_svg = cfg.ascent_px as f32 * scale;
+        let extra = (cell_h as f32 - char_h_svg).max(0.0);
+        (ascent_svg + extra / 2.0).round() as u32
+    };
 
     // Determine if all spans cover the full duration (static content optimization).
     let is_static =
@@ -765,6 +791,11 @@ mod tests {
             framerate: 10,
             cell_width_px: 8,
             cell_height_px: 16,
+            // Plausible metrics for JetBrains Mono at the SVG default font_size
+            // of 16px: bbox_h ≈ 19px, ascent ≈ 15px.
+            font_size_px: 16.0,
+            char_height_px: 19,
+            ascent_px: 15,
             frame_style: FrameStyle {
                 padding_px: 4,
                 ..FrameStyle::default()

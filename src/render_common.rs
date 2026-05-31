@@ -31,6 +31,15 @@ pub struct ViewportConfig {
     pub bar_h: u32,
     pub content_x: u32,
     pub content_y: u32,
+    /// The CSS em-square size used when the font metrics below were measured.
+    /// Zero when font metrics are unavailable.
+    pub font_size_px: f32,
+    /// Raw font bbox height (`ascent − descent`) at `font_size_px`, without
+    /// the `line_height` multiplier.  Zero when unavailable.
+    pub char_height_px: u32,
+    /// Raw scaled font ascent at `font_size_px` (before vertical centering).
+    /// Zero when unavailable.
+    pub ascent_px: u32,
 }
 
 /// Returns `true` if the character is a box drawing character.
@@ -51,6 +60,9 @@ impl ViewportConfig {
         cell_width_px: u32,
         cell_height_px: u32,
         frame_style: FrameStyle,
+        font_size_px: f32,
+        char_height_px: u32,
+        ascent_px: u32,
     ) -> Self {
         let cell_w = cell_width_px.max(1);
         let cell_h = cell_height_px.max(1);
@@ -93,6 +105,9 @@ impl ViewportConfig {
             bar_h,
             content_x: frame_style.margin_px + frame_style.padding_px + extra_x,
             content_y: frame_style.margin_px + bar_h + frame_style.padding_px + extra_y,
+            font_size_px,
+            char_height_px,
+            ascent_px,
         }
     }
 }
