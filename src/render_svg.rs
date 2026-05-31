@@ -42,6 +42,9 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+use flate2::Compression;
+use flate2::write::GzEncoder;
+
 use crate::render_common::is_box_drawing;
 use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
@@ -734,9 +737,22 @@ fn run_svg_stream_worker(
 
     let s = render_from_frames(&frames, cfg, &opts);
 
+    let is_svgz = out
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("svgz"));
+
     let mut file = File::create(&out).with_context(|| format!("create {}", out.display()))?;
-    file.write_all(s.as_bytes())
-        .with_context(|| format!("writing {}", out.display()))?;
+    if is_svgz {
+        let mut encoder = GzEncoder::new(file, Compression::best());
+        encoder
+            .write_all(s.as_bytes())
+            .with_context(|| format!("writing gzipped {}", out.display()))?;
+        encoder.finish().context("finalising gzip compression")?;
+    } else {
+        file.write_all(s.as_bytes())
+            .with_context(|| format!("writing {}", out.display()))?;
+    }
     Ok(())
 }
 
@@ -893,5 +909,34 @@ mod tests {
     fn escapes_xml_special_chars() {
         assert_eq!(escape_text("<&>"), "&lt;&amp;&gt;");
         assert_eq!(escape_attr("\"<&>'"), "&quot;&lt;&amp;&gt;&apos;");
+    }
+
+    #[test]
+    fn test_render_svg_and_svgz() {
+        let rec = synth_recording();
+        let temp_dir = std::env::temp_dir();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        let svg_path = temp_dir.join(format!("evp_test_{}.svg", stamp));
+        let svgz_path = temp_dir.join(format!("evp_test_{}.svgz", stamp));
+
+        render_svg(&rec, &SvgOptions::default(), &svg_path).unwrap();
+        render_svg(&rec, &SvgOptions::default(), &svgz_path).unwrap();
+
+        assert!(svg_path.exists());
+        assert!(svgz_path.exists());
+
+        let svg_bytes = std::fs::read(&svg_path).unwrap();
+        let svgz_bytes = std::fs::read(&svgz_path).unwrap();
+
+        // Gzipped data has 0x1f 0x8b magic number at start.
+        assert!(svgz_bytes.len() < svg_bytes.len());
+        assert_eq!(svgz_bytes[0], 0x1f);
+        assert_eq!(svgz_bytes[1], 0x8b);
+
+        std::fs::remove_file(svg_path).ok();
+        std::fs::remove_file(svgz_path).ok();
     }
 }

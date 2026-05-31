@@ -201,7 +201,7 @@ fn backend_for_output(
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if ext.eq_ignore_ascii_case("gif") {
         Ok(evp::renderer::RendererBackend::Gif(render_opts.clone()))
-    } else if ext.eq_ignore_ascii_case("svg") {
+    } else if ext.eq_ignore_ascii_case("svg") || ext.eq_ignore_ascii_case("svgz") {
         Ok(evp::renderer::RendererBackend::Svg(evp::SvgOptions {
             font_size: render_opts.font_size,
             embed_fonts,

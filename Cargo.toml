@@ -57,6 +57,7 @@ base64 = "0.22.1"
 subsetter = "0.2.3"
 ttf-parser = "0.25.1"
 rustybuzz = "0.20.1"
+flate2 = "1.1.9"
 
 
 

@@ -16,10 +16,17 @@ renderer threads.
 - specify full shell path with arguments
 - SVG output (as well as gif)
 - no runtime dependencies (everything is statically linked)
-- embedded fonts
-- TODO: mouse support 
-- TODO: font is embedded in the SVG so that it renders the same everywhere
-- TODO: text is selectable
+- embedded, character-subsetted fonts (so SVG renders the same everywhere)
+- selectable SVG text
+- TODO: mouse support
+
+## Output Formats
+
+`evp` infers the output renderer from the file extension of your `Output` directives or `--output` CLI argument. The following formats are supported:
+- **`.gif`**: Animated GIF.
+- **`.svg`**: Animated SVG with embedded, character-subsetted fonts.
+- **`.svgz`**: Compressed SVG. If the output path ends in `.svgz`, `evp` automatically Gzip-compresses the generated SVG.
+- **`.json`**: The raw terminal frame recording in JSON format.
 
 ## Acknowledgments
 

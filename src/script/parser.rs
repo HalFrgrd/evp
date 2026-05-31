@@ -165,7 +165,7 @@ fn parse_line(
                 .and_then(|e| e.to_str())
                 .map(|s| s.to_ascii_lowercase());
             match ext.as_deref() {
-                Some("gif") | Some("svg") | Some("json") => {}
+                Some("gif") | Some("svg") | Some("svgz") | Some("json") => {}
                 Some(other) => bail!(
                     "Output `{path}` has unsupported extension `.{other}`. \
                      evp currently writes `.gif`, `.svg`, or `.json` only. \
@@ -889,8 +889,8 @@ mod tests {
 
     #[test]
     fn multiple_outputs_parse() {
-        let script = parse("Output a.gif\nOutput b.svg\nOutput c.json\n").unwrap();
-        assert_eq!(script.outputs, vec!["a.gif", "b.svg", "c.json"]);
+        let script = parse("Output a.gif\nOutput b.svg\nOutput c.json\nOutput d.svgz\n").unwrap();
+        assert_eq!(script.outputs, vec!["a.gif", "b.svg", "c.json", "d.svgz"]);
     }
 
     #[test]
