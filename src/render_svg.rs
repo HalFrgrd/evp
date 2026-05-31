@@ -46,9 +46,9 @@ use crate::render_common::is_box_drawing;
 use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
 
-use std::collections::HashSet;
 use base64::prelude::*;
-use subsetter::{subset, GlyphRemapper};
+use std::collections::HashSet;
+use subsetter::{GlyphRemapper, subset};
 use ttf_parser::Face;
 use woff2_patched::convert_woff2_to_ttf;
 
@@ -116,8 +116,14 @@ fn generate_style_block(frames: &[RawFrame]) -> String {
 
     let subset = |data: &[u8]| -> String {
         match subset_font(data, &used_chars) {
-            Some(subset_data) => format!("url(data:font/ttf;base64,{}) format('truetype')", BASE64_STANDARD.encode(&subset_data)),
-            None => format!("url(data:font/woff2;base64,{}) format('woff2')", BASE64_STANDARD.encode(data)),
+            Some(subset_data) => format!(
+                "url(data:font/ttf;base64,{}) format('truetype')",
+                BASE64_STANDARD.encode(&subset_data)
+            ),
+            None => format!(
+                "url(data:font/woff2;base64,{}) format('woff2')",
+                BASE64_STANDARD.encode(data)
+            ),
         }
     };
 
@@ -339,7 +345,11 @@ fn render_from_frames(frames: &[RawFrame], cfg: ViewportConfig, opts: &SvgOption
             let new_visual = CellVisual::from_snap(&frame.cells[idx]);
             let (ref old_visual, start_ms, old_default_bg) = current[idx];
             // If visual changed, or default_bg changed (which affects "blank" rendering)
-            if *old_visual != new_visual || (old_visual.bg == old_default_bg && new_visual.bg == frame.default_bg && old_default_bg != frame.default_bg) {
+            if *old_visual != new_visual
+                || (old_visual.bg == old_default_bg
+                    && new_visual.bg == frame.default_bg
+                    && old_default_bg != frame.default_bg)
+            {
                 // Flush the old span if it's not visually blank
                 if !old_visual.is_blank(old_default_bg) {
                     let row = (idx / cols as usize) as u16;
@@ -488,9 +498,8 @@ fn render_from_frames(frames: &[RawFrame], cfg: ViewportConfig, opts: &SvgOption
     let baseline = (opts.font_size * 0.8).round() as u32;
 
     // Determine if all spans cover the full duration (static content optimization).
-    let is_static = |span_start: u32, span_end: u32| -> bool {
-        span_start == 0 && span_end >= total_ms
-    };
+    let is_static =
+        |span_start: u32, span_end: u32| -> bool { span_start == 0 && span_end >= total_ms };
 
     // Emit cell spans grouped by time window for efficiency.
     // First: background rects.
@@ -540,16 +549,17 @@ fn render_from_frames(frames: &[RawFrame], cfg: ViewportConfig, opts: &SvgOption
         } else {
             ""
         };
-        let decoration =
-            if span.visual.flags & style_flags::UNDERLINE != 0 && span.visual.flags & style_flags::STRIKETHROUGH != 0 {
-                " text-decoration=\"underline line-through\""
-            } else if span.visual.flags & style_flags::UNDERLINE != 0 {
-                " text-decoration=\"underline\""
-            } else if span.visual.flags & style_flags::STRIKETHROUGH != 0 {
-                " text-decoration=\"line-through\""
-            } else {
-                ""
-            };
+        let decoration = if span.visual.flags & style_flags::UNDERLINE != 0
+            && span.visual.flags & style_flags::STRIKETHROUGH != 0
+        {
+            " text-decoration=\"underline line-through\""
+        } else if span.visual.flags & style_flags::UNDERLINE != 0 {
+            " text-decoration=\"underline\""
+        } else if span.visual.flags & style_flags::STRIKETHROUGH != 0 {
+            " text-decoration=\"line-through\""
+        } else {
+            ""
+        };
 
         let is_box = span.visual.text.chars().any(is_box_drawing);
 
