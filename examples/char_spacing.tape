@@ -7,6 +7,10 @@ Set TypingSpeed 20ms
 Set LineHeight 3
 Set LetterSpacing 0
 Set CursorBlink false
+Set Theme debug
+Set Margin 60
+Set MarginFill "#6B50FF"
+Set Padding 0
 
 Env PS1 ">"
 Set Shell /bin/sh

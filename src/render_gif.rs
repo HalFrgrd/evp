@@ -177,12 +177,19 @@ impl GifStreamHandle {
 ///     `lineHeight`-driven cell height,
 ///   * `baseline`: the baseline offset from the top of the cell, computed
 ///     from the font's ascent in CSS pixels.
+/// Returns `(scale, cell_w, cell_h, baseline, char_height_px, ascent_px)` where:
+/// - `baseline` is the distance from the top of the cell to the alphabetic
+///   baseline, adjusted to vertically centre the glyph bbox within the cell
+///   (i.e. `raw_ascent + extra / 2` where `extra = cell_h - bbox_h`).
+/// - `char_height_px` is the raw font bbox height (`ascent - descent`) before
+///   the `line_height` multiplier — the natural glyph height at `font_size`.
+/// - `ascent_px` is the raw scaled ascent (before centering).
 fn css_cell_metrics(
     font: &FontArc,
     font_size: f32,
     line_height: f32,
     letter_spacing: f32,
-) -> (PxScale, u32, u32, u32) {
+) -> (PxScale, u32, u32, u32, u32, u32) {
     // Fall back to the font's intrinsic height if upem is missing.
     let upem = font
         .units_per_em()
@@ -205,9 +212,13 @@ fn css_cell_metrics(
     // bbox is ~27px; font_size alone would give 22px — too tight.
     let bbox_h = scaled.ascent() - scaled.descent();
     let cell_h = (bbox_h * line_height).ceil().max(1.0) as u32;
-    // Baseline: ascent from the top of the cell.
-    let baseline = scaled.ascent().round().max(0.0) as u32;
-    (scale, cell_w, cell_h, baseline)
+    let char_height_px = bbox_h.round().max(0.0) as u32;
+    let raw_ascent = scaled.ascent().round().max(0.0) as u32;
+    // Centre the glyph bbox vertically in the cell: push the baseline down by
+    // half the extra space introduced by line_height > 1.
+    let extra = (cell_h as f32 - bbox_h).max(0.0);
+    let baseline = (scaled.ascent() + extra / 2.0).round().max(0.0) as u32;
+    (scale, cell_w, cell_h, baseline, char_height_px, raw_ascent)
 }
 
 /// Load the font family for `font_path` (or the embedded default) and return
@@ -217,12 +228,19 @@ fn css_cell_metrics(
 /// Called by the runner to derive the terminal grid size before any renderer
 /// is spawned, so cols/rows are computed from the actual font metrics rather
 /// than a geometric approximation.
+/// Returns `(cell_w, cell_h, char_height_px, ascent_px)` using the same CSS
+/// em-square semantics as [`css_cell_metrics`].
+///
+/// `char_height_px` is the raw font bbox height (ascent − descent) without
+/// the `line_height` multiplier.  `ascent_px` is the raw scaled ascent.
+/// These are propagated into [`ViewportConfig`] so downstream renderers (e.g.
+/// SVG) can compute a centred baseline without reloading the font.
 pub fn measure_cell_px(
     font_path: Option<&str>,
     font_size: f32,
     line_height: f32,
     letter_spacing: f32,
-) -> (u32, u32) {
+) -> (u32, u32, u32, u32) {
     let font_set = match load_font_family(font_path) {
         Ok(loaded) => loaded.font_set,
         Err(_) => {
@@ -230,13 +248,15 @@ pub fn measure_cell_px(
             // fonts are somehow corrupt.
             let w = (font_size * 0.6 + letter_spacing).round().max(1.0) as u32;
             let h = (font_size * line_height).round().max(1.0) as u32;
-            return (w, h);
+            let char_h = (font_size * 1.2).round().max(1.0) as u32;
+            let asc = (font_size * 0.8).round().max(0.0) as u32;
+            return (w, h, char_h, asc);
         }
     };
     let primary = &font_set.fonts[font_set.regular[0]];
-    let (_scale, cell_w, cell_h, _baseline) =
+    let (_scale, cell_w, cell_h, _baseline, char_height_px, ascent_px) =
         css_cell_metrics(primary, font_size, line_height, letter_spacing);
-    (cell_w, cell_h)
+    (cell_w, cell_h, char_height_px, ascent_px)
 }
 
 pub fn spawn_gif_stream(
@@ -249,12 +269,13 @@ pub fn spawn_gif_stream(
 
     let font_set = loaded.font_set;
     let primary = &font_set.fonts[font_set.regular[0]];
-    let (scale, _, _, baseline) = css_cell_metrics(
+    let (scale, _, _, baseline, char_height_px, ascent_px) = css_cell_metrics(
         primary,
         opts.font_size,
         opts.line_height,
         opts.letter_spacing,
     );
+    let cfg = cfg.with_font_metrics(opts.font_size, char_height_px, ascent_px);
 
     let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) =
         bounded(RAW_FRAME_CONSUMER_CHANNEL_CAPACITY);
@@ -296,13 +317,14 @@ pub fn render_png_frame(frame: &RawFrame, opts: &RenderOptions, out: &Path) -> R
     let loaded = load_font_family(opts.font_path.as_deref())?;
     let font_set = loaded.font_set;
     let primary = &font_set.fonts[font_set.regular[0]];
-    let (scale, cell_w, cell_h, baseline) = css_cell_metrics(
+    let (scale, cell_w, cell_h, baseline, char_height_px, ascent_px) = css_cell_metrics(
         primary,
         opts.font_size,
         opts.line_height,
         opts.letter_spacing,
     );
-    let cfg = ViewportConfig::new(frame.cols, frame.rows, 0, cell_w, cell_h, opts.frame_style);
+    let cfg = ViewportConfig::new(frame.cols, frame.rows, 0, cell_w, cell_h, opts.frame_style)
+        .with_font_metrics(opts.font_size, char_height_px, ascent_px);
     let mut glyph_cache = GlyphCache::new();
     let buf = rasterize_raw_frame(frame, &font_set, scale, baseline, cfg, &mut glyph_cache);
     lodepng::encode24_file(out, &buf, cfg.canvas_w as usize, cfg.canvas_h as usize)

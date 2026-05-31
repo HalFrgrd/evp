@@ -118,6 +118,18 @@ pub struct Recording {
     pub framerate: u32,
     pub cell_width_px: u32,
     pub cell_height_px: u32,
+    /// CSS em-square size used when the GIF renderer measured font metrics.
+    /// Zero for recordings produced before this field was introduced.
+    #[serde(default)]
+    pub font_size_px: f32,
+    /// Raw font bbox height (ascent − descent) at `font_size_px`, without the
+    /// `line_height` multiplier.  Zero when unavailable.
+    #[serde(default)]
+    pub char_height_px: u32,
+    /// Raw scaled font ascent at `font_size_px` (before centering).
+    /// Zero when unavailable.
+    #[serde(default)]
+    pub ascent_px: u32,
     pub frame_style: FrameStyle,
     pub frames: Vec<Frame>,
 }
@@ -199,6 +211,9 @@ impl RecordingBuilder {
             framerate: self.cfg.viewport.framerate,
             cell_width_px: self.cfg.viewport.cell_width_px,
             cell_height_px: self.cfg.viewport.cell_height_px,
+            font_size_px: self.cfg.viewport.font_size_px,
+            char_height_px: self.cfg.viewport.char_height_px,
+            ascent_px: self.cfg.viewport.ascent_px,
             frame_style: self.cfg.viewport.frame_style,
             frames: self.frames,
         }

@@ -93,7 +93,8 @@ pub fn render_recording(rec: &Recording, backend: RendererBackend, output: PathB
             rec.cell_width_px,
             rec.cell_height_px,
             rec.frame_style,
-        ),
+        )
+        .with_font_metrics(rec.font_size_px, rec.char_height_px, rec.ascent_px),
         non_json_backend,
         output,
     )?;

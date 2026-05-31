@@ -31,6 +31,15 @@ pub struct ViewportConfig {
     pub bar_h: u32,
     pub content_x: u32,
     pub content_y: u32,
+    /// The CSS em-square size used when the font metrics below were measured.
+    /// Zero when font metrics are unavailable.
+    pub font_size_px: f32,
+    /// Raw font bbox height (`ascent − descent`) at `font_size_px`, without
+    /// the `line_height` multiplier.  Zero when unavailable.
+    pub char_height_px: u32,
+    /// Raw scaled font ascent at `font_size_px` (before vertical centering).
+    /// Zero when unavailable.
+    pub ascent_px: u32,
 }
 
 /// Returns `true` if the character is a box drawing character.
@@ -93,7 +102,31 @@ impl ViewportConfig {
             bar_h,
             content_x: frame_style.margin_px + frame_style.padding_px + extra_x,
             content_y: frame_style.margin_px + bar_h + frame_style.padding_px + extra_y,
+            font_size_px: 0.0,
+            char_height_px: 0,
+            ascent_px: 0,
         }
+    }
+
+    /// Attach font metric fields produced by the GIF renderer so that other
+    /// renderers (e.g. SVG) can compute a vertically-centred baseline without
+    /// reloading the font.
+    ///
+    /// - `font_size_px`: the CSS em-square size at which the metrics were
+    ///   measured (e.g. 22.0 for the default GIF renderer).
+    /// - `char_height_px`: raw font bbox height (ascent − descent) at that
+    ///   font size, *without* the `line_height` multiplier.
+    /// - `ascent_px`: raw scaled ascent at that font size (before centering).
+    pub fn with_font_metrics(
+        mut self,
+        font_size_px: f32,
+        char_height_px: u32,
+        ascent_px: u32,
+    ) -> Self {
+        self.font_size_px = font_size_px;
+        self.char_height_px = char_height_px;
+        self.ascent_px = ascent_px;
+        self
     }
 }
 
