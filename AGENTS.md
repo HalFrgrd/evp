@@ -134,12 +134,12 @@ Look for these milestones (in order):
 
 ```
 spawning pty
-applied default Snazzy color palette
+applied terminal theme theme=…
+render thread finished path=…
 frames captured
-output written path=…
 ```
 
-If "frames captured" prints but "output written" never does, you're in
+If "render thread finished" never prints, you're in
 a renderer-thread deadlock — re-read the *Sender-drop discipline*
 section.
 
@@ -160,6 +160,6 @@ section.
   static library, headers, and pkg-config files into `assets/libghostty`.
 - Run `docker buildx bake extract-libghostty` to refresh `assets/libghostty`
   so local and CI builds do not need network access for Zig/Ghostty fetches.
-- `vhs.Dockerfile` (repo root) is based on the charmbracelet VHS image and
+- `docker/vhs.Dockerfile` is based on the charmbracelet VHS image and
   bakes in `scripts/stress_test_program.py` and `scripts/stress_test.tape`
   for the stress-test comparison run.

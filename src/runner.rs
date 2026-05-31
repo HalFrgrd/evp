@@ -367,6 +367,7 @@ pub fn run_with_raw_frame_consumers(
                     opts.rows,
                     script.settings.cursor_blink,
                     last_cursor_moved_at,
+                    script.settings.theme.cursor_accent_rgb().ok().flatten(),
                 )?;
                 // Update cursor-movement tracking: any change in cursor
                 // state (moved, appeared, or disappeared) counts as
@@ -538,6 +539,14 @@ fn apply_theme(terminal: &mut Terminal<'_, '_>, theme: &crate::Theme) -> Result<
         cursor_rgb[0], cursor_rgb[1], cursor_rgb[2]
     );
     terminal.vt_write(cursor.as_bytes());
+
+    if let Some(selection_rgb) = theme.selection_rgb()? {
+        let selection_seq = format!(
+            "\x1b]17;rgb:{:02x}/{:02x}/{:02x}\x1b\\",
+            selection_rgb[0], selection_rgb[1], selection_rgb[2]
+        );
+        terminal.vt_write(selection_seq.as_bytes());
+    }
 
     info!(theme = ?theme.name, "applied terminal theme");
     Ok(())
@@ -808,11 +817,13 @@ fn capture<'a>(
     rows: u16,
     cursor_blink: bool,
     last_cursor_moved_at: Option<Duration>,
+    cursor_accent: Option<[u8; 3]>,
 ) -> Result<(RawFrame, Option<(u16, u16)>)> {
     let snap = render_state.update(terminal)?;
     let colors = snap.colors()?;
     let default_fg = rgb_to_arr(colors.foreground);
     let default_bg = rgb_to_arr(colors.background);
+    let cursor_color = colors.cursor.map(rgb_to_arr);
 
     let total = (cols as usize) * (rows as usize);
     let mut cells: Vec<CellSnap> = Vec::with_capacity(total);
@@ -924,6 +935,8 @@ fn capture<'a>(
             cursor,
             default_fg,
             default_bg,
+            cursor_color,
+            cursor_accent,
         },
         raw_cursor_pos,
     ))

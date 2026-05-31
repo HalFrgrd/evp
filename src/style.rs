@@ -144,6 +144,14 @@ impl Theme {
     pub fn cursor_rgb(&self) -> Result<[u8; 3]> {
         parse_hex_color(&self.cursor)
     }
+
+    pub fn cursor_accent_rgb(&self) -> Result<Option<[u8; 3]>> {
+        self.cursor_accent.as_ref().map(|s| parse_hex_color(s)).transpose()
+    }
+
+    pub fn selection_rgb(&self) -> Result<Option<[u8; 3]>> {
+        self.selection.as_ref().map(|s| parse_hex_color(s)).transpose()
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]

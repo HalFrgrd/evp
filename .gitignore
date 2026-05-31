@@ -8,3 +8,4 @@ docker/build/
 assets/libghostty/
 scripts/compare-out/
 _vhs_work/
+**/.antigravitycli/
