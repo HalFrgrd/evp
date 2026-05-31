@@ -396,12 +396,13 @@ fn render_from_frames(frames: &[RawFrame], cfg: ViewportConfig, opts: &SvgOption
     let mut cur_cursor: Option<(u16, u16, u32, [u8; 3])> = None; // (col, row, start_ms, color)
 
     for frame in frames.iter() {
+        let cc = frame.cursor_color.unwrap_or(frame.default_fg);
         match (cur_cursor, frame.cursor) {
             (None, Some((cx, cy))) => {
-                cur_cursor = Some((cx, cy, frame.t_ms, frame.default_fg));
+                cur_cursor = Some((cx, cy, frame.t_ms, cc));
             }
             (Some((ocx, ocy, start, color)), Some((cx, cy))) => {
-                if ocx != cx || ocy != cy || color != frame.default_fg {
+                if ocx != cx || ocy != cy || color != cc {
                     cursor_spans.push(CursorSpan {
                         col: ocx,
                         row: ocy,
@@ -409,7 +410,7 @@ fn render_from_frames(frames: &[RawFrame], cfg: ViewportConfig, opts: &SvgOption
                         end_ms: frame.t_ms,
                         color,
                     });
-                    cur_cursor = Some((cx, cy, frame.t_ms, frame.default_fg));
+                    cur_cursor = Some((cx, cy, frame.t_ms, cc));
                 }
             }
             (Some((ocx, ocy, start, color)), None) => {
@@ -805,6 +806,8 @@ mod tests {
                 cursor: Some((2, 0)),
                 default_fg: [255, 255, 255],
                 default_bg: [0, 0, 0],
+                cursor_color: None,
+                cursor_accent: None,
                 cells,
             }],
         }

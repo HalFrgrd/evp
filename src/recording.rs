@@ -64,6 +64,10 @@ pub struct RawFrame {
     /// Terminal default colors (fg, bg) at this point in time.
     pub default_fg: [u8; 3],
     pub default_bg: [u8; 3],
+    #[serde(default)]
+    pub cursor_color: Option<[u8; 3]>,
+    #[serde(default)]
+    pub cursor_accent: Option<[u8; 3]>,
 }
 
 /// A single cell diff entry.
@@ -84,6 +88,10 @@ pub enum Frame {
         cursor: Option<(u16, u16)>,
         default_fg: [u8; 3],
         default_bg: [u8; 3],
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        cursor_color: Option<[u8; 3]>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        cursor_accent: Option<[u8; 3]>,
         cells: Vec<CellSnap>,
     },
     Diff {
@@ -91,6 +99,10 @@ pub enum Frame {
         cursor: Option<(u16, u16)>,
         default_fg: [u8; 3],
         default_bg: [u8; 3],
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        cursor_color: Option<[u8; 3]>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        cursor_accent: Option<[u8; 3]>,
         changes: Vec<CellChange>,
     },
 }
@@ -106,6 +118,18 @@ impl Frame {
     pub fn cursor(&self) -> Option<(u16, u16)> {
         match self {
             Frame::Key { cursor, .. } | Frame::Diff { cursor, .. } => *cursor,
+        }
+    }
+
+    pub fn cursor_color(&self) -> Option<[u8; 3]> {
+        match self {
+            Frame::Key { cursor_color, .. } | Frame::Diff { cursor_color, .. } => *cursor_color,
+        }
+    }
+
+    pub fn cursor_accent(&self) -> Option<[u8; 3]> {
+        match self {
+            Frame::Key { cursor_accent, .. } | Frame::Diff { cursor_accent, .. } => *cursor_accent,
         }
     }
 }
@@ -177,6 +201,8 @@ impl RecordingBuilder {
                 cursor: frame.cursor,
                 default_fg: frame.default_fg,
                 default_bg: frame.default_bg,
+                cursor_color: frame.cursor_color,
+                cursor_accent: frame.cursor_accent,
                 cells: frame.cells.clone(),
             });
             self.frames_since_key = 0;
@@ -196,6 +222,8 @@ impl RecordingBuilder {
                 cursor: frame.cursor,
                 default_fg: frame.default_fg,
                 default_bg: frame.default_bg,
+                cursor_color: frame.cursor_color,
+                cursor_accent: frame.cursor_accent,
                 changes,
             });
             self.frames_since_key += 1;
@@ -239,12 +267,16 @@ impl Recording {
         let mut cursor;
         let mut default_fg;
         let mut default_bg;
+        let mut cursor_color;
+        let mut cursor_accent;
         match &self.frames[key_i] {
             Frame::Key {
                 t_ms: t,
                 cursor: c,
                 default_fg: dfg,
                 default_bg: dbg,
+                cursor_color: cc,
+                cursor_accent: ca,
                 cells: cs,
             } => {
                 cells = cs.clone();
@@ -252,6 +284,8 @@ impl Recording {
                 cursor = *c;
                 default_fg = *dfg;
                 default_bg = *dbg;
+                cursor_color = *cc;
+                cursor_accent = *ca;
             }
             Frame::Diff { .. } => unreachable!(),
         }
@@ -265,12 +299,16 @@ impl Recording {
                     cursor: c,
                     default_fg: dfg,
                     default_bg: dbg,
+                    cursor_color: cc,
+                    cursor_accent: ca,
                     changes,
                 } => {
                     t_ms = *t;
                     cursor = *c;
                     default_fg = *dfg;
                     default_bg = *dbg;
+                    cursor_color = *cc;
+                    cursor_accent = *ca;
                     for ch in changes {
                         if let Some(slot) = cells.get_mut(ch.idx as usize) {
                             *slot = ch.cell.clone();
@@ -288,6 +326,8 @@ impl Recording {
             cursor,
             default_fg,
             default_bg,
+            cursor_color,
+            cursor_accent,
         })
     }
 }

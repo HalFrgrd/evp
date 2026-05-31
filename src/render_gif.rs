@@ -498,7 +498,13 @@ fn rasterize_raw_frame(
                 fg = dim_color(fg, bg);
             }
 
-            if bg != frame.default_bg || cell.flags & style_flags::INVERSE != 0 {
+            let is_cursor = frame.cursor == Some((col, row));
+            if is_cursor {
+                bg = frame.cursor_color.unwrap_or(frame.default_fg);
+                fg = frame.cursor_accent.unwrap_or(frame.default_bg);
+            }
+
+            if bg != frame.default_bg || cell.flags & style_flags::INVERSE != 0 || is_cursor {
                 fill_rect(&mut buf, cfg.canvas_w, x, y, cell_w, cell_h, bg);
             }
 
@@ -607,11 +613,7 @@ fn rasterize_raw_frame(
         }
     }
 
-    if let Some((cx, cy)) = frame.cursor {
-        let x = cfg.content_x + cx as u32 * cell_w;
-        let y = cfg.content_y + cy as u32 * cell_h;
-        invert_rect(&mut buf, cfg.canvas_w, x, y, cell_w, cell_h);
-    }
+
 
     if cfg.frame_style.border_radius_px > 0 {
         mask_outside_rounded_rect(
@@ -759,18 +761,6 @@ fn fill_rect(buf: &mut [u8], w: u32, x: u32, y: u32, rw: u32, rh: u32, color: [u
     }
 }
 
-fn invert_rect(buf: &mut [u8], w: u32, x: u32, y: u32, rw: u32, rh: u32) {
-    for yy in y..(y + rh) {
-        for xx in x..(x + rw) {
-            let i = ((yy * w + xx) * 3) as usize;
-            if i + 2 < buf.len() {
-                buf[i] = 255 - buf[i];
-                buf[i + 1] = 255 - buf[i + 1];
-                buf[i + 2] = 255 - buf[i + 2];
-            }
-        }
-    }
-}
 
 fn blend_pixel(buf: &mut [u8], w: u32, x: u32, y: u32, color: [u8; 3], coverage: f32) {
     let i = ((y * w + x) * 3) as usize;
