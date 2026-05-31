@@ -142,8 +142,17 @@ pub fn derive_options(s: &Settings) -> ViewportConfig {
     let rows = s
         .rows
         .unwrap_or_else(|| (inner_h / cell_h_px).max(2) as u16);
-    ViewportConfig::new(cols, rows, s.framerate, cell_w_px, cell_h_px, frame_style)
-        .with_font_metrics(s.font_size, char_height_px, ascent_px)
+    ViewportConfig::new(
+        cols,
+        rows,
+        s.framerate,
+        cell_w_px,
+        cell_h_px,
+        frame_style,
+        s.font_size,
+        char_height_px,
+        ascent_px,
+    )
 }
 
 /// Run the script end-to-end. Returns only pipeline stats.

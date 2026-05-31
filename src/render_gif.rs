@@ -241,18 +241,9 @@ pub fn measure_cell_px(
     line_height: f32,
     letter_spacing: f32,
 ) -> (u32, u32, u32, u32) {
-    let font_set = match load_font_family(font_path) {
-        Ok(loaded) => loaded.font_set,
-        Err(_) => {
-            // Fallback: 0.6 em approximation — only reached if the embedded
-            // fonts are somehow corrupt.
-            let w = (font_size * 0.6 + letter_spacing).round().max(1.0) as u32;
-            let h = (font_size * line_height).round().max(1.0) as u32;
-            let char_h = (font_size * 1.2).round().max(1.0) as u32;
-            let asc = (font_size * 0.8).round().max(0.0) as u32;
-            return (w, h, char_h, asc);
-        }
-    };
+    let font_set = load_font_family(font_path)
+        .expect("font metrics are always required but font failed to load")
+        .font_set;
     let primary = &font_set.fonts[font_set.regular[0]];
     let (_scale, cell_w, cell_h, _baseline, char_height_px, ascent_px) =
         css_cell_metrics(primary, font_size, line_height, letter_spacing);
@@ -275,7 +266,10 @@ pub fn spawn_gif_stream(
         opts.line_height,
         opts.letter_spacing,
     );
-    let cfg = cfg.with_font_metrics(opts.font_size, char_height_px, ascent_px);
+    let mut cfg = cfg;
+    cfg.font_size_px = opts.font_size;
+    cfg.char_height_px = char_height_px;
+    cfg.ascent_px = ascent_px;
 
     let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) =
         bounded(RAW_FRAME_CONSUMER_CHANNEL_CAPACITY);
@@ -296,6 +290,9 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<(
             rec.cell_width_px,
             rec.cell_height_px,
             rec.frame_style,
+            rec.font_size_px,
+            rec.char_height_px,
+            rec.ascent_px,
         ),
         opts.clone(),
         out.to_path_buf(),
@@ -323,8 +320,17 @@ pub fn render_png_frame(frame: &RawFrame, opts: &RenderOptions, out: &Path) -> R
         opts.line_height,
         opts.letter_spacing,
     );
-    let cfg = ViewportConfig::new(frame.cols, frame.rows, 0, cell_w, cell_h, opts.frame_style)
-        .with_font_metrics(opts.font_size, char_height_px, ascent_px);
+    let cfg = ViewportConfig::new(
+        frame.cols,
+        frame.rows,
+        0,
+        cell_w,
+        cell_h,
+        opts.frame_style,
+        opts.font_size,
+        char_height_px,
+        ascent_px,
+    );
     let mut glyph_cache = GlyphCache::new();
     let buf = rasterize_raw_frame(frame, &font_set, scale, baseline, cfg, &mut glyph_cache);
     lodepng::encode24_file(out, &buf, cfg.canvas_w as usize, cfg.canvas_h as usize)

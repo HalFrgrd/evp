@@ -60,6 +60,9 @@ impl ViewportConfig {
         cell_width_px: u32,
         cell_height_px: u32,
         frame_style: FrameStyle,
+        font_size_px: f32,
+        char_height_px: u32,
+        ascent_px: u32,
     ) -> Self {
         let cell_w = cell_width_px.max(1);
         let cell_h = cell_height_px.max(1);
@@ -102,31 +105,10 @@ impl ViewportConfig {
             bar_h,
             content_x: frame_style.margin_px + frame_style.padding_px + extra_x,
             content_y: frame_style.margin_px + bar_h + frame_style.padding_px + extra_y,
-            font_size_px: 0.0,
-            char_height_px: 0,
-            ascent_px: 0,
+            font_size_px,
+            char_height_px,
+            ascent_px,
         }
-    }
-
-    /// Attach font metric fields produced by the GIF renderer so that other
-    /// renderers (e.g. SVG) can compute a vertically-centred baseline without
-    /// reloading the font.
-    ///
-    /// - `font_size_px`: the CSS em-square size at which the metrics were
-    ///   measured (e.g. 22.0 for the default GIF renderer).
-    /// - `char_height_px`: raw font bbox height (ascent − descent) at that
-    ///   font size, *without* the `line_height` multiplier.
-    /// - `ascent_px`: raw scaled ascent at that font size (before centering).
-    pub fn with_font_metrics(
-        mut self,
-        font_size_px: f32,
-        char_height_px: u32,
-        ascent_px: u32,
-    ) -> Self {
-        self.font_size_px = font_size_px;
-        self.char_height_px = char_height_px;
-        self.ascent_px = ascent_px;
-        self
     }
 }
 

@@ -210,8 +210,10 @@ pub fn render_svg(rec: &Recording, opts: &SvgOptions, out: &Path) -> Result<()> 
             rec.cell_width_px,
             rec.cell_height_px,
             rec.frame_style,
-        )
-        .with_font_metrics(rec.font_size_px, rec.char_height_px, rec.ascent_px),
+            rec.font_size_px,
+            rec.char_height_px,
+            rec.ascent_px,
+        ),
         opts.clone(),
         out.to_path_buf(),
     )?;
@@ -238,8 +240,10 @@ pub fn render_svg_to_string(rec: &Recording, opts: &SvgOptions) -> Result<String
         rec.cell_width_px,
         rec.cell_height_px,
         rec.frame_style,
-    )
-    .with_font_metrics(rec.font_size_px, rec.char_height_px, rec.ascent_px);
+        rec.font_size_px,
+        rec.char_height_px,
+        rec.ascent_px,
+    );
 
     // Reconstruct every frame up-front.
     let mut frames: Vec<RawFrame> = Vec::with_capacity(rec.frames.len());
@@ -507,14 +511,16 @@ fn render_from_frames(frames: &[RawFrame], cfg: ViewportConfig, opts: &SvgOption
     // When metrics are absent (old recordings), fall back to the historical
     // approximation of 0.8 * font_size (no centering) — this preserves the
     // previous behaviour for recordings that pre-date this feature.
-    let baseline = if cfg.char_height_px > 0 && cfg.font_size_px > 0.0 {
+    assert!(
+        cfg.char_height_px > 0 && cfg.font_size_px > 0.0,
+        "font metrics are always required; ViewportConfig::with_font_metrics was never called"
+    );
+    let baseline = {
         let scale = opts.font_size / cfg.font_size_px;
         let char_h_svg = cfg.char_height_px as f32 * scale;
         let ascent_svg = cfg.ascent_px as f32 * scale;
         let extra = (cell_h as f32 - char_h_svg).max(0.0);
         (ascent_svg + extra / 2.0).round() as u32
-    } else {
-        (opts.font_size * 0.8).round() as u32
     };
 
     // Determine if all spans cover the full duration (static content optimization).
@@ -785,9 +791,11 @@ mod tests {
             framerate: 10,
             cell_width_px: 8,
             cell_height_px: 16,
-            font_size_px: 0.0,
-            char_height_px: 0,
-            ascent_px: 0,
+            // Plausible metrics for JetBrains Mono at the SVG default font_size
+            // of 16px: bbox_h ≈ 19px, ascent ≈ 15px.
+            font_size_px: 16.0,
+            char_height_px: 19,
+            ascent_px: 15,
             frame_style: FrameStyle {
                 padding_px: 4,
                 ..FrameStyle::default()
