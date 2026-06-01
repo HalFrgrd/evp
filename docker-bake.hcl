@@ -7,3 +7,10 @@ target "extract-libghostty" {
   dockerfile = "docker/libghostty-pkgconfig.Dockerfile"
   output     = ["type=local,dest=${EXTRACT_LIBGHOSTTY_DEST}"]
 }
+
+target "vhs" {
+  context    = "."
+  dockerfile = "docker/vhs.Dockerfile"
+  tags       = ["evp-vhs:latest"]
+}
+
