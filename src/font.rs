@@ -127,6 +127,8 @@ pub struct FontInfo {
     pub font: FontArc,
     /// Raw TTF bytes (needed for SVG subsetting).
     pub ttf_bytes: Vec<u8>,
+    /// Original WOFF2 bytes if available (for efficient SVG embedding).
+    pub woff2_bytes: Option<Vec<u8>>,
     /// CSS font family name.
     pub family_name: String,
     /// CSS font weight (e.g. "normal", "bold").
@@ -219,6 +221,7 @@ pub fn load_font_family(path: Option<&str>) -> Result<LoadedFontFamily> {
         let info = FontInfo {
             font: face,
             ttf_bytes: bytes,
+            woff2_bytes: None,
             family_name,
             weight: "normal".to_string(),
             style: "normal".to_string(),
@@ -248,6 +251,7 @@ pub fn load_font_family(path: Option<&str>) -> Result<LoadedFontFamily> {
     fonts.push(FontInfo {
         font: jb_reg,
         ttf_bytes: jb_reg_ttf.to_vec(),
+        woff2_bytes: Some(EMBEDDED_FONTS[0].bytes.to_vec()),
         family_name: EMBEDDED_FONTS[0].family_name.to_string(),
         weight: EMBEDDED_FONTS[0].weight.to_string(),
         style: EMBEDDED_FONTS[0].style.to_string(),
@@ -261,6 +265,7 @@ pub fn load_font_family(path: Option<&str>) -> Result<LoadedFontFamily> {
         fonts.push(FontInfo {
             font: f,
             ttf_bytes: jb_bold_ttf.to_vec(),
+            woff2_bytes: Some(EMBEDDED_FONTS[1].bytes.to_vec()),
             family_name: EMBEDDED_FONTS[1].family_name.to_string(),
             weight: EMBEDDED_FONTS[1].weight.to_string(),
             style: EMBEDDED_FONTS[1].style.to_string(),
@@ -276,6 +281,7 @@ pub fn load_font_family(path: Option<&str>) -> Result<LoadedFontFamily> {
         fonts.push(FontInfo {
             font: f,
             ttf_bytes: jb_italic_ttf.to_vec(),
+            woff2_bytes: Some(EMBEDDED_FONTS[2].bytes.to_vec()),
             family_name: EMBEDDED_FONTS[2].family_name.to_string(),
             weight: EMBEDDED_FONTS[2].weight.to_string(),
             style: EMBEDDED_FONTS[2].style.to_string(),
@@ -291,6 +297,7 @@ pub fn load_font_family(path: Option<&str>) -> Result<LoadedFontFamily> {
         fonts.push(FontInfo {
             font: f,
             ttf_bytes: jb_bi_ttf.to_vec(),
+            woff2_bytes: Some(EMBEDDED_FONTS[3].bytes.to_vec()),
             family_name: EMBEDDED_FONTS[3].family_name.to_string(),
             weight: EMBEDDED_FONTS[3].weight.to_string(),
             style: EMBEDDED_FONTS[3].style.to_string(),
@@ -310,6 +317,7 @@ pub fn load_font_family(path: Option<&str>) -> Result<LoadedFontFamily> {
             fonts.push(FontInfo {
                 font,
                 ttf_bytes: ttf.to_vec(),
+                woff2_bytes: Some(emb.bytes.to_vec()),
                 family_name: emb.family_name.to_string(),
                 weight: emb.weight.to_string(),
                 style: emb.style.to_string(),

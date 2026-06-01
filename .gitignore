@@ -9,3 +9,4 @@ assets/libghostty/
 scripts/compare-out/
 _vhs_work/
 **/.antigravitycli/
+**/compare-out/

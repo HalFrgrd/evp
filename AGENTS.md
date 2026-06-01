@@ -1,171 +1,89 @@
 # AGENTS
 
-Notes for coding agents (and humans) working in `evp`. Keep this short — it
-should help you avoid stepping on the same rakes we already found.
+Notes for coding agents (and humans) working in `evp`. Keep this short — it should help you avoid stepping on the same rakes we already found.
 
-## Build / run
+## Build & Run Invariants
 
-- Workspace member of a multi-root setup; `libghostty-rs` and `vhs` live
-  alongside it but `evp` builds standalone via `cargo build`.
-- If Copilot is running as a cloud agent, always open a PR for any code
-  changes it makes.
-- For Copilot/restricted builds, **always** use the prebuilt libghostty
-  pkg-config artifact in `assets/libghostty`; do not rely on vendored
-  Ghostty fetches from `libghostty-vt-sys`.
-- Refresh that artifact with:
-  `docker buildx bake extract-libghostty`
-- Keep `GHOSTTY_SOURCE_DIR` unset when building `evp`.
-- Release build is required for any timing or smoke testing — debug is
-  ~15-20× slower because of glyph rasterization and gifski quantization.
+- **Musl Target**: This environment compiles for the `x86_64-unknown-linux-musl` target by default. When calling the compiled binary directly, make sure to use `./target/x86_64-unknown-linux-musl/...` rather than the standard `./target/...` directories.
+- **Standalone Build**: `evp` is a workspace member of a multi-root setup (alongside `libghostty-rs` and `vhs`) but builds standalone via `cargo build`.
+- **Prebuilt Ghostty**: For Copilot/restricted builds, **always** use the prebuilt libghostty pkg-config artifact in `assets/libghostty`; do not rely on vendored Ghostty fetches from `libghostty-vt-sys`. Keep `GHOSTTY_SOURCE_DIR` unset.
+- **Refresh Artifact**: Refresh the prebuilt artifact using `docker buildx bake extract-libghostty`.
+- **Performance Profile**: A release build is required for timing or smoke testing — debug is 15-20× slower because of glyph rasterization and gifski quantization:
   - Debug: ~200ms/frame
   - Release: ~14ms/frame
-- Smoke test: `./target/release/evp ./examples/hello.tape --output /tmp/x.gif`
-- Trace logs: append `--log-level trace` (very chatty).
+- **Smoke test**: `./target/x86_64-unknown-linux-musl/release/evp ./examples/hello.tape --output /tmp/x.gif`
+- **Trace logs**: Append `--log-level trace` (very chatty).
 
-## Benchmark conventions
+## Unified Font Architecture (`src/font.rs`)
 
-`examples/benchmark_render.rs` is the canonical timing harness. Notable
-choices, do **not** silently change them:
+- **Centralized Source of Truth**: All font loading, glyph fallback selection, and cell metrics calculations are centralized in `src/font.rs`. Avoid ad-hoc font parsing or loading.
+- **Lazy Decompression**: Embedded WOFF2 files (JetBrains Mono Nerd Font Mono variants, Noto Sans Mono, Noto Sans Symbols 2, CJK JP subset, Unifont Upper/CSUR) are lazily decompressed to TTF once at runtime using `OnceLock`, caching the decoded TTF bytes.
+- **FontSet**: Holds loaded fonts and ordered style-specific indices. When looking up a glyph, `FontSet::select_for_char` walks the list to find the first face covering the character, falling back to the primary regular font if none do.
+- **Script Settings**: Font selection is configured strictly via the `.tape` settings (e.g. `Set Font ...`). The `--font` CLI option has been removed.
 
-- **`Set TypingSpeed 80ms`** — chosen so per-character `Type` events land
-  on distinct frame deadlines at 30 fps (one keystroke ≈ 2-3 frames).
-  Lowering this makes the benchmark dominated by glyph layout instead of
-  rendering throughput; raising it stretches the recording for no useful
-  signal.
-- **`Set Framerate 30`** — matches typical demo output and keeps frame
-  count predictable for diff-frame ratios.
-- **`RENDER_REPEATS = 4`** — renders the same `Recording` four times so
-  the per-pass average filters out cold-cache noise. Pass 1 is almost
-  always slower (font load, allocator warmup).
-- The benchmark builds its own filesystem fixture under `/tmp/evp-bench-fs-*`
-  and writes a `.tape` next to it. Old fixtures are not cleaned up — they're
-  small and useful for rerunning by hand.
+## SVG Font Embedding (`src/render_svg.rs`)
 
-Typical numbers on a modern x86_64 release build:
+- **Full Embedding vs Subsetting**: We do **not** use the `subsetter` crate or any font-subsetting libraries. Subsetting crates strip the `cmap` table, rendering the embedded fonts invalid in most web browsers.
+- **WOFF2 base64 Data**: For embedded fonts, the SVG renderer embeds the full, valid font data using base64 WOFF2 strings in `@font-face` blocks (via `url(data:font/woff2;base64,...)`). This preserves all character mappings and layout tables while keeping files compact.
+- **Custom Font Fallback**: If a custom `.ttf` path is provided in the tape, the renderer embeds the raw TTF bytes (via `url(data:font/ttf;base64,...)`).
+- **Conditional Embedding**: The style block dynamically determines which font variants (bold, italic, CJK fallbacks, etc.) are actually required by scanning the character sets used in the recording.
 
+## Streaming Render Pipeline (Must-Know)
+
+`evp` runs the runner plus one raw-frame consumer worker per output or library recording request:
+1. **PTY/runner** — drives libghostty + the script timeline. Captures one `RawFrame` per frame deadline and hands clones to consumers with non-blocking sends.
+2. **RawFrameConsumer worker** — gif/svg/json renderers write output files; the optional `FullRecording` consumer builds an in-memory `Recording`.
+
+### Hard Rules
+
+- **PTY Thread Must Never Block**: The PTY thread uses `try_send` on each consumer channel. If a queue is full, the frame is dropped and `raw_frame_consumer_dropped_frames` is logged at the end.
+- **Channel Capacity**: Bounded channel capacity is `4096` to absorb startup bursts.
+- **Sender-Drop Discipline (The Deadlock Gotcha)**: Every channel has multiple senders (`tx.clone()`). A worker exits its `rx.recv()` loop **only when all senders drop**. If you hold onto a clone past the `join()` call, the worker blocks forever and `JoinHandle::join` deadlocks.
+  
+  Concretely:
+  ```rust
+  let RendererHandle { tx, join } = self;
+  drop(tx);                  // Drop the clone we exposed to the runner
+  match join { ... h.join() } // Now the worker can exit safely
+  ```
+
+- **Gifski rules (`src/render_gif.rs`)**: `gifski::new()` returns `(collector, writer)`. The writer's `write()` blocks until the collector is dropped. Never call `writer.write()` on the same thread as the collector loop unless you've already dropped the collector, or you will deadlock instantly.
+
+## Threading Invariants
+
+- libghostty types (`Terminal`, render iterators) are `!Send + !Sync`. They stay on the runner thread. Only owned `RawFrame` values (plain `Vec` + cursor + colors) cross thread boundaries.
+- The runner does not own a `RecordingBuilder`. Only the optional `FullRecording` consumer builds an in-memory `Recording`.
+
+## Benchmark Conventions
+
+`examples/benchmark_render.rs` is the canonical timing harness. Do not silently change these settings:
+- **`Set TypingSpeed 80ms`** — chosen so per-character `Type` events land on distinct frame deadlines at 30 fps (one keystroke ≈ 2-3 frames).
+- **`Set Framerate 30`** — matches typical demo output.
+- **`RENDER_REPEATS = 4`** — renders the same `Recording` 4 times to filter out cold-cache noise (Pass 1 font loads, allocator warmups).
+- Benchmarks build their filesystem fixture under `/tmp/evp-bench-fs-*` and leave them for easy manual rerunning.
+
+## Debug Log Breadcrumbs
+
+Filter logs with:
+```bash
+RUST_LOG=evp::runner=debug,evp::render_gif=info,evp::render_svg=info ./target/x86_64-unknown-linux-musl/release/evp ...
 ```
-recording_build_ms ≈ 10000   (capture is bound by the 80ms TypingSpeed)
-render_avg_ms      ≈ 1200    (gifski streaming, 320 frames)
-```
+Look for milestones in order:
+`spawning pty` -> `applied terminal theme theme=...` -> `render thread finished path=...` -> `frames captured`.
+If `render thread finished` doesn't print, it is a renderer-thread deadlock.
 
-## Streaming render pipeline (must-know)
+## Things That Look Like Bugs But Aren't
 
-`evp` runs the runner plus one raw-frame consumer worker per output or
-library recording request:
+- **Empty Diff Frames**: `Frame::Diff` with no `changes` is intentional to keep the timeline aligned with the framerate for animations like cursor blinking.
+- **Padding**: The recording extends `total_duration` by ~4 frame intervals past the last script event to keep the final state visible and avoid stuck loops.
+- **Pass 1 Slowness**: The first pass of `benchmark_render` is slower due to font loading and allocator warmup.
 
-1. **PTY/runner** — drives libghostty + the script timeline. Captures one
-   `RawFrame` per frame deadline and hands clones to consumers with
-   non-blocking sends.
-2. **RawFrameConsumer worker** — gif/svg/json renderers write output files;
-   the optional `FullRecording` consumer builds an in-memory `Recording` for
-   library callers.
+## Docker Build Environment
 
-### Hard rules
+- `docker/libghostty-pkgconfig.Dockerfile` builds the prebuilt `libghostty-vt` static library, headers, and pkg-config files into `assets/libghostty`.
+- Run `docker buildx bake extract-libghostty` to refresh `assets/libghostty` so local and CI builds do not need network access for Zig/Ghostty fetches.
+- `docker/vhs.Dockerfile` is based on the charmbracelet VHS image and bakes in `scripts/stress_test_program.py` and `scripts/stress_test.tape` for the stress-test comparison run.
 
-- The PTY thread **must never block** on raw-frame consumers. It uses
-  `try_send` on each consumer channel; if a queue is full, that consumer frame
-  is dropped and `raw_frame_consumer_dropped_frames` is logged at the end.
-- Bounded raw-frame consumer channel capacity is `4096`. This is large enough
-  to absorb bursts on cold starts; do not shrink it without a benchmark.
+## Common Mistakes & Gotchas (From Past Agents)
 
-### Sender-drop discipline (the hang we keep re-creating)
-
-Every channel has multiple senders by design (`tx.clone()` is handed to
-the runner so it can feed frames). A worker exits its `rx.recv()` loop
-**only when all senders drop**. If you hold onto a clone past the
-`join()` call, the worker blocks forever and `JoinHandle::join` blocks
-with it.
-
-Concretely, in `src/renderer.rs::RendererHandle::join`:
-
-```rust
-let RendererHandle { tx, join } = self;
-drop(tx);                  // drop the clone we exposed to the runner
-match join { … h.join() }  // now the worker can exit
-```
-
-Do the same pattern in any new handle wrapper. This was the cause of the
-"binary never finishes" bug after the unified renderer refactor — the
-worker had two live senders (`self.tx` on the wrapper + the inner
-handle's `tx`) and `h.join()` deadlocked.
-
-### Gifski-specific rules (`src/render_gif.rs`)
-
-- `gifski::new()` returns `(collector, writer)`. The writer's `write()`
-  call **blocks until the collector is dropped**. Two valid topologies:
-  1. Writer on its own thread; main thread drops the collector when the
-     frame loop ends, then joins the writer. This is what we use.
-  2. Writer on the same thread, run *after* dropping the collector
-     (gifski's own example). Easier to reason about but serialises the
-     final frame batch.
-  Do not call `writer.write()` on the same thread as the collector loop
-  unless you have already dropped the collector — instant deadlock.
-- `add_frame_rgba` blocks if gifski's internal queue is saturated. That's
-  fine because the frame loop owns the collector — no upstream channel
-  is held while we wait.
-
-## Threading invariants
-
-- libghostty types (`Terminal`, render iterators) are `!Send + !Sync`. They
-  stay on the runner thread. Only owned `RawFrame` values (plain `Vec` +
-  cursor + colors) ever cross a thread boundary.
-- The runner must not own a `RecordingBuilder` by default. Only the optional
-  `FullRecording` raw-frame consumer builds an in-memory `Recording`.
-
-## Output formats
-
-- `.gif`, `.svg`, and `.json` go through the same `renderer::spawn_renderer`
-  entry point. Each output gets its own streaming worker.
-- `run_and_return_recording` attaches the `FullRecording` consumer for tests
-  and library callers that need a `Recording`.
-- Adding a new output format means: implement a `spawn_X_stream`
-  returning a handle with `tx: Sender<RawFrame>` + `join() -> Result<()>`,
-  then add a `RendererBackend::X` arm in `src/renderer.rs`.
-
-## Debug log breadcrumbs
-
-Useful filters when chasing pipeline bugs:
-
-```
-RUST_LOG=evp::runner=debug,evp::render_gif=info,evp::render_svg=info ./target/release/evp …
-```
-
-Look for these milestones (in order):
-
-```
-spawning pty
-applied terminal theme theme=…
-render thread finished path=…
-frames captured
-```
-
-If "render thread finished" never prints, you're in
-a renderer-thread deadlock — re-read the *Sender-drop discipline*
-section.
-
-## Things that look like bugs but aren't
-
-- Empty diff frames (`Frame::Diff` with no `changes`) are intentional;
-  they keep the timeline aligned with the framerate so cursor blink and
-  default-color changes still animate.
-- The recording extends `total_duration` by ~4 frame intervals past the
-  last script event. This is so the final terminal state is always
-  visible in the output and is not a stuck loop.
-- Pass 1 of `benchmark_render` is consistently slower than passes 2-4.
-  Font loading + allocator warmup. That's why we average across 4 passes.
-
-## Docker build environment
-
-- `docker/libghostty-pkgconfig.Dockerfile` builds the prebuilt `libghostty-vt`
-  static library, headers, and pkg-config files into `assets/libghostty`.
-- Run `docker buildx bake extract-libghostty` to refresh `assets/libghostty`
-  so local and CI builds do not need network access for Zig/Ghostty fetches.
-- `docker/vhs.Dockerfile` is based on the charmbracelet VHS image and
-  bakes in `scripts/stress_test_program.py` and `scripts/stress_test.tape`
-  for the stress-test comparison run.
-
-## Common mistakes to avoid (from past agents)
-
-- **Target Triple**: This environment compiles for the `x86_64-unknown-linux-musl` target by default. When calling the compiled binary directly, make sure to use `./target/x86_64-unknown-linux-musl/...` rather than the standard `./target/...` directories.
 - **PTY Process Deadlock**: Standard shells (like `dash`/`/bin/sh`) can ignore `SIGHUP` inside virtual PTY/container environments. Always use `SIGKILL` instead of `SIGHUP` to reap child processes in `Child::drop` (`src/pty.rs`), otherwise test suites will deadlock/hang indefinitely.
-

@@ -51,9 +51,7 @@ use crossbeam_channel::{Receiver, Sender, bounded};
 
 use base64::prelude::*;
 use std::collections::HashSet;
-use subsetter::{GlyphRemapper, subset};
 use crate::font::load_font_family;
-use ttf_parser::Face;
 
 use crate::{
     recording::{RawFrame, Recording, style_flags},
@@ -61,72 +59,49 @@ use crate::{
     style::{rgb_hex, window_bar_dot_metrics},
 };
 
-fn subset_font(ttf: &[u8], chars: &HashSet<char>, force: bool) -> Option<Vec<u8>> {
-    let face = Face::parse(ttf, 0).ok()?;
-
-    let mut glyphs = Vec::new();
-    glyphs.push(0); // .notdef
-    let mut has_any = false;
-    for c in chars {
-        if let Some(glyph_id) = face.glyph_index(*c) {
-            if glyph_id.0 != 0 {
-                glyphs.push(glyph_id.0);
-                has_any = true;
-            }
-        }
-    }
-
-    if !has_any && !force {
-        return None;
-    }
-
-    glyphs.sort_unstable();
-    glyphs.dedup();
-
-    let mapper = GlyphRemapper::new_from_glyphs_sorted(&glyphs);
-    subset(ttf, 0, &mapper).ok()
-}
-
 fn generate_style_block(frames: &[RawFrame], opts: &SvgOptions) -> String {
     if !opts.embed_fonts {
         return String::new();
-    }
-    let mut used_chars = HashSet::new();
-    for frame in frames {
-        for cell in &frame.cells {
-            for c in cell.text.chars() {
-                used_chars.insert(c);
-            }
-        }
     }
 
     let mut style = String::new();
     style.push_str("<style>\n");
 
     if let Ok(loaded) = load_font_family(opts.font_path.as_deref()) {
-        for info in &loaded.font_set.fonts {
-            let is_primary_regular = info.weight == "normal"
-                && info.style == "normal"
-                && (info.is_custom || info.family_name == "JetBrainsMono Nerd Font Mono");
-            let force = is_primary_regular;
+        let mut used_font_indices = HashSet::new();
 
-            if let Some(subset_data) = subset_font(&info.ttf_bytes, &used_chars, force) {
-                let encoded = BASE64_STANDARD.encode(&subset_data);
-                let src = format!("url(data:font/ttf;base64,{encoded}) format('truetype')");
-                let css_template = format!(
-                    "@font-face {{ font-family: '{}'; src: {}; font-weight: {}; font-style: {}; }}\n",
-                    info.family_name, src, info.weight, info.style
-                );
-                style.push_str(&css_template);
-            } else if force {
-                let encoded = BASE64_STANDARD.encode(&info.ttf_bytes);
-                let src = format!("url(data:font/ttf;base64,{encoded}) format('truetype')");
-                let css_template = format!(
-                    "@font-face {{ font-family: '{}'; src: {}; font-weight: {}; font-style: {}; }}\n",
-                    info.family_name, src, info.weight, info.style
-                );
-                style.push_str(&css_template);
+        // Always force the regular variant of the primary font (index 0) so the base layout exists.
+        used_font_indices.insert(0);
+
+        // Check which fonts are actually selected/used by cells.
+        for frame in frames {
+            for cell in &frame.cells {
+                for c in cell.text.chars() {
+                    let (idx, _) = loaded.font_set.select_for_char(cell.flags, c);
+                    used_font_indices.insert(idx);
+                }
             }
+        }
+
+        // Embed the used fonts.
+        for &idx in &used_font_indices {
+            if idx >= loaded.font_set.fonts.len() {
+                continue;
+            }
+            let info = &loaded.font_set.fonts[idx];
+            let (src, format_str) = if let Some(ref woff2) = info.woff2_bytes {
+                let encoded = BASE64_STANDARD.encode(woff2);
+                (format!("url(data:font/woff2;base64,{encoded})"), "woff2")
+            } else {
+                let encoded = BASE64_STANDARD.encode(&info.ttf_bytes);
+                (format!("url(data:font/ttf;base64,{encoded})"), "truetype")
+            };
+
+            let css_template = format!(
+                "@font-face {{ font-family: '{}'; src: {} format('{}'); font-weight: {}; font-style: {}; }}\n",
+                info.family_name, src, format_str, info.weight, info.style
+            );
+            style.push_str(&css_template);
         }
     }
 
