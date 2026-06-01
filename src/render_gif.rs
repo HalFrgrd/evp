@@ -13,100 +13,17 @@ use std::{
 use ab_glyph::{Font, FontArc, Glyph, GlyphId, PxScale, ScaleFont};
 use anyhow::{Context, Result, anyhow};
 
+use crate::font::{FontSet, load_font_family};
 use crate::render_common::is_box_drawing;
 use crossbeam_channel::{Receiver, Sender, bounded};
 use gifski::{Settings, progress};
-use tracing::{debug, warn};
-use woff2_patched::convert_woff2_to_ttf;
+use tracing::debug;
 
 use crate::{
     recording::{RawFrame, Recording, style_flags},
     render_common::{RAW_FRAME_CONSUMER_CHANNEL_CAPACITY, RenderOptions, ViewportConfig},
     style::window_bar_dot_metrics,
 };
-
-const EMBEDDED_JETBRAINS_NERD_MONO_REGULAR_WOFF2: &[u8] = include_bytes!(concat!(
-    env!("OUT_DIR"),
-    "/JetBrainsMonoNerdFontMono-Regular.woff2"
-));
-const EMBEDDED_JETBRAINS_NERD_MONO_BOLD_WOFF2: &[u8] = include_bytes!(concat!(
-    env!("OUT_DIR"),
-    "/JetBrainsMonoNerdFontMono-Bold.woff2"
-));
-const EMBEDDED_JETBRAINS_NERD_MONO_ITALIC_WOFF2: &[u8] = include_bytes!(concat!(
-    env!("OUT_DIR"),
-    "/JetBrainsMonoNerdFontMono-Italic.woff2"
-));
-const EMBEDDED_JETBRAINS_NERD_MONO_BOLD_ITALIC_WOFF2: &[u8] = include_bytes!(concat!(
-    env!("OUT_DIR"),
-    "/JetBrainsMonoNerdFontMono-BoldItalic.woff2"
-));
-const EMBEDDED_UNIFONT_UPPER_WOFF2: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/unifont_upper-17.0.04.woff2"));
-const EMBEDDED_UNIFONT_CSUR_WOFF2: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/unifont_csur-17.0.04.woff2"));
-const EMBEDDED_NOTO_SANS_MONO_REGULAR_WOFF2: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/NotoSansMono-Regular.woff2"));
-const EMBEDDED_NOTO_SANS_SYMBOLS2_REGULAR_WOFF2: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/NotoSansSymbols2-Regular.woff2"));
-const EMBEDDED_NOTO_SANS_MONO_CJK_JP_SUBSET_WOFF2: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/NotoSansMonoCJKjp-Subset.woff2"));
-
-/// A collection of font faces organised by text style.
-///
-/// Each style variant holds an ordered list of indices into `fonts`.  When
-/// rendering a character the list is walked in order and the first face that
-/// contains a glyph for that character wins.  The primary face is at index 0
-/// of each per-style list; everything after it is a fallback.  There is no
-/// distinction between "primary" and "fallback" — they are all just entries
-/// in a `Vec` to be tried in sequence.
-#[derive(Debug)]
-struct FontSet {
-    /// All loaded font faces, indexed.
-    fonts: Vec<FontArc>,
-    /// Font indices (into `fonts`) to try for regular text, in priority order.
-    regular: Vec<usize>,
-    /// Font indices to try for bold text.
-    bold: Vec<usize>,
-    /// Font indices to try for italic text.
-    italic: Vec<usize>,
-    /// Font indices to try for bold-italic text.
-    bold_italic: Vec<usize>,
-}
-
-impl FontSet {
-    /// Returns the ordered font-index slice appropriate for `flags`.
-    ///
-    /// If the style-specific list is empty (e.g. no bold face was loaded) the
-    /// regular list is returned as a fallback.
-    fn indices_for_flags(&self, flags: u8) -> &[usize] {
-        let want_bold = flags & style_flags::BOLD != 0;
-        let want_italic = flags & style_flags::ITALIC != 0;
-        let list = match (want_bold, want_italic) {
-            (true, true) => &self.bold_italic,
-            (true, false) => &self.bold,
-            (false, true) => &self.italic,
-            (false, false) => &self.regular,
-        };
-        if list.is_empty() { &self.regular } else { list }
-    }
-
-    /// Select the best `(font_index, &FontArc)` for `ch` given cell `flags`.
-    ///
-    /// Tries each face in the appropriate style list in order; returns the
-    /// first that has a glyph for `ch`.  Falls back to the first face in the
-    /// list if none do.
-    fn select_for_char(&self, flags: u8, ch: char) -> (usize, &FontArc) {
-        let indices = self.indices_for_flags(flags);
-        for &idx in indices {
-            if has_glyph(&self.fonts[idx], ch) {
-                return (idx, &self.fonts[idx]);
-            }
-        }
-        let idx = indices[0];
-        (idx, &self.fonts[idx])
-    }
-}
 
 /// Cache key identifying a rasterised glyph outline.
 #[derive(Hash, Eq, PartialEq)]
@@ -246,7 +163,7 @@ pub fn measure_cell_px(
         .font_set;
     let primary = &font_set.fonts[font_set.regular[0]];
     let (_scale, cell_w, cell_h, _baseline, char_height_px, ascent_px) =
-        css_cell_metrics(primary, font_size, line_height, letter_spacing);
+        css_cell_metrics(&primary.font, font_size, line_height, letter_spacing);
     (cell_w, cell_h, char_height_px, ascent_px)
 }
 
@@ -261,7 +178,7 @@ pub fn spawn_gif_stream(
     let font_set = loaded.font_set;
     let primary = &font_set.fonts[font_set.regular[0]];
     let (scale, _, _, baseline, char_height_px, ascent_px) = css_cell_metrics(
-        primary,
+        &primary.font,
         opts.font_size,
         opts.line_height,
         opts.letter_spacing,
@@ -315,7 +232,7 @@ pub fn render_png_frame(frame: &RawFrame, opts: &RenderOptions, out: &Path) -> R
     let font_set = loaded.font_set;
     let primary = &font_set.fonts[font_set.regular[0]];
     let (scale, cell_w, cell_h, baseline, char_height_px, ascent_px) = css_cell_metrics(
-        primary,
+        &primary.font,
         opts.font_size,
         opts.line_height,
         opts.letter_spacing,
@@ -782,212 +699,4 @@ fn dim_color(fg: [u8; 3], bg: [u8; 3]) -> [u8; 3] {
     ]
 }
 
-/// Load the requested font set. If `path` is provided it is used as the sole
-/// face for all text styles. Otherwise the embedded JetBrains Mono Nerd Font
-/// faces are loaded as primaries with embedded fallback faces appended.
-#[derive(Debug)]
-struct LoadedFontFamily {
-    font_set: FontSet,
-    description: String,
-}
 
-fn load_font_family(path: Option<&str>) -> Result<LoadedFontFamily> {
-    if let Some(p) = path {
-        let bytes = std::fs::read(p).with_context(|| format!("reading font {p}"))?;
-        let face = FontArc::try_from_vec(bytes).context("invalid font file")?;
-        // Use the same face for all styles; no fallbacks for custom fonts.
-        let font_set = FontSet {
-            fonts: vec![face],
-            regular: vec![0],
-            bold: vec![0],
-            italic: vec![0],
-            bold_italic: vec![0],
-        };
-        return Ok(LoadedFontFamily {
-            font_set,
-            description: format!("explicit path: {p}"),
-        });
-    }
-
-    // Deterministic default: embedded JetBrains Mono Nerd Font (Mono variant)
-    // compressed as WOFF2 at build time and decompressed at runtime.
-    // License text is shipped in `licenses/JETBRAINSMONO-OFL-1.1.txt`.
-    let jb_regular = decode_embedded_face(
-        "JetBrainsMonoNerdFontMono-Regular.woff2",
-        EMBEDDED_JETBRAINS_NERD_MONO_REGULAR_WOFF2,
-    )?;
-    let jb_bold = try_embedded_face(
-        "JetBrainsMonoNerdFontMono-Bold.woff2",
-        EMBEDDED_JETBRAINS_NERD_MONO_BOLD_WOFF2,
-    );
-    let jb_italic = try_embedded_face(
-        "JetBrainsMonoNerdFontMono-Italic.woff2",
-        EMBEDDED_JETBRAINS_NERD_MONO_ITALIC_WOFF2,
-    );
-    let jb_bold_italic = try_embedded_face(
-        "JetBrainsMonoNerdFontMono-BoldItalic.woff2",
-        EMBEDDED_JETBRAINS_NERD_MONO_BOLD_ITALIC_WOFF2,
-    );
-
-    let (fallback_faces, fallback_names) = load_default_fallback_faces();
-
-    // Build the flat font list and per-style index vectors.
-    //
-    // Layout:
-    //   0  = JetBrains Regular
-    //   1  = JetBrains Bold       (if loaded)
-    //   2  = JetBrains Italic     (if loaded)
-    //   3  = JetBrains BoldItalic (if loaded)
-    //   4+ = fallback faces (NotoSansMono, NotoSansSymbols2, etc.)
-    let mut fonts: Vec<FontArc> = Vec::new();
-    fonts.push(jb_regular);
-    let idx_bold = jb_bold.map(|f| {
-        let i = fonts.len();
-        fonts.push(f);
-        i
-    });
-    let idx_italic = jb_italic.map(|f| {
-        let i = fonts.len();
-        fonts.push(f);
-        i
-    });
-    let idx_bold_italic = jb_bold_italic.map(|f| {
-        let i = fonts.len();
-        fonts.push(f);
-        i
-    });
-
-    let fallback_start = fonts.len();
-    fonts.extend(fallback_faces);
-    let fallback_indices: Vec<usize> = (fallback_start..fonts.len()).collect();
-
-    // Each style list: the style-specific primary (if available) followed by
-    // all fallback faces in order.  When a style face was not loaded its list
-    // falls back to the regular list via `indices_for_flags`.
-    let regular: Vec<usize> = std::iter::once(0)
-        .chain(fallback_indices.iter().copied())
-        .collect();
-    let bold: Vec<usize> = idx_bold
-        .into_iter()
-        .chain(fallback_indices.iter().copied())
-        .collect();
-    let italic: Vec<usize> = idx_italic
-        .into_iter()
-        .chain(fallback_indices.iter().copied())
-        .collect();
-    let bold_italic: Vec<usize> = idx_bold_italic
-        .into_iter()
-        .chain(fallback_indices.iter().copied())
-        .collect();
-
-    let description = if fallback_names.is_empty() {
-        "embedded default: JetBrainsMono Nerd Font Mono family".to_string()
-    } else {
-        format!(
-            "embedded default: JetBrainsMono Nerd Font Mono family + fallbacks [{}]",
-            fallback_names.join(" -> ")
-        )
-    };
-
-    Ok(LoadedFontFamily {
-        font_set: FontSet {
-            fonts,
-            regular,
-            bold,
-            italic,
-            bold_italic,
-        },
-        description,
-    })
-}
-
-fn load_default_fallback_faces() -> (Vec<FontArc>, Vec<String>) {
-    let mut faces = Vec::new();
-    let mut names = Vec::new();
-
-    // 1) Embedded Noto Sans Mono (broad BMP + width-consistent text).
-    match decode_embedded_face(
-        "NotoSansMono-Regular.woff2",
-        EMBEDDED_NOTO_SANS_MONO_REGULAR_WOFF2,
-    ) {
-        Ok(font) => {
-            faces.push(font);
-            names.push("NotoSansMono-Regular (embedded)".to_string());
-        }
-        Err(err) => {
-            warn!(error = ?err, "failed to load embedded fallback font face");
-        }
-    }
-
-    // 2) Embedded Noto Sans Symbols 2 (symbols incl. Braille patterns).
-    match decode_embedded_face(
-        "NotoSansSymbols2-Regular.woff2",
-        EMBEDDED_NOTO_SANS_SYMBOLS2_REGULAR_WOFF2,
-    ) {
-        Ok(font) => {
-            faces.push(font);
-            names.push("NotoSansSymbols2-Regular (embedded)".to_string());
-        }
-        Err(err) => {
-            warn!(error = ?err, "failed to load embedded fallback font face");
-        }
-    }
-
-    // 3) Embedded Noto Sans Mono CJK JP subset (JP + half-width katakana).
-    match decode_embedded_face(
-        "NotoSansMonoCJKjp-Subset.woff2",
-        EMBEDDED_NOTO_SANS_MONO_CJK_JP_SUBSET_WOFF2,
-    ) {
-        Ok(font) => {
-            faces.push(font);
-            names.push("NotoSansMonoCJKjp-Subset (embedded)".to_string());
-        }
-        Err(err) => {
-            warn!(error = ?err, "failed to load embedded fallback font face");
-        }
-    }
-
-    // 4) Embedded unifont_upper (U+10000 and above coverage).
-    match decode_embedded_face("unifont_upper-17.0.04.woff2", EMBEDDED_UNIFONT_UPPER_WOFF2) {
-        Ok(font) => {
-            faces.push(font);
-            names.push("unifont_upper-17.0.04 (embedded)".to_string());
-        }
-        Err(err) => {
-            warn!(error = ?err, "failed to load embedded fallback font face");
-        }
-    }
-
-    // 5) Embedded unifont_csur (CSUR/PUA coverage).
-    match decode_embedded_face("unifont_csur-17.0.04.woff2", EMBEDDED_UNIFONT_CSUR_WOFF2) {
-        Ok(font) => {
-            faces.push(font);
-            names.push("unifont_csur-17.0.04 (embedded)".to_string());
-        }
-        Err(err) => {
-            warn!(error = ?err, "failed to load embedded fallback font face");
-        }
-    }
-
-    (faces, names)
-}
-
-fn decode_embedded_face(name: &'static str, bytes: &'static [u8]) -> Result<FontArc> {
-    let ttf = convert_woff2_to_ttf(&mut std::io::Cursor::new(bytes))
-        .with_context(|| format!("failed to decompress embedded WOFF2 face: {}", name))?;
-    FontArc::try_from_vec(ttf).with_context(|| format!("invalid embedded font face: {}", name))
-}
-
-fn try_embedded_face(name: &'static str, bytes: &'static [u8]) -> Option<FontArc> {
-    match decode_embedded_face(name, bytes) {
-        Ok(f) => Some(f),
-        Err(err) => {
-            warn!(face = name, error = ?err, "failed to load embedded face");
-            None
-        }
-    }
-}
-
-fn has_glyph(font: &FontArc, ch: char) -> bool {
-    font.glyph_id(ch).0 != 0
-}

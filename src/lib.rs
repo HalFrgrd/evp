@@ -26,6 +26,7 @@
 //! [`script`], [`pty`], [`keys`]) are also `pub` for callers that need
 //! finer control.
 
+pub mod font;
 pub mod full_recording;
 pub mod keys;
 pub mod pty;

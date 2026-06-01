@@ -71,10 +71,6 @@ struct Cli {
     /// outputs in one run (for example `--output out.gif --output out.svg`).
     #[arg(short, long)]
     output: Vec<PathBuf>,
-    /// Optional path to a TTF font file. If omitted, a system monospace
-    /// font is auto-discovered.
-    #[arg(long)]
-    font: Option<String>,
     /// Also render the intermediate Recording as JSON to this path.
     #[arg(long = "dump-json")]
     dump_json: Option<PathBuf>,
@@ -147,7 +143,7 @@ fn real_main() -> Result<()> {
     };
 
     let render_opts = evp::RenderOptions {
-        font_path: cli.font.clone().or(script.settings.font_family.clone()),
+        font_path: script.settings.font_family.clone(),
         font_size: script.settings.font_size,
         line_height: script.settings.line_height,
         letter_spacing: script.settings.letter_spacing,
@@ -203,6 +199,7 @@ fn backend_for_output(
         Ok(evp::renderer::RendererBackend::Gif(render_opts.clone()))
     } else if ext.eq_ignore_ascii_case("svg") || ext.eq_ignore_ascii_case("svgz") {
         Ok(evp::renderer::RendererBackend::Svg(evp::SvgOptions {
+            font_path: render_opts.font_path.clone(),
             font_size: render_opts.font_size,
             embed_fonts,
             ..Default::default()

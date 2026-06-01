@@ -52,8 +52,8 @@ use crossbeam_channel::{Receiver, Sender, bounded};
 use base64::prelude::*;
 use std::collections::HashSet;
 use subsetter::{GlyphRemapper, subset};
+use crate::font::load_font_family;
 use ttf_parser::Face;
-use woff2_patched::convert_woff2_to_ttf;
 
 use crate::{
     recording::{RawFrame, Recording, style_flags},
@@ -61,36 +61,8 @@ use crate::{
     style::{rgb_hex, window_bar_dot_metrics},
 };
 
-const EMBEDDED_JETBRAINS_NERD_MONO_REGULAR_WOFF2: &[u8] = include_bytes!(concat!(
-    env!("OUT_DIR"),
-    "/JetBrainsMonoNerdFontMono-Regular.woff2"
-));
-const EMBEDDED_JETBRAINS_NERD_MONO_BOLD_WOFF2: &[u8] = include_bytes!(concat!(
-    env!("OUT_DIR"),
-    "/JetBrainsMonoNerdFontMono-Bold.woff2"
-));
-const EMBEDDED_JETBRAINS_NERD_MONO_ITALIC_WOFF2: &[u8] = include_bytes!(concat!(
-    env!("OUT_DIR"),
-    "/JetBrainsMonoNerdFontMono-Italic.woff2"
-));
-const EMBEDDED_JETBRAINS_NERD_MONO_BOLD_ITALIC_WOFF2: &[u8] = include_bytes!(concat!(
-    env!("OUT_DIR"),
-    "/JetBrainsMonoNerdFontMono-BoldItalic.woff2"
-));
-const EMBEDDED_UNIFONT_UPPER_WOFF2: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/unifont_upper-17.0.04.woff2"));
-const EMBEDDED_UNIFONT_CSUR_WOFF2: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/unifont_csur-17.0.04.woff2"));
-const EMBEDDED_NOTO_SANS_MONO_REGULAR_WOFF2: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/NotoSansMono-Regular.woff2"));
-const EMBEDDED_NOTO_SANS_SYMBOLS2_REGULAR_WOFF2: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/NotoSansSymbols2-Regular.woff2"));
-const EMBEDDED_NOTO_SANS_MONO_CJK_JP_SUBSET_WOFF2: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/NotoSansMonoCJKjp-Subset.woff2"));
-
-fn subset_font(woff2_data: &[u8], chars: &HashSet<char>, force: bool) -> Option<Vec<u8>> {
-    let ttf = convert_woff2_to_ttf(&mut std::io::Cursor::new(woff2_data)).ok()?;
-    let face = Face::parse(&ttf, 0).ok()?;
+fn subset_font(ttf: &[u8], chars: &HashSet<char>, force: bool) -> Option<Vec<u8>> {
+    let face = Face::parse(ttf, 0).ok()?;
 
     let mut glyphs = Vec::new();
     glyphs.push(0); // .notdef
@@ -112,11 +84,11 @@ fn subset_font(woff2_data: &[u8], chars: &HashSet<char>, force: bool) -> Option<
     glyphs.dedup();
 
     let mapper = GlyphRemapper::new_from_glyphs_sorted(&glyphs);
-    subset(&ttf, 0, &mapper).ok()
+    subset(ttf, 0, &mapper).ok()
 }
 
-fn generate_style_block(frames: &[RawFrame], embed_fonts: bool) -> String {
-    if !embed_fonts {
+fn generate_style_block(frames: &[RawFrame], opts: &SvgOptions) -> String {
+    if !opts.embed_fonts {
         return String::new();
     }
     let mut used_chars = HashSet::new();
@@ -131,72 +103,32 @@ fn generate_style_block(frames: &[RawFrame], embed_fonts: bool) -> String {
     let mut style = String::new();
     style.push_str("<style>\n");
 
-    let mut add_font = |data: &[u8], css_template: &str, force: bool| match subset_font(
-        data,
-        &used_chars,
-        force,
-    ) {
-        Some(subset_data) => {
-            let encoded = BASE64_STANDARD.encode(&subset_data);
-            let src = format!("url(data:font/ttf;base64,{encoded}) format('truetype')");
-            style.push_str(&css_template.replace("{}", &src));
-            style.push('\n');
-        }
-        None => {
-            if force {
-                let encoded = BASE64_STANDARD.encode(data);
-                let src = format!("url(data:font/woff2;base64,{encoded}) format('woff2')");
-                style.push_str(&css_template.replace("{}", &src));
-                style.push('\n');
+    if let Ok(loaded) = load_font_family(opts.font_path.as_deref()) {
+        for info in &loaded.font_set.fonts {
+            let is_primary_regular = info.weight == "normal"
+                && info.style == "normal"
+                && (info.is_custom || info.family_name == "JetBrainsMono Nerd Font Mono");
+            let force = is_primary_regular;
+
+            if let Some(subset_data) = subset_font(&info.ttf_bytes, &used_chars, force) {
+                let encoded = BASE64_STANDARD.encode(&subset_data);
+                let src = format!("url(data:font/ttf;base64,{encoded}) format('truetype')");
+                let css_template = format!(
+                    "@font-face {{ font-family: '{}'; src: {}; font-weight: {}; font-style: {}; }}\n",
+                    info.family_name, src, info.weight, info.style
+                );
+                style.push_str(&css_template);
+            } else if force {
+                let encoded = BASE64_STANDARD.encode(&info.ttf_bytes);
+                let src = format!("url(data:font/ttf;base64,{encoded}) format('truetype')");
+                let css_template = format!(
+                    "@font-face {{ font-family: '{}'; src: {}; font-weight: {}; font-style: {}; }}\n",
+                    info.family_name, src, info.weight, info.style
+                );
+                style.push_str(&css_template);
             }
         }
-    };
-
-    add_font(
-        EMBEDDED_JETBRAINS_NERD_MONO_REGULAR_WOFF2,
-        "@font-face { font-family: 'JetBrainsMono Nerd Font Mono'; src: {}; font-weight: normal; font-style: normal; }",
-        true,
-    );
-    add_font(
-        EMBEDDED_JETBRAINS_NERD_MONO_BOLD_WOFF2,
-        "@font-face { font-family: 'JetBrainsMono Nerd Font Mono'; src: {}; font-weight: bold; font-style: normal; }",
-        false,
-    );
-    add_font(
-        EMBEDDED_JETBRAINS_NERD_MONO_ITALIC_WOFF2,
-        "@font-face { font-family: 'JetBrainsMono Nerd Font Mono'; src: {}; font-weight: normal; font-style: italic; }",
-        false,
-    );
-    add_font(
-        EMBEDDED_JETBRAINS_NERD_MONO_BOLD_ITALIC_WOFF2,
-        "@font-face { font-family: 'JetBrainsMono Nerd Font Mono'; src: {}; font-weight: bold; font-style: italic; }",
-        false,
-    );
-    add_font(
-        EMBEDDED_NOTO_SANS_MONO_REGULAR_WOFF2,
-        "@font-face { font-family: 'Noto Sans Mono'; src: {}; }",
-        false,
-    );
-    add_font(
-        EMBEDDED_NOTO_SANS_SYMBOLS2_REGULAR_WOFF2,
-        "@font-face { font-family: 'Noto Sans Symbols 2'; src: {}; }",
-        false,
-    );
-    add_font(
-        EMBEDDED_NOTO_SANS_MONO_CJK_JP_SUBSET_WOFF2,
-        "@font-face { font-family: 'Noto Sans Mono CJK JP'; src: {}; }",
-        false,
-    );
-    add_font(
-        EMBEDDED_UNIFONT_UPPER_WOFF2,
-        "@font-face { font-family: 'unifont_upper'; src: {}; }",
-        false,
-    );
-    add_font(
-        EMBEDDED_UNIFONT_CSUR_WOFF2,
-        "@font-face { font-family: 'unifont_csur'; src: {}; }",
-        false,
-    );
+    }
 
     style.push_str("</style>\n");
     style
@@ -205,6 +137,8 @@ fn generate_style_block(frames: &[RawFrame], embed_fonts: bool) -> String {
 /// Tunables for the SVG renderer.
 #[derive(Debug, Clone)]
 pub struct SvgOptions {
+    /// Optional path to a custom TTF font file.
+    pub font_path: Option<String>,
     /// CSS `font-family` value applied to every `<text>` element.
     /// Defaults to a stack of common monospace families.
     pub font_family: String,
@@ -247,6 +181,7 @@ pub fn spawn_svg_stream(
 impl Default for SvgOptions {
     fn default() -> Self {
         Self {
+            font_path: None,
             font_family: "'JetBrainsMono Nerd Font Mono', 'Noto Sans Mono', 'Noto Sans Symbols 2', 'Noto Sans Mono CJK JP', 'unifont_upper', 'unifont_csur', ui-monospace, Menlo, Consolas, 'DejaVu Sans Mono', monospace".to_string(),
             font_size: 16.0,
             embed_fonts: true,
@@ -492,6 +427,14 @@ fn render_from_frames(frames: &[RawFrame], cfg: ViewportConfig, opts: &SvgOption
     }
 
     // Now emit SVG.
+    let mut font_family = opts.font_family.clone();
+    if let Some(ref path) = opts.font_path {
+        if let Ok(loaded) = load_font_family(Some(path)) {
+            let primary = &loaded.font_set.fonts[loaded.font_set.regular[0]];
+            font_family = format!("'{}', {}", primary.family_name, font_family);
+        }
+    }
+
     let mut s = String::with_capacity(64 * 1024);
     s.push_str(&format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -499,9 +442,9 @@ fn render_from_frames(frames: &[RawFrame], cfg: ViewportConfig, opts: &SvgOption
 {style}"#,
         w = canvas_w,
         h = canvas_h,
-        font = escape_attr(&opts.font_family),
+        font = escape_attr(&font_family),
         fs = opts.font_size,
-        style = generate_style_block(frames, opts.embed_fonts)
+        style = generate_style_block(frames, opts)
     ));
 
     // Canvas background (static).

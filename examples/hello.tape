@@ -5,6 +5,9 @@
 
 Output hello.gif
 
+Env PS1 "> "
+Env PROMPT_COMMAND ""
+
 Set Shell bash --norc
 Set Width 800
 Set Height 300

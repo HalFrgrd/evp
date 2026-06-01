@@ -4,6 +4,7 @@ use evp::Recording;
 
 /// Parse + run a tape source and return the recorded frames.
 pub fn record(tape: &str) -> Recording {
+    let _ = tracing_subscriber::fmt::try_init();
     let script = evp::parse_script(tape).expect("parse tape");
     let out = evp::run_and_return_recording(&script).expect("run script");
     out.recording

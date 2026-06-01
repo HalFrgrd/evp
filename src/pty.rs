@@ -224,7 +224,7 @@ pub enum Child {
 impl Drop for Child {
     fn drop(&mut self) {
         if let Child::Active(pid) = *self {
-            let _ = signal::kill(pid, signal::SIGHUP);
+            let _ = signal::kill(pid, signal::SIGKILL);
             let _ = wait::waitpid(pid, None);
         }
     }

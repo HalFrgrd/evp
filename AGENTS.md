@@ -163,3 +163,9 @@ section.
 - `docker/vhs.Dockerfile` is based on the charmbracelet VHS image and
   bakes in `scripts/stress_test_program.py` and `scripts/stress_test.tape`
   for the stress-test comparison run.
+
+## Common mistakes to avoid (from past agents)
+
+- **Target Triple**: This environment compiles for the `x86_64-unknown-linux-musl` target by default. When calling the compiled binary directly, make sure to use `./target/x86_64-unknown-linux-musl/...` rather than the standard `./target/...` directories.
+- **PTY Process Deadlock**: Standard shells (like `dash`/`/bin/sh`) can ignore `SIGHUP` inside virtual PTY/container environments. Always use `SIGKILL` instead of `SIGHUP` to reap child processes in `Child::drop` (`src/pty.rs`), otherwise test suites will deadlock/hang indefinitely.
+
