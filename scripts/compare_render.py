@@ -151,27 +151,28 @@ def run_vhs(image: str, tape: Path, out_gif: Path) -> float:
 
     # VHS resolves Output relative to the working directory inside the
     # container (/work). We force the output name to "vhs_out.gif".
-    lines = tape_text.splitlines(keepends=True)
-    new_lines: list[str] = []
+    lines = tape_text.splitlines()
+    new_lines = []
     replaced = False
     for line in lines:
-        if line.lstrip().startswith("Output "):
-            new_lines.append("Output vhs_out.gif\n")
+        stripped = line.strip()
+        if stripped.startswith("Output "):
+            new_lines.append("Output vhs_out.gif")
             replaced = True
-        elif line.lstrip().startswith("Set Shell "):
+        elif stripped.startswith("Set Shell "):
             # Strip any shell arguments, since VHS only accepts the shell executable name
-            parts = line.strip().split()
+            parts = stripped.split()
             if len(parts) >= 3:
                 shell_name = parts[2]
-                new_lines.append(f"Set Shell {shell_name}\n")
+                new_lines.append(f"Set Shell {shell_name}")
             else:
                 new_lines.append(line)
         else:
             new_lines.append(line)
     if not replaced:
-        new_lines.insert(0, "Output vhs_out.gif\n")
+        new_lines.insert(0, "Output vhs_out.gif")
 
-    patched = "".join(new_lines)
+    patched = "\n".join(new_lines) + "\n"
 
     # Write the patched tape and a helper script into a temp dir that we
     # bind-mount into the container.
@@ -606,6 +607,26 @@ def main() -> None:
     tape = args.tape.resolve()
     if not tape.exists():
         sys.exit(f"tape not found: {tape}")
+
+    # Assert that all Set and Output settings come before any action commands (Env, Hide, Type, etc.)
+    # to maintain strict VHS compatibility.
+    tape_text = tape.read_text()
+    seen_action = None
+    for line_num, line in enumerate(tape_text.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        is_setting = stripped.startswith("Set ") or stripped.startswith("Output ")
+        if is_setting:
+            if seen_action:
+                sys.exit(
+                    f"Assertion Error in {tape.name}:{line_num}:\n"
+                    f"  Setting '{stripped}' found after action command '{seen_action}'.\n"
+                    f"  All settings (Set and Output) must come before any Env or action commands for VHS compatibility."
+                )
+        else:
+            if not seen_action:
+                seen_action = stripped
 
     out_dir = (args.out_dir or tape.parent / "compare-out").resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
