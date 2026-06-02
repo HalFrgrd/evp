@@ -376,9 +376,9 @@ def save_comparison_grid(
         draw.text((width + 10, 8), "EVP GIF", fill=(255, 255, 255, 255))
         draw.text((width * 2 + 10, 8), "VHS GIF", fill=(255, 255, 255, 255))
         
-        draw.text((10, height + h_header + 8), "Diff: EVP GIF vs EVP SVG", fill=(255, 255, 255, 255))
-        draw.text((width + 10, height + h_header + 8), "Diff: EVP GIF vs VHS GIF", fill=(255, 255, 255, 255))
-        draw.text((width * 2 + 10, height + h_header + 8), "Diff: EVP SVG vs VHS GIF", fill=(255, 255, 255, 255))
+        draw.text((10, height + h_header + 8), "Diff: EVP GIF (red) vs EVP SVG (blue)", fill=(255, 255, 255, 255))
+        draw.text((width + 10, height + h_header + 8), "Diff: EVP GIF (red) vs VHS GIF (blue)", fill=(255, 255, 255, 255))
+        draw.text((width * 2 + 10, height + h_header + 8), "Diff: EVP SVG (red) vs VHS GIF (blue)", fill=(255, 255, 255, 255))
         
         grid.save(out_path)
 

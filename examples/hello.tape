@@ -14,6 +14,7 @@ Set Height 300
 Set FontSize 20
 Set TypingSpeed 50ms
 Set Framerate 30
+Set Padding 0
 
 Sleep 500ms
 Type "echo Hello, evp!"
