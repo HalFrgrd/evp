@@ -468,7 +468,17 @@ def compare_renders_frame_by_frame(
 
             for diff_name, (img1, img2) in diff_paths.items():
                 temp_diff_png = temp_frames_dir / f"temp_diff_{diff_name}_{idx}.png"
-                res = run_agent_image_diff(img1, img2, temp_diff_png)
+                res = run_agent_image_diff(img1, img2, None)
+                
+                # Render custom diff: grayscale intensities, red (img1 > img2), blue (img2 > img1)
+                from PIL import Image, ImageChops
+                i1 = Image.open(img1).convert("L")
+                i2 = Image.open(img2).convert("L")
+                r = ImageChops.subtract(i1, i2)
+                b = ImageChops.subtract(i2, i1)
+                g = Image.new("L", i1.size, 0)
+                diff_img = Image.merge("RGB", (r, g, b))
+                diff_img.save(temp_diff_png)
                 
                 diff_pct = res.get("diff_percentage", 100.0)
                 matched = res.get("match", False)
