@@ -564,11 +564,13 @@ fn render_from_frames(frames: &[RawFrame], cfg: ViewportConfig, opts: &SvgOption
 
         let text_elem = if is_box {
             let text_length = cell_w;
-            let bbox_h = opts.font_size * 0.8;
-            let scale_y = (cell_h as f32 / bbox_h).max(1.0);
+            let scale = opts.font_size / cfg.font_size_px;
+            let char_h_svg = cfg.char_height_px as f32 * scale;
+            let ascent_svg = cfg.ascent_px as f32 * scale;
+            let scale_y = (cell_h as f32 / char_h_svg).max(1.0);
             let transform = if scale_y > 1.0 {
                 let cell_center_y = (y as f32 - baseline as f32) + (cell_h as f32 / 2.0);
-                let char_center_y = y as f32 - (opts.font_size * 0.3);
+                let char_center_y = y as f32 - ascent_svg + (char_h_svg / 2.0);
                 format!(
                     r#" transform="translate(0, {cy}) scale(1, {scale_y}) translate(0, -{char_center_y})""#,
                     cy = cell_center_y,

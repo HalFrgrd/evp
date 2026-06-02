@@ -446,6 +446,7 @@ fn rasterize_raw_frame(
                     "font_idx {font_idx} exceeds u16 range"
                 );
                 let mut glyph_scale = scale;
+                let mut char_baseline = pen_y_baseline;
 
                 if is_box_drawing(ch) {
                     let scaled = font.as_scaled(scale);
@@ -460,6 +461,9 @@ fn rasterize_raw_frame(
                     // so we stretch it accordingly.
                     glyph_scale.x = scale.x * (bbox_w / glyph_w);
                     glyph_scale.y = scale.y * (bbox_h / glyph_h);
+
+                    let stretched_scaled = font.as_scaled(glyph_scale);
+                    char_baseline = (y as f32 + stretched_scaled.ascent()).round() as i32;
                 }
 
                 let cache_key = GlyphCacheKey {
@@ -499,14 +503,7 @@ fn rasterize_raw_frame(
                                 continue;
                             }
                             let px = pen_x as i32 + bm.offset_x + gx as i32;
-                            let mut py = pen_y_baseline + bm.offset_y + gy as i32;
-                            if is_box_drawing(ch) {
-                                // Center the stretched bitmap within the cell vertically.
-                                let cell_center_y = y as i32 + (cell_h as i32) / 2;
-                                let box_center_y =
-                                    pen_y_baseline + bm.offset_y + (bm.height as i32) / 2;
-                                py += cell_center_y - box_center_y;
-                            }
+                            let py = char_baseline + bm.offset_y + gy as i32;
                             if px < 0 || py < 0 {
                                 continue;
                             }
