@@ -96,6 +96,7 @@ pub fn render_recording(rec: &Recording, backend: RendererBackend, output: PathB
             rec.font_size_px,
             rec.char_height_px,
             rec.ascent_px,
+            rec.letter_spacing,
         ),
         non_json_backend,
         output,

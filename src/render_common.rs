@@ -40,6 +40,8 @@ pub struct ViewportConfig {
     /// Raw scaled font ascent at `font_size_px` (before vertical centering).
     /// Zero when unavailable.
     pub ascent_px: u32,
+    /// Additive pixels added to each cell's width.
+    pub letter_spacing: f32,
 }
 
 /// Returns `true` if the character is a box drawing character.
@@ -63,6 +65,7 @@ impl ViewportConfig {
         font_size_px: f32,
         char_height_px: u32,
         ascent_px: u32,
+        letter_spacing: f32,
     ) -> Self {
         let cell_w = cell_width_px.max(1);
         let cell_h = cell_height_px.max(1);
@@ -108,6 +111,7 @@ impl ViewportConfig {
             font_size_px,
             char_height_px,
             ascent_px,
+            letter_spacing,
         }
     }
 }

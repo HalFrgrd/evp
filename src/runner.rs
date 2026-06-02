@@ -152,6 +152,7 @@ pub fn derive_options(s: &Settings) -> ViewportConfig {
         s.font_size,
         char_height_px,
         ascent_px,
+        s.letter_spacing,
     )
 }
 

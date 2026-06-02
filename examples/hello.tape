@@ -12,8 +12,9 @@ Set FontSize 20
 Set TypingSpeed 50ms
 Set Framerate 30
 Set Padding 0
-Set Margin 30
+Set Margin 0
 Set MarginFill "#6B50FF"
+Set LetterSpacing 0
 
 Env PS1 "> "
 Env PROMPT_COMMAND ""

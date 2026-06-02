@@ -177,6 +177,7 @@ pub fn render_svg(rec: &Recording, opts: &SvgOptions, out: &Path) -> Result<()> 
             rec.font_size_px,
             rec.char_height_px,
             rec.ascent_px,
+            rec.letter_spacing,
         ),
         opts.clone(),
         out.to_path_buf(),
@@ -207,6 +208,7 @@ pub fn render_svg_to_string(rec: &Recording, opts: &SvgOptions) -> Result<String
         rec.font_size_px,
         rec.char_height_px,
         rec.ascent_px,
+        rec.letter_spacing,
     );
 
     // Reconstruct every frame up-front.
@@ -488,8 +490,11 @@ fn render_from_frames(frames: &[RawFrame], cfg: ViewportConfig, opts: &SvgOption
         cfg.char_height_px > 0 && cfg.font_size_px > 0.0,
         "font metrics are always required; ViewportConfig::with_font_metrics was never called"
     );
+    let scale = opts.font_size / cfg.font_size_px;
+    let letter_spacing_svg = cfg.letter_spacing * scale;
+    let offset_x_svg = (cfg.letter_spacing / 2.0).floor() * scale;
+
     let baseline = {
-        let scale = opts.font_size / cfg.font_size_px;
         let char_h_svg = cfg.char_height_px as f32 * scale;
         let ascent_svg = cfg.ascent_px as f32 * scale;
         let extra = (cell_h as f32 - char_h_svg).max(0.0);
@@ -591,12 +596,21 @@ fn render_from_frames(frames: &[RawFrame], cfg: ViewportConfig, opts: &SvgOption
                 txt = escape_text(&span.visual.text),
             )
         } else {
+            let draw_x = x as f32 + offset_x_svg;
+            let style = if letter_spacing_svg != 0.0 {
+                format!(r#" style="letter-spacing: {:.2}px;""#, letter_spacing_svg)
+            } else {
+                String::new()
+            };
             format!(
-                r#"<text x="{x}" y="{y}" fill="{fg}"{w}{i}{d}>{txt}</text>"#,
+                r#"<text x="{x}" y="{y}" fill="{fg}"{w}{i}{d}{s}>{txt}</text>"#,
+                x = draw_x,
+                y = y,
                 fg = rgb_hex(span.visual.fg),
                 w = weight,
                 i = italic,
                 d = decoration,
+                s = style,
                 txt = escape_text(&span.visual.text),
             )
         };
@@ -784,6 +798,7 @@ mod tests {
             font_size_px: 16.0,
             char_height_px: 19,
             ascent_px: 15,
+            letter_spacing: 1.0,
             frame_style: FrameStyle {
                 padding_px: 4,
                 ..FrameStyle::default()

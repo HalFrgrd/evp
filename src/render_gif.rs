@@ -210,6 +210,7 @@ pub fn render_gif(rec: &Recording, opts: &RenderOptions, out: &Path) -> Result<(
             rec.font_size_px,
             rec.char_height_px,
             rec.ascent_px,
+            rec.letter_spacing,
         ),
         opts.clone(),
         out.to_path_buf(),
@@ -247,6 +248,7 @@ pub fn render_png_frame(frame: &RawFrame, opts: &RenderOptions, out: &Path) -> R
         opts.font_size,
         char_height_px,
         ascent_px,
+        opts.letter_spacing,
     );
     let mut glyph_cache = GlyphCache::new();
     let buf = rasterize_raw_frame(frame, &font_set, scale, baseline, cfg, &mut glyph_cache);
@@ -496,13 +498,17 @@ fn rasterize_raw_frame(
                 });
 
                 if let Some(bm) = bitmap.as_ref() {
+                    let mut draw_pen_x = pen_x;
+                    if !is_box_drawing(ch) {
+                        draw_pen_x += (cfg.letter_spacing / 2.0).floor();
+                    }
                     for gy in 0..bm.height {
                         for gx in 0..bm.width {
                             let coverage = bm.pixels[(gy * bm.width + gx) as usize];
                             if coverage <= 0.0 {
                                 continue;
                             }
-                            let px = pen_x as i32 + bm.offset_x + gx as i32;
+                            let px = draw_pen_x as i32 + bm.offset_x + gx as i32;
                             let py = char_baseline + bm.offset_y + gy as i32;
                             if px < 0 || py < 0 {
                                 continue;

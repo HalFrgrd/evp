@@ -154,6 +154,9 @@ pub struct Recording {
     /// Zero when unavailable.
     #[serde(default)]
     pub ascent_px: u32,
+    /// Additive pixels added to each cell's width.
+    #[serde(default)]
+    pub letter_spacing: f32,
     pub frame_style: FrameStyle,
     pub frames: Vec<Frame>,
 }
@@ -242,6 +245,7 @@ impl RecordingBuilder {
             font_size_px: self.cfg.viewport.font_size_px,
             char_height_px: self.cfg.viewport.char_height_px,
             ascent_px: self.cfg.viewport.ascent_px,
+            letter_spacing: self.cfg.viewport.letter_spacing,
             frame_style: self.cfg.viewport.frame_style,
             frames: self.frames,
         }
