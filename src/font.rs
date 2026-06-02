@@ -5,8 +5,10 @@
 
 use std::sync::OnceLock;
 
+use std::collections::BTreeSet;
+
 use ab_glyph::{Font, FontArc};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use tracing::warn;
 use woff2_patched::convert_woff2_to_ttf;
 
@@ -137,6 +139,19 @@ pub struct FontInfo {
     pub style: String,
     /// Whether this font was explicitly loaded from a custom file path.
     pub is_custom: bool,
+}
+
+impl FontInfo {
+    pub fn subset(&self, chars: &BTreeSet<char>) -> Result<Vec<u8>> {
+        if chars.is_empty() {
+            return Err(anyhow!("no characters to subset"));
+        }
+
+        let reader = font_subset::FontReader::new(&self.ttf_bytes).map_err(|e| anyhow!("{e:?}"))?;
+        let font = reader.read().map_err(|e| anyhow!("{e:?}"))?;
+        let subset = font.subset(chars).map_err(|e| anyhow!("{e:?}"))?;
+        Ok(subset.to_woff2())
+    }
 }
 
 /// A collection of font faces organised by style.
