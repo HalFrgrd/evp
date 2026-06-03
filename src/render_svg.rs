@@ -98,16 +98,31 @@ fn generate_style_block(frames: &[RawFrame], opts: &SvgOptions) -> Result<String
             continue;
         }
 
-        let subset = info.subset(chars).with_context(|| {
-            format!(
-                "failed to subset font '{}' ({} chars)",
-                info.family_name,
-                chars.len()
-            )
-        })?;
-        let encoded = BASE64_STANDARD.encode(subset);
-        let src = format!("url(data:font/woff2;base64,{encoded})");
-        let format_str = "woff2";
+        let (font_bytes, format_str, mime_type) = match info.subset(chars) {
+            Ok(subset) => (subset, "woff2", "font/woff2"),
+            Err(err) => {
+                tracing::warn!(
+                    "failed to subset font '{}' ({} chars), embedding the entire font: {:?}",
+                    info.family_name,
+                    chars.len(),
+                    err
+                );
+                if let Some(ref woff2) = info.woff2_bytes {
+                    (woff2.clone(), "woff2", "font/woff2")
+                } else {
+                    let is_otf = info.ttf_bytes.starts_with(b"OTTO");
+                    let (fmt, mime) = if is_otf {
+                        ("opentype", "font/opentype")
+                    } else {
+                        ("truetype", "font/truetype")
+                    };
+                    (info.ttf_bytes.clone(), fmt, mime)
+                }
+            }
+        };
+
+        let encoded = BASE64_STANDARD.encode(font_bytes);
+        let src = format!("url(data:{mime_type};base64,{encoded})");
 
         let css_template = format!(
             "@font-face {{ font-family: '{}'; src: {} format('{}'); font-weight: {}; font-style: {}; }}\n",
@@ -888,5 +903,25 @@ mod tests {
 
         std::fs::remove_file(svg_path).ok();
         std::fs::remove_file(svgz_path).ok();
+    }
+
+    #[test]
+    fn test_font_subset_fallback_on_cff_cjk() {
+        let mut rec = synth_recording();
+        // Insert a CJK character to trigger the Noto Sans Mono CJK JP fallback font
+        if let Frame::Key { cells, .. } = &mut rec.frames[0] {
+            cells[2] = CellSnap {
+                text: "あ".into(),
+                fg: [255, 255, 255],
+                bg: [0, 0, 0],
+                flags: 0,
+            };
+        }
+
+        let result = render_svg_to_string(&rec, &SvgOptions::default());
+        assert!(result.is_ok(), "Rendering SVG with CJK characters should succeed via full font fallback");
+        let svg = result.unwrap();
+        assert!(svg.contains("font-family: 'Noto Sans Mono CJK JP'"));
+        assert!(svg.contains("url(data:font/woff2;base64,"));
     }
 }
