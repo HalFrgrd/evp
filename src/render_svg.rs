@@ -59,65 +59,65 @@ use crate::{
     style::{rgb_hex, window_bar_dot_metrics},
 };
 
-fn generate_style_block(frames: &[RawFrame], opts: &SvgOptions) -> String {
+fn generate_style_block(frames: &[RawFrame], opts: &SvgOptions) -> Result<String> {
     if !opts.embed_fonts {
-        return String::new();
+        return Ok(String::new());
     }
 
     let mut style = String::new();
     style.push_str("<style>\n");
 
-    if let Ok(loaded) = load_font_family(opts.font_path.as_deref()) {
-        let mut used_fonts: HashMap<usize, BTreeSet<char>> = HashMap::new();
+    let loaded = load_font_family(opts.font_path.as_deref())?;
+    let mut used_fonts: HashMap<usize, BTreeSet<char>> = HashMap::new();
 
-        // Always force the regular variant of the primary font (index 0) so the base layout exists.
-        used_fonts.entry(0).or_default();
-
-        // Check which fonts are actually selected/used by cells.
-        for frame in frames {
-            for cell in &frame.cells {
-                for c in cell.text.chars() {
-                    let (idx, _) = loaded.font_set.select_for_char(cell.flags, c);
-                    used_fonts.entry(idx).or_default().insert(c);
-                }
+    // Check which fonts are actually selected/used by cells.
+    for frame in frames {
+        for cell in &frame.cells {
+            for c in cell.text.chars() {
+                let (idx, _) = loaded.font_set.select_for_char(cell.flags, c);
+                used_fonts.entry(idx).or_default().insert(c);
             }
-        }
-
-        // Embed the used fonts.
-        let mut sorted_indices: Vec<_> = used_fonts.keys().copied().collect();
-        sorted_indices.sort();
-
-        for idx in sorted_indices {
-            if idx >= loaded.font_set.fonts.len() {
-                continue;
-            }
-            let info = &loaded.font_set.fonts[idx];
-            let chars = &used_fonts[&idx];
-
-            let (src, format_str) = if let Ok(subset) = info.subset(chars) {
-                let encoded = BASE64_STANDARD.encode(subset);
-                (format!("url(data:font/woff2;base64,{encoded})"), "woff2")
-            } else {
-                // Fallback to full font if subsetting fails
-                if let Some(ref woff2) = info.woff2_bytes {
-                    let encoded = BASE64_STANDARD.encode(woff2);
-                    (format!("url(data:font/woff2;base64,{encoded})"), "woff2")
-                } else {
-                    let encoded = BASE64_STANDARD.encode(&info.ttf_bytes);
-                    (format!("url(data:font/ttf;base64,{encoded})"), "truetype")
-                }
-            };
-
-            let css_template = format!(
-                "@font-face {{ font-family: '{}'; src: {} format('{}'); font-weight: {}; font-style: {}; }}\n",
-                info.family_name, src, format_str, info.weight, info.style
-            );
-            style.push_str(&css_template);
         }
     }
 
+    if used_fonts.is_empty() {
+        return Ok(String::new());
+    }
+
+    // Embed the used fonts.
+    let mut sorted_indices: Vec<_> = used_fonts.keys().copied().collect();
+    sorted_indices.sort();
+
+    for idx in sorted_indices {
+        if idx >= loaded.font_set.fonts.len() {
+            continue;
+        }
+        let info = &loaded.font_set.fonts[idx];
+        let chars = &used_fonts[&idx];
+        if chars.is_empty() {
+            continue;
+        }
+
+        let subset = info.subset(chars).with_context(|| {
+            format!(
+                "failed to subset font '{}' ({} chars)",
+                info.family_name,
+                chars.len()
+            )
+        })?;
+        let encoded = BASE64_STANDARD.encode(subset);
+        let src = format!("url(data:font/woff2;base64,{encoded})");
+        let format_str = "woff2";
+
+        let css_template = format!(
+            "@font-face {{ font-family: '{}'; src: {} format('{}'); font-weight: {}; font-style: {}; }}\n",
+            info.family_name, src, format_str, info.weight, info.style
+        );
+        style.push_str(&css_template);
+    }
+
     style.push_str("</style>\n");
-    style
+    Ok(style)
 }
 
 /// Tunables for the SVG renderer.
@@ -231,7 +231,7 @@ pub fn render_svg_to_string(rec: &Recording, opts: &SvgOptions) -> Result<String
         frames.push(f);
     }
 
-    Ok(render_from_frames(&frames, cfg, opts))
+    render_from_frames(&frames, cfg, opts)
 }
 
 // ---------------------------------------------------------------------------
@@ -282,19 +282,23 @@ struct CursorSpan {
     color: [u8; 3],
 }
 
-fn render_from_frames(frames: &[RawFrame], cfg: ViewportConfig, opts: &SvgOptions) -> String {
+fn render_from_frames(
+    frames: &[RawFrame],
+    cfg: ViewportConfig,
+    opts: &SvgOptions,
+) -> Result<String> {
     let canvas_w = cfg.canvas_w;
     let canvas_h = cfg.canvas_h;
 
     if frames.is_empty() {
-        return format!(
+        return Ok(format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">
 </svg>
 "#,
             w = canvas_w,
             h = canvas_h,
-        );
+        ));
     }
 
     // Total animation duration.
@@ -432,7 +436,7 @@ fn render_from_frames(frames: &[RawFrame], cfg: ViewportConfig, opts: &SvgOption
         h = canvas_h,
         font = escape_attr(&font_family),
         fs = opts.font_size,
-        style = generate_style_block(frames, opts)
+        style = generate_style_block(frames, opts)?
     ));
 
     // Canvas background (static).
@@ -666,7 +670,7 @@ fn render_from_frames(frames: &[RawFrame], cfg: ViewportConfig, opts: &SvgOption
     }
 
     s.push_str("\n</svg>\n");
-    s
+    Ok(s)
 }
 
 fn run_svg_stream_worker(
@@ -680,7 +684,7 @@ fn run_svg_stream_worker(
         frames.push(frame);
     }
 
-    let s = render_from_frames(&frames, cfg, &opts);
+    let s = render_from_frames(&frames, cfg, &opts)?;
 
     let is_svgz = out
         .extension()
