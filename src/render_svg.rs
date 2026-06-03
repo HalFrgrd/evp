@@ -50,7 +50,7 @@ use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
 
 use base64::prelude::*;
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashMap};
 use crate::font::load_font_family;
 
 use crate::{
@@ -68,33 +68,44 @@ fn generate_style_block(frames: &[RawFrame], opts: &SvgOptions) -> String {
     style.push_str("<style>\n");
 
     if let Ok(loaded) = load_font_family(opts.font_path.as_deref()) {
-        let mut used_font_indices = HashSet::new();
+        let mut used_fonts: HashMap<usize, BTreeSet<char>> = HashMap::new();
 
         // Always force the regular variant of the primary font (index 0) so the base layout exists.
-        used_font_indices.insert(0);
+        used_fonts.entry(0).or_default();
 
         // Check which fonts are actually selected/used by cells.
         for frame in frames {
             for cell in &frame.cells {
                 for c in cell.text.chars() {
                     let (idx, _) = loaded.font_set.select_for_char(cell.flags, c);
-                    used_font_indices.insert(idx);
+                    used_fonts.entry(idx).or_default().insert(c);
                 }
             }
         }
 
         // Embed the used fonts.
-        for &idx in &used_font_indices {
+        let mut sorted_indices: Vec<_> = used_fonts.keys().copied().collect();
+        sorted_indices.sort();
+
+        for idx in sorted_indices {
             if idx >= loaded.font_set.fonts.len() {
                 continue;
             }
             let info = &loaded.font_set.fonts[idx];
-            let (src, format_str) = if let Some(ref woff2) = info.woff2_bytes {
-                let encoded = BASE64_STANDARD.encode(woff2);
+            let chars = &used_fonts[&idx];
+
+            let (src, format_str) = if let Ok(subset) = info.subset(chars) {
+                let encoded = BASE64_STANDARD.encode(subset);
                 (format!("url(data:font/woff2;base64,{encoded})"), "woff2")
             } else {
-                let encoded = BASE64_STANDARD.encode(&info.ttf_bytes);
-                (format!("url(data:font/ttf;base64,{encoded})"), "truetype")
+                // Fallback to full font if subsetting fails
+                if let Some(ref woff2) = info.woff2_bytes {
+                    let encoded = BASE64_STANDARD.encode(woff2);
+                    (format!("url(data:font/woff2;base64,{encoded})"), "woff2")
+                } else {
+                    let encoded = BASE64_STANDARD.encode(&info.ttf_bytes);
+                    (format!("url(data:font/ttf;base64,{encoded})"), "truetype")
+                }
             };
 
             let css_template = format!(

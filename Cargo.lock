@@ -173,7 +173,17 @@ checksum = "cc97b8f16f944bba54f0433f07e30be199b6dc2bd25937444bbad560bcea29bd"
 dependencies = [
  "alloc-no-stdlib",
  "alloc-stdlib",
- "brotli-decompressor",
+ "brotli-decompressor 4.0.3",
+]
+
+[[package]]
+name = "brotli"
+version = "8.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8119e4516436f5708bbc474a9d395bf12f1b5395e93a92a56e647ac3388c8610"
+dependencies = [
+ "alloc-no-stdlib",
+ "brotli-decompressor 5.0.1",
 ]
 
 [[package]]
@@ -184,6 +194,15 @@ checksum = "a334ef7c9e23abf0ce748e8cd309037da93e606ad52eb372e4ce327a0dcfbdfd"
 dependencies = [
  "alloc-no-stdlib",
  "alloc-stdlib",
+]
+
+[[package]]
+name = "brotli-decompressor"
+version = "5.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5962523e1b92ce1b5e793d9169b9943eece10d39f62550bc04bb605d75b94924"
+dependencies = [
+ "alloc-no-stdlib",
 ]
 
 [[package]]
@@ -461,6 +480,7 @@ dependencies = [
  "crossbeam-channel",
  "crossterm",
  "flate2",
+ "font-subset",
  "fontdb",
  "gifski",
  "humantime",
@@ -492,6 +512,15 @@ dependencies = [
  "crc32fast",
  "miniz_oxide",
  "zlib-rs",
+]
+
+[[package]]
+name = "font-subset"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e47922b9d737f16d425c10ec7b9b9751590cf8908270b5f9647bdad960b4b979"
+dependencies = [
+ "brotli 8.0.3",
 ]
 
 [[package]]
@@ -1610,7 +1639,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb9e0d17aedee2afac15749407e107edce8485f57b7ad9fb929f0bbdf2c28f24"
 dependencies = [
  "bitvec",
- "brotli",
+ "brotli 7.0.0",
  "bytes",
  "four-cc",
  "safer-bytes",
