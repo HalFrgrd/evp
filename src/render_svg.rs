@@ -503,7 +503,7 @@ fn render_from_frames(frames: &[RawFrame], cfg: ViewportConfig, opts: &SvgOption
     );
     let scale = opts.font_size / cfg.font_size_px;
     let letter_spacing_svg = cfg.letter_spacing * scale;
-    let offset_x_svg = (cfg.letter_spacing / 2.0).floor() * scale;
+    let offset_x_svg = (letter_spacing_svg / 2.0).floor();
 
     let baseline = {
         let char_h_svg = cfg.char_height_px as f32 * scale;
