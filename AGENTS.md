@@ -23,10 +23,9 @@ Notes for coding agents (and humans) working in `evp`. Keep this short — it sh
 
 ## SVG Font Embedding (`src/render_svg.rs`)
 
-- **Full Embedding vs Subsetting**: We do **not** use the `subsetter` crate or any font-subsetting libraries. Subsetting crates strip the `cmap` table, rendering the embedded fonts invalid in most web browsers.
-- **WOFF2 base64 Data**: For embedded fonts, the SVG renderer embeds the full, valid font data using base64 WOFF2 strings in `@font-face` blocks (via `url(data:font/woff2;base64,...)`). This preserves all character mappings and layout tables while keeping files compact.
-- **Custom Font Fallback**: If a custom `.ttf` path is provided in the tape, the renderer embeds the raw TTF bytes (via `url(data:font/ttf;base64,...)`).
-- **Conditional Embedding**: The style block dynamically determines which font variants (bold, italic, CJK fallbacks, etc.) are actually required by scanning the character sets used in the recording.
+- **Subsetting is Mandatory**: We use the `font-subset` crate to create WOFF2 subsets of all required fonts. Only the glyphs actually used in the recording are embedded. If subsetting fails, the renderer returns an error.
+- **WOFF2 base64 Data**: Embedded fonts are always base64-encoded WOFF2 strings in `@font-face` blocks.
+- **Conditional Embedding**: The style block dynamically determines which font variants (bold, italic, CJK fallbacks, etc.) are actually required by scanning the character sets used in the recording. The default font is only embedded if it is actually used.
 
 ## Streaming Render Pipeline (Must-Know)
 
