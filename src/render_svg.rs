@@ -422,18 +422,7 @@ impl TSpan {
         };
 
         let set_str = if is_hidden {
-            if self.end_ms >= total_ms || total_ms.saturating_sub(self.end_ms) <= 200 {
-                format!(
-                    r#"<set attributeName="visibility" to="visible" begin="{}"/>"#,
-                    format_begin(self.start_ms)
-                )
-            } else {
-                format!(
-                    r#"<set attributeName="visibility" to="visible" begin="{}" end="t.begin+{}"/>"#,
-                    format_begin(self.start_ms),
-                    format_time(self.end_ms)
-                )
-            }
+            visibility_set(self.start_ms, self.end_ms, total_ms)
         } else {
             String::new()
         };
@@ -595,18 +584,7 @@ impl TextElement {
                     opt.push_str(&tag[..idx]);
                     opt.push_str(r#" class="h""#);
                     opt.push_str(">");
-                    let set_str = if self.end_ms >= total_ms || total_ms.saturating_sub(self.end_ms) <= 200 {
-                        format!(
-                            r#"<set attributeName="visibility" to="visible" begin="{}"/>"#,
-                            format_begin(self.start_ms)
-                        )
-                    } else {
-                        format!(
-                            r#"<set attributeName="visibility" to="visible" begin="{}" end="t.begin+{}"/>"#,
-                            format_begin(self.start_ms),
-                            format_time(self.end_ms)
-                        )
-                    };
+                    let set_str = visibility_set(self.start_ms, self.end_ms, total_ms);
                     opt.push_str(&set_str);
                     opt.push_str(&tag[idx + 1..]);
                     opt
@@ -614,20 +592,11 @@ impl TextElement {
                     tag.clone()
                 }
             } else {
-                if self.end_ms >= total_ms || total_ms.saturating_sub(self.end_ms) <= 200 {
-                    format!(
-                        r#"<g class="h"><set attributeName="visibility" to="visible" begin="{}"/>{}</g>"#,
-                        format_begin(self.start_ms),
-                        text_tags.join(""),
-                    )
-                } else {
-                    format!(
-                        r#"<g class="h"><set attributeName="visibility" to="visible" begin="{}" end="t.begin+{}"/>{}</g>"#,
-                        format_begin(self.start_ms),
-                        format_time(self.end_ms),
-                        text_tags.join(""),
-                    )
-                }
+                format!(
+                    r#"<g class="h">{}{}</g>"#,
+                    visibility_set(self.start_ms, self.end_ms, total_ms),
+                    text_tags.join(""),
+                )
             }
         }
     }
@@ -747,6 +716,20 @@ fn format_begin(ms: u32) -> String {
     } else {
         format!("t.begin+{}", format_time(ms))
     }
+}
+
+fn visibility_set(start_ms: u32, end_ms: u32, total_ms: u32) -> String {
+    let end = if end_ms >= total_ms {
+        "t.end".to_string()
+    } else {
+        format!("t.begin+{}", format_time(end_ms))
+    };
+
+    format!(
+        r#"<set attributeName="visibility" to="visible" begin="{}" end="{}"/>"#,
+        format_begin(start_ms),
+        end
+    )
 }
 
 fn simplify_discrete_animation<T: PartialEq + Clone>(
@@ -1101,18 +1084,7 @@ impl SvgDoc {
                 } else {
                     String::new()
                 };
-                let set_str = if rect.end_ms >= total_ms || total_ms.saturating_sub(rect.end_ms) <= 200 {
-                    format!(
-                        r#"<set attributeName="visibility" to="visible" begin="{}"/>"#,
-                        format_begin(rect.start_ms)
-                    )
-                } else {
-                    format!(
-                        r#"<set attributeName="visibility" to="visible" begin="{}" end="t.begin+{}"/>"#,
-                        format_begin(rect.start_ms),
-                        format_time(rect.end_ms)
-                    )
-                };
+                let set_str = visibility_set(rect.start_ms, rect.end_ms, total_ms);
                 s.push_str(&format!(
                     r#"<rect x="{x}" y="{y}" width="{w}" height="{h}"{fill}{clip}>{set}{anim}</rect>"#,
                     x = rect.x,
@@ -2000,6 +1972,38 @@ mod tests {
 
         let svg = render_svg_to_string(&rec, &SvgOptions::default()).unwrap();
         assert!(svg.contains("font-family: 'Noto Emoji'"));
+    }
+
+    #[test]
+    fn late_non_static_text_keeps_exact_end_time() {
+        let te = TextElement {
+            y: 20,
+            y_animation: None,
+            start_ms: 600,
+            end_ms: 950,
+            tspans: vec![TSpan {
+                x_coords: vec![10.0],
+                text: "loop".to_string(),
+                fg: [255, 255, 255],
+                bold: false,
+                italic: false,
+                underline: false,
+                strikethrough: false,
+                is_box: false,
+                scale_y: 1.0,
+                cell_center_y_offset: 0.0,
+                char_center_y_offset: 0.0,
+                cell_w: 10,
+                cell_h: 20,
+                baseline: 15,
+                letter_spacing: 0.0,
+                start_ms: 600,
+                end_ms: 950,
+            }],
+        };
+
+        let svg = te.to_svg_string(&HashMap::new(), 1000, 0.0, None);
+        assert!(svg.contains(r#"begin="t.begin+0.6" end="t.begin+0.95""#));
     }
 
     #[test]
