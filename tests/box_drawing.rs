@@ -1,7 +1,7 @@
 mod common;
 
 use common::record;
-use evp::{RenderOptions, FrameStyle, WindowBarStyle};
+use evp::{FrameStyle, RenderOptions, WindowBarStyle};
 #[test]
 fn test_box_drawing_alignment() {
     // A script setting up bash, disabling prompt elements, padding/margin, and window bar,
@@ -34,7 +34,9 @@ Sleep 500ms
     assert!(!rec.frames.is_empty(), "no frames captured");
 
     // Reconstruct the last frame
-    let frame = rec.reconstruct(rec.frames.len() - 1).expect("reconstruct last frame");
+    let frame = rec
+        .reconstruct(rec.frames.len() - 1)
+        .expect("reconstruct last frame");
 
     // Generate a temporary file path for the PNG frame
     let mut temp_png = std::env::temp_dir();
@@ -53,8 +55,7 @@ Sleep 500ms
         border_radius_px: 0,
     };
 
-    evp::render_gif::render_png_frame(&frame, &opts, &temp_png)
-        .expect("render PNG frame");
+    evp::render_gif::render_png_frame(&frame, &opts, &temp_png).expect("render PNG frame");
 
     // Load the rendered PNG
     let img = lodepng::decode24_file(&temp_png).expect("decode rendered png");
@@ -97,7 +98,8 @@ Sleep 500ms
     );
     // Assert that bottom_col0 is background color (not drawn)
     assert_eq!(
-        bottom_col0_pixel, bg_color,
+        bottom_col0_pixel,
+        bg_color,
         "upper half block (col 0): bottom pixel at y={} should be background color",
         cell_h - 2
     );
@@ -109,7 +111,8 @@ Sleep 500ms
     );
     // Assert that bottom_col1 is drawn (not equal to background color)
     assert_ne!(
-        bottom_col1_pixel, bg_color,
+        bottom_col1_pixel,
+        bg_color,
         "lower half block (col 1): bottom pixel at y={} should not be background color",
         cell_h - 2
     );

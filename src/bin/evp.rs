@@ -159,7 +159,11 @@ fn run_cli(cli: Cli) -> Result<()> {
                     cli.output.clone()
                 };
 
-                let font_size = if rec.font_size_px > 0.0 { rec.font_size_px } else { 16.0 };
+                let font_size = if rec.font_size_px > 0.0 {
+                    rec.font_size_px
+                } else {
+                    16.0
+                };
                 let render_opts = evp::RenderOptions {
                     font_path: None,
                     font_size,
@@ -178,7 +182,8 @@ fn run_cli(cli: Cli) -> Result<()> {
             }
             Err(_) => {
                 // Fall back to treating it as a script file.
-                let script = evp::parse_script_file(path).with_context(|| format!("parsing {}", path.display()))?;
+                let script = evp::parse_script_file(path)
+                    .with_context(|| format!("parsing {}", path.display()))?;
                 run_script(&cli, &script, evp_start)?;
             }
         }
@@ -409,8 +414,13 @@ mod tests {
         let cli = Cli::try_parse_from(["evp", path.to_str().unwrap()]).unwrap();
         let result = run_cli(cli);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("--output is required"));
-        
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("--output is required")
+        );
+
         let _ = std::fs::remove_file(path);
     }
 
@@ -423,18 +433,19 @@ mod tests {
         std::fs::write(&json_path, json_bytes).unwrap();
 
         let output_path = temp_dir.join("test_output.json");
-        
+
         let cli = Cli::try_parse_from([
             "evp",
             json_path.to_str().unwrap(),
             "--output",
             output_path.to_str().unwrap(),
-        ]).unwrap();
-        
+        ])
+        .unwrap();
+
         let result = run_cli(cli);
         assert!(result.is_ok());
         assert!(output_path.exists());
-        
+
         let _ = std::fs::remove_file(json_path);
         let _ = std::fs::remove_file(output_path);
     }
