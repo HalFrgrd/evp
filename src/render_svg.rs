@@ -795,6 +795,37 @@ pub fn optimize_tspans(elements: &mut [TextElement]) {
     }
 }
 
+pub fn group_text_elements_by_row_and_time(elements: &mut Vec<TextElement>) {
+    if elements.is_empty() {
+        return;
+    }
+    elements.sort_by(|a, b| {
+        a.y.cmp(&b.y)
+            .then(a.start_ms.cmp(&b.start_ms))
+            .then(a.end_ms.cmp(&b.end_ms))
+            .then_with(|| {
+                let ax = a.tspans.first().map(|t| t.x_coords[0]).unwrap_or(0.0);
+                let bx = b.tspans.first().map(|t| t.x_coords[0]).unwrap_or(0.0);
+                ax.partial_cmp(&bx).unwrap_or(std::cmp::Ordering::Equal)
+            })
+    });
+
+    let mut merged: Vec<TextElement> = Vec::new();
+    for te in std::mem::take(elements) {
+        if let Some(last) = merged.last_mut() {
+            if last.y == te.y
+                && last.start_ms == te.start_ms
+                && last.end_ms == te.end_ms
+            {
+                last.tspans.extend(te.tspans);
+                continue;
+            }
+        }
+        merged.push(te);
+    }
+    *elements = merged;
+}
+
 pub fn optimize_bg_rects(bg_rects: &mut Vec<BgRect>) {
     if bg_rects.is_empty() {
         return;
@@ -830,6 +861,8 @@ pub fn optimize_bg_rects(bg_rects: &mut Vec<BgRect>) {
 }
 
 pub fn optimize_rows(elements: &mut Vec<TextElement>) {
+    elements.sort_by_key(|e| e.start_ms);
+
     let mut i = 0;
     while i < elements.len() {
         let mut merged = false;
@@ -852,28 +885,6 @@ pub fn optimize_rows(elements: &mut Vec<TextElement>) {
                             dur_ms: el2_end - el1.start_ms,
                         });
                     }
-                    elements.remove(j);
-                    merged = true;
-                    break;
-                } else if elements[j].end_ms == elements[i].start_ms {
-                    let el1_y = elements[i].y;
-                    let el1_start = elements[i].start_ms;
-
-                    let el2 = &mut elements[j];
-                    if let Some(ref mut anim) = el2.y_animation {
-                        anim.begin_ms = el1_start;
-                        anim.segments.insert(0, (el1_y, el1_start));
-                        anim.dur_ms = el2.end_ms - el1_start;
-                    } else {
-                        el2.y_animation = Some(YAnimation {
-                            begin_ms: el1_start,
-                            segments: vec![(el1_y, el1_start), (el2.y, el2.start_ms)],
-                            dur_ms: el2.end_ms - el1_start,
-                        });
-                    }
-                    el2.start_ms = el1_start;
-
-                    elements[i] = elements[j].clone();
                     elements.remove(j);
                     merged = true;
                     break;
@@ -1048,6 +1059,9 @@ fn render_from_frames(
     // Construct SVG Doc structures
     let mut bg_rects = Vec::new();
     for span in &cell_spans {
+        if span.start_ms == span.end_ms {
+            continue;
+        }
         if span.visual.bg == span.default_bg {
             continue;
         }
@@ -1071,6 +1085,9 @@ fn render_from_frames(
 
     let mut text_elements = Vec::new();
     for span in &cell_spans {
+        if span.start_ms == span.end_ms {
+            continue;
+        }
         if span.visual.text.is_empty() {
             continue;
         }
@@ -1134,6 +1151,9 @@ fn render_from_frames(
 
     let mut cursor_rects = Vec::new();
     for span in &cursor_spans {
+        if span.start_ms == span.end_ms {
+            continue;
+        }
         let x = cfg.content_x + span.col as u32 * cell_w;
         let y = cfg.content_y + span.row as u32 * cell_h;
         cursor_rects.push(CursorRect {
@@ -1148,6 +1168,7 @@ fn render_from_frames(
     }
 
     // Run optimizations
+    group_text_elements_by_row_and_time(&mut text_elements);
     optimize_tspans(&mut text_elements);
     optimize_bg_rects(&mut bg_rects);
     optimize_rows(&mut text_elements);
@@ -1571,5 +1592,96 @@ mod tests {
         assert_eq!(anim.begin_ms, 0);
         assert_eq!(anim.dur_ms, 1000);
         assert_eq!(anim.segments, vec![(20, 0), (40, 500)]);
+    }
+
+    #[test]
+    fn test_group_text_elements_by_row_and_time() {
+        let mut elements = vec![
+            TextElement {
+                y: 20,
+                y_animation: None,
+                start_ms: 100,
+                end_ms: 200,
+                tspans: vec![TSpan {
+                    x_coords: vec![10.0],
+                    text: "a".to_string(),
+                    fg: [255, 0, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                }],
+            },
+            TextElement {
+                y: 20,
+                y_animation: None,
+                start_ms: 100,
+                end_ms: 200,
+                tspans: vec![TSpan {
+                    x_coords: vec![20.0],
+                    text: "b".to_string(),
+                    fg: [255, 0, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                }],
+            },
+            TextElement {
+                y: 40,
+                y_animation: None,
+                start_ms: 100,
+                end_ms: 200,
+                tspans: vec![TSpan {
+                    x_coords: vec![10.0],
+                    text: "c".to_string(),
+                    fg: [255, 0, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                }],
+            },
+        ];
+
+        group_text_elements_by_row_and_time(&mut elements);
+        assert_eq!(elements.len(), 2);
+        
+        // Element at y=20 (a and b should be merged)
+        assert_eq!(elements[0].y, 20);
+        assert_eq!(elements[0].start_ms, 100);
+        assert_eq!(elements[0].end_ms, 200);
+        assert_eq!(elements[0].tspans.len(), 2);
+        assert_eq!(elements[0].tspans[0].text, "a");
+        assert_eq!(elements[0].tspans[1].text, "b");
+
+        // Element at y=40 (c should remain separate)
+        assert_eq!(elements[1].y, 40);
+        assert_eq!(elements[1].tspans.len(), 1);
+        assert_eq!(elements[1].tspans[0].text, "c");
     }
 }
