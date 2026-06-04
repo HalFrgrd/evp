@@ -192,7 +192,7 @@ impl Default for SvgOptions {
     fn default() -> Self {
         Self {
             font_path: None,
-            font_family: "'JetBrainsMono Nerd Font Mono', 'Noto Sans Mono', 'Noto Sans Symbols 2', 'Noto Sans Mono CJK JP', 'unifont_upper', 'unifont_csur', ui-monospace, Menlo, Consolas, 'DejaVu Sans Mono', monospace".to_string(),
+            font_family: "'JetBrainsMono Nerd Font Mono', 'Noto Sans Mono', 'Noto Emoji', 'Noto Sans Symbols 2', 'Noto Sans Mono CJK JP', 'unifont_upper', 'unifont_csur', ui-monospace, Menlo, Consolas, 'DejaVu Sans Mono', monospace".to_string(),
             font_size: 16.0,
             embed_fonts: true,
         }
@@ -1961,9 +1961,9 @@ mod tests {
     }
 
     #[test]
-    fn test_font_subset_fallback_on_cff_cjk() {
+    fn test_font_subset_on_checked_in_cjk_subset() {
         let mut rec = synth_recording();
-        // Insert a CJK character to trigger the Noto Sans Mono CJK JP fallback font
+        // Insert a CJK character to trigger the Noto Sans Mono CJK JP fallback font.
         if let Frame::Key { cells, .. } = &mut rec.frames[0] {
             cells[2] = CellSnap {
                 text: "あ".into(),
@@ -1976,14 +1976,30 @@ mod tests {
         let result = render_svg_to_string(&rec, &SvgOptions::default());
         assert!(
             result.is_ok(),
-            "Rendering SVG with CJK characters should succeed via full font fallback"
+            "Rendering SVG with CJK characters should succeed via the checked-in subset"
         );
         let svg = result.unwrap();
         assert!(svg.contains("font-family: 'Noto Sans Mono CJK JP'"));
         assert!(svg.contains("url(data:font/woff2;base64,"));
-        assert!(svg.contains(
+        assert!(!svg.contains(
             "Font subsetting failed for 'Noto Sans Mono CJK JP'; embedding the full font data in this SVG."
         ));
+    }
+
+    #[test]
+    fn test_noto_emoji_is_embedded_when_used() {
+        let mut rec = synth_recording();
+        if let Frame::Key { cells, .. } = &mut rec.frames[0] {
+            cells[2] = CellSnap {
+                text: "🚀".into(),
+                fg: [255, 255, 255],
+                bg: [0, 0, 0],
+                flags: 0,
+            };
+        }
+
+        let svg = render_svg_to_string(&rec, &SvgOptions::default()).unwrap();
+        assert!(svg.contains("font-family: 'Noto Emoji'"));
     }
 
     #[test]

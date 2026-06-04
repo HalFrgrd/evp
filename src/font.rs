@@ -35,7 +35,7 @@ impl EmbeddedFont {
 }
 
 // We define our embedded font records statically. Each contains a OnceLock for lazy decompression.
-static EMBEDDED_FONTS: [EmbeddedFont; 9] = [
+static EMBEDDED_FONTS: [EmbeddedFont; 10] = [
     EmbeddedFont {
         name: "JetBrainsMonoNerdFontMono-Regular.woff2",
         bytes: include_bytes!(concat!(
@@ -84,6 +84,14 @@ static EMBEDDED_FONTS: [EmbeddedFont; 9] = [
         name: "NotoSansMono-Regular.woff2",
         bytes: include_bytes!(concat!(env!("OUT_DIR"), "/NotoSansMono-Regular.woff2")),
         family_name: "Noto Sans Mono",
+        weight: "normal",
+        style: "normal",
+        lock: OnceLock::new(),
+    },
+    EmbeddedFont {
+        name: "NotoEmoji-Regular.woff2",
+        bytes: include_bytes!(concat!(env!("OUT_DIR"), "/NotoEmoji-Regular.woff2")),
+        family_name: "Noto Emoji",
         weight: "normal",
         style: "normal",
         lock: OnceLock::new(),
@@ -321,7 +329,7 @@ pub fn load_font_family(path: Option<&str>) -> Result<LoadedFontFamily> {
     let fallback_start = fonts.len();
     let mut fallback_names = Vec::new();
 
-    for i in 4..9 {
+    for i in 4..10 {
         let emb = &EMBEDDED_FONTS[i];
         let ttf = emb.get_ttf();
         if let Ok(font) = FontArc::try_from_vec(ttf.to_vec()) {
