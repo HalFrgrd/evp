@@ -49,9 +49,9 @@ use crate::render_common::is_box_drawing;
 use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
 
+use crate::font::load_font_family;
 use base64::prelude::*;
 use std::collections::{BTreeSet, HashMap};
-use crate::font::load_font_family;
 
 use crate::{
     recording::{RawFrame, Recording, style_flags},
@@ -279,6 +279,7 @@ impl CellVisual {
 }
 
 /// A time span during which a cell has a particular visual state.
+#[derive(Clone)]
 struct CellSpan {
     row: u16,
     col: u16,
@@ -295,6 +296,1067 @@ struct CursorSpan {
     start_ms: u32,
     end_ms: u32,
     color: [u8; 3],
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TSpan {
+    pub x_coords: Vec<f32>,
+    pub text: String,
+    pub fg: [u8; 3],
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strikethrough: bool,
+    pub is_box: bool,
+    pub scale_y: f32,
+    pub cell_center_y_offset: f32,
+    pub char_center_y_offset: f32,
+    pub cell_w: u32,
+    pub cell_h: u32,
+    pub baseline: u32,
+    pub letter_spacing: f32,
+    pub start_ms: u32,
+    pub end_ms: u32,
+}
+
+impl TSpan {
+    fn to_svg_string(
+        &self,
+        color_classes: &HashMap<[u8; 3], String>,
+        parent_start_ms: u32,
+        parent_end_ms: u32,
+        total_ms: u32,
+        default_letter_spacing: f32,
+        default_fg: Option<[u8; 3]>,
+    ) -> String {
+        let x_str = if self.x_coords.len() > 1 && {
+            let step = self.cell_w as f32;
+            let mut uniform = true;
+            for i in 1..self.x_coords.len() {
+                let expected = self.x_coords[0] + i as f32 * step;
+                if (self.x_coords[i] - expected).abs() > 1e-3 {
+                    uniform = false;
+                    break;
+                }
+            }
+            uniform
+        } {
+            let formatted = format!("{:.2}", self.x_coords[0]);
+            let mut trimmed = formatted.trim_end_matches('0');
+            if trimmed.ends_with('.') {
+                trimmed = &trimmed[..trimmed.len() - 1];
+            }
+            trimmed.to_string()
+        } else {
+            self.x_coords
+                .iter()
+                .map(|x| {
+                    let formatted = format!("{:.2}", x);
+                    let mut trimmed = formatted.trim_end_matches('0');
+                    if trimmed.ends_with('.') {
+                        trimmed = &trimmed[..trimmed.len() - 1];
+                    }
+                    trimmed.to_string()
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let weight = if self.bold {
+            " font-weight=\"bold\""
+        } else {
+            ""
+        };
+        let italic = if self.italic {
+            " font-style=\"italic\""
+        } else {
+            ""
+        };
+        let decoration = if self.underline && self.strikethrough {
+            " text-decoration=\"underline line-through\""
+        } else if self.underline {
+            " text-decoration=\"underline\""
+        } else if self.strikethrough {
+            " text-decoration=\"line-through\""
+        } else {
+            ""
+        };
+        let style = if (self.letter_spacing - default_letter_spacing).abs() < 1e-5 {
+            String::new()
+        } else {
+            format!(r#" style="letter-spacing: {}px;""#, format_seconds(self.letter_spacing))
+        };
+
+        let is_tspan_static = is_static(self.start_ms, self.end_ms, total_ms);
+        let matches_parent = self.start_ms <= parent_start_ms && self.end_ms >= parent_end_ms;
+        let is_hidden = !is_tspan_static && !matches_parent;
+
+        let fill_attr = if let Some(cls) = color_classes.get(&self.fg) {
+            if is_hidden {
+                format!(r#" class="{} h""#, cls)
+            } else {
+                format!(r#" class="{}""#, cls)
+            }
+        } else {
+            if Some(self.fg) == default_fg {
+                if is_hidden {
+                    r#" class="h""#.to_string()
+                } else {
+                    String::new()
+                }
+            } else {
+                if is_hidden {
+                    format!(r#" fill="{}" class="h""#, rgb_hex(self.fg))
+                } else {
+                    format!(r#" fill="{}""#, rgb_hex(self.fg))
+                }
+            }
+        };
+
+        let set_str = if is_hidden {
+            if self.end_ms >= total_ms || total_ms.saturating_sub(self.end_ms) <= 200 {
+                format!(
+                    r#"<set attributeName="visibility" to="visible" begin="{}"/>"#,
+                    format_begin(self.start_ms)
+                )
+            } else {
+                format!(
+                    r#"<set attributeName="visibility" to="visible" begin="{}" end="t.begin+{}"/>"#,
+                    format_begin(self.start_ms),
+                    format_time(self.end_ms)
+                )
+            }
+        } else {
+            String::new()
+        };
+
+        format!(
+            r#"<tspan x="{x}"{fill}{w}{i}{d}{s}>{set}{txt}</tspan>"#,
+            x = x_str,
+            fill = fill_attr,
+            w = weight,
+            i = italic,
+            d = decoration,
+            s = style,
+            set = set_str,
+            txt = escape_text(&self.text),
+        )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct YAnimation {
+    pub begin_ms: u32,
+    pub segments: Vec<(u32, u32)>, // (y_value, start_ms_of_segment)
+    pub dur_ms: u32,
+}
+
+impl YAnimation {
+    fn to_svg_string(&self) -> String {
+        let values_str = self
+            .segments
+            .iter()
+            .map(|(y, _)| y.to_string())
+            .collect::<Vec<_>>()
+            .join(";");
+        let key_times_str = self
+            .segments
+            .iter()
+            .map(|(_, start)| format_key_time((start - self.begin_ms) as f32 / self.dur_ms as f32))
+            .collect::<Vec<_>>()
+            .join(";");
+        format!(
+            r#"<animate attributeName="y" calcMode="discrete" values="{values}" keyTimes="{key_times}" dur="{dur}" begin="{begin}" fill="freeze"/>"#,
+            values = values_str,
+            key_times = key_times_str,
+            dur = format_time(self.dur_ms),
+            begin = format_begin(self.begin_ms),
+        )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextElement {
+    pub y: u32,
+    pub y_animation: Option<YAnimation>,
+    pub start_ms: u32,
+    pub end_ms: u32,
+    pub tspans: Vec<TSpan>,
+}
+
+impl TextElement {
+    pub fn content_equals(&self, other: &Self) -> bool {
+        if self.tspans.len() != other.tspans.len() {
+            return false;
+        }
+        for (a, b) in self.tspans.iter().zip(other.tspans.iter()) {
+            if a.x_coords != b.x_coords
+                || a.text != b.text
+                || a.fg != b.fg
+                || a.bold != b.bold
+                || a.italic != b.italic
+                || a.underline != b.underline
+                || a.strikethrough != b.strikethrough
+                || a.is_box != b.is_box
+                || a.scale_y != b.scale_y
+                || a.letter_spacing != b.letter_spacing
+            {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub fn to_svg_string(
+        &self,
+        color_classes: &HashMap<[u8; 3], String>,
+        total_ms: u32,
+        default_letter_spacing: f32,
+        default_fg: Option<[u8; 3]>,
+    ) -> String {
+        let mut text_tags = Vec::new();
+        let mut current_non_box: Vec<&TSpan> = Vec::new();
+
+        let parent_start = self.start_ms;
+        let parent_end = self.end_ms;
+
+        let flush_non_box = |non_box: &mut Vec<&TSpan>, tags: &mut Vec<String>| {
+            if non_box.is_empty() {
+                return;
+            }
+            let mut s = String::new();
+            s.push_str(&format!(r#"<text y="{}">"#, self.y));
+            if let Some(ref anim) = self.y_animation {
+                s.push_str(&anim.to_svg_string());
+            }
+            for tspan in non_box.iter() {
+                s.push_str(&tspan.to_svg_string(color_classes, parent_start, parent_end, total_ms, default_letter_spacing, default_fg));
+            }
+            s.push_str("</text>");
+            tags.push(s);
+            non_box.clear();
+        };
+
+        for tspan in &self.tspans {
+            if tspan.is_box {
+                flush_non_box(&mut current_non_box, &mut text_tags);
+
+                let text_length = tspan.cell_w;
+                let scale_y = tspan.scale_y;
+                let y = self.y;
+                let transform = if scale_y > 1.0 {
+                    let cy = y as f32 + tspan.cell_center_y_offset;
+                    let char_center_y = y as f32 + tspan.char_center_y_offset;
+                    format!(
+                        r#" transform="translate(0, {cy}) scale(1, {scale_y}) translate(0, -{char_center_y})""#,
+                        cy = cy,
+                        char_center_y = char_center_y,
+                        scale_y = scale_y
+                    )
+                } else {
+                    String::new()
+                };
+
+                let mut s = String::new();
+                s.push_str(&format!(
+                    r#"<text x="{x}" y="{y}"{transform} textLength="{text_length}" lengthAdjust="spacingAndGlyphs">"#,
+                    x = tspan.x_coords[0],
+                    y = y,
+                    transform = transform,
+                    text_length = text_length,
+                ));
+                if let Some(ref anim) = self.y_animation {
+                    s.push_str(&anim.to_svg_string());
+                }
+                s.push_str(&tspan.to_svg_string(color_classes, parent_start, parent_end, total_ms, default_letter_spacing, default_fg));
+                s.push_str("</text>");
+                text_tags.push(s);
+            } else {
+                current_non_box.push(tspan);
+            }
+        }
+        flush_non_box(&mut current_non_box, &mut text_tags);
+
+        if is_static(self.start_ms, self.end_ms, total_ms) {
+            text_tags.join("")
+        } else {
+            if text_tags.len() == 1 {
+                let tag = &text_tags[0];
+                if let Some(idx) = tag.find('>') {
+                    let mut opt = String::new();
+                    opt.push_str(&tag[..idx]);
+                    opt.push_str(r#" class="h""#);
+                    opt.push_str(">");
+                    let set_str = if self.end_ms >= total_ms || total_ms.saturating_sub(self.end_ms) <= 200 {
+                        format!(
+                            r#"<set attributeName="visibility" to="visible" begin="{}"/>"#,
+                            format_begin(self.start_ms)
+                        )
+                    } else {
+                        format!(
+                            r#"<set attributeName="visibility" to="visible" begin="{}" end="t.begin+{}"/>"#,
+                            format_begin(self.start_ms),
+                            format_time(self.end_ms)
+                        )
+                    };
+                    opt.push_str(&set_str);
+                    opt.push_str(&tag[idx + 1..]);
+                    opt
+                } else {
+                    tag.clone()
+                }
+            } else {
+                if self.end_ms >= total_ms || total_ms.saturating_sub(self.end_ms) <= 200 {
+                    format!(
+                        r#"<g class="h"><set attributeName="visibility" to="visible" begin="{}"/>{}</g>"#,
+                        format_begin(self.start_ms),
+                        text_tags.join(""),
+                    )
+                } else {
+                    format!(
+                        r#"<g class="h"><set attributeName="visibility" to="visible" begin="{}" end="t.begin+{}"/>{}</g>"#,
+                        format_begin(self.start_ms),
+                        format_time(self.end_ms),
+                        text_tags.join(""),
+                    )
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BgRect {
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+    pub fill: [u8; 3],
+    pub start_ms: u32,
+    pub end_ms: u32,
+    pub clip_path: Option<String>,
+    pub y_animation: Option<YAnimation>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CursorRect {
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+    pub fill: [u8; 3],
+    pub start_ms: u32,
+    pub end_ms: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct WindowBarCircle {
+    pub cx: u32,
+    pub cy: u32,
+    pub r: u32,
+    pub fill: Option<[u8; 3]>,
+    pub stroke: Option<[u8; 3]>,
+}
+
+impl WindowBarCircle {
+    fn to_svg_string(&self) -> String {
+        if let Some(fill) = self.fill {
+            format!(
+                r#"<circle cx="{cx}" cy="{cy}" r="{r}" fill="{fill}"/>"#,
+                cx = self.cx,
+                cy = self.cy,
+                r = self.r,
+                fill = rgb_hex(fill),
+            )
+        } else if let Some(stroke) = self.stroke {
+            format!(
+                r#"<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{stroke}" stroke-width="2"/>"#,
+                cx = self.cx,
+                cy = self.cy,
+                r = self.r,
+                stroke = rgb_hex(stroke),
+            )
+        } else {
+            String::new()
+        }
+    }
+}
+
+pub struct SvgDoc {
+    pub canvas_w: u32,
+    pub canvas_h: u32,
+    pub font_family: String,
+    pub font_size: f32,
+    pub letter_spacing: f32,
+    pub style_block: String,
+    pub canvas_bg: [u8; 3],
+    pub frame_bg_x: u32,
+    pub frame_bg_y: u32,
+    pub frame_bg_w: u32,
+    pub frame_bg_h: u32,
+    pub frame_bg_fill: [u8; 3],
+    pub frame_clip_path: Option<(u32, u32, u32, u32, u32)>, // x, y, w, h, radius
+    pub window_bar_circles: Vec<WindowBarCircle>,
+    pub master_timer_dur: f32,
+    pub bg_rects: Vec<BgRect>,
+    pub text_elements: Vec<TextElement>,
+    pub cursor_rects: Vec<CursorRect>,
+}
+
+fn is_static(start_ms: u32, end_ms: u32, total_ms: u32) -> bool {
+    start_ms <= 40 && (end_ms >= total_ms || total_ms.saturating_sub(end_ms) <= 200)
+}
+
+fn format_seconds(s: f32) -> String {
+    let formatted = format!("{:.3}", s);
+    let mut trimmed = formatted.trim_end_matches('0');
+    if trimmed.ends_with('.') {
+        trimmed = &trimmed[..trimmed.len() - 1];
+    }
+    trimmed.to_string()
+}
+
+fn format_key_time(s: f32) -> String {
+    let formatted = format!("{:.4}", s);
+    let mut trimmed = formatted.trim_end_matches('0');
+    if trimmed.ends_with('.') {
+        trimmed = &trimmed[..trimmed.len() - 1];
+    }
+    if trimmed.is_empty() {
+        "0".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn format_time(ms: u32) -> String {
+    format_seconds(ms as f32 / 1000.0)
+}
+
+fn format_begin(ms: u32) -> String {
+    if ms <= 40 {
+        "t.begin".to_string()
+    } else {
+        format!("t.begin+{}", format_time(ms))
+    }
+}
+
+fn simplify_discrete_animation<T: PartialEq + Clone>(
+    key_times: &[f32],
+    values: &[T],
+) -> (Vec<f32>, Vec<T>) {
+    if key_times.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let mut simplified_kt = vec![key_times[0]];
+    let mut simplified_vals = vec![values[0].clone()];
+    for i in 1..values.len() {
+        if values[i] != values[i - 1] {
+            simplified_kt.push(key_times[i]);
+            simplified_vals.push(values[i].clone());
+        }
+    }
+    (simplified_kt, simplified_vals)
+}
+
+fn format_key_time_list(kt: &[f32]) -> String {
+    kt.iter().map(|&k| format_key_time(k)).collect::<Vec<_>>().join(";")
+}
+
+fn format_val_list<T: std::fmt::Display>(vals: &[T]) -> String {
+    vals.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(";")
+}
+
+fn serialize_cursor_rects(cursors: &[CursorRect], total_ms: u32) -> String {
+    if cursors.is_empty() {
+        return String::new();
+    }
+
+    let mut groups: HashMap<(u32, u32, [u8; 3]), Vec<CursorRect>> = HashMap::new();
+    for c in cursors {
+        groups.entry((c.w, c.h, c.fill)).or_default().push(c.clone());
+    }
+
+    let mut s = String::new();
+    for ((w, h, fill), mut list) in groups {
+        list.sort_by_key(|c| c.start_ms);
+
+        let mut boundaries = vec![0, total_ms];
+        for c in &list {
+            boundaries.push(c.start_ms);
+            boundaries.push(c.end_ms);
+        }
+        boundaries.sort_unstable();
+        boundaries.dedup();
+
+        let mut key_times_f32 = Vec::new();
+        let mut x_vals = Vec::new();
+        let mut y_vals = Vec::new();
+        let mut vis_vals = Vec::new();
+
+        let mut last_x = list.first().map(|c| c.x).unwrap_or(0);
+        let mut last_y = list.first().map(|c| c.y).unwrap_or(0);
+
+        for i in 0..(boundaries.len() - 1) {
+            let start = boundaries[i];
+            let end = boundaries[i + 1];
+            let k = start as f32 / total_ms as f32;
+            key_times_f32.push(k);
+
+            let active = list.iter().find(|c| c.start_ms <= start && c.end_ms >= end);
+            if let Some(c) = active {
+                x_vals.push(c.x);
+                y_vals.push(c.y);
+                vis_vals.push("visible");
+                last_x = c.x;
+                last_y = c.y;
+            } else {
+                x_vals.push(last_x);
+                y_vals.push(last_y);
+                vis_vals.push("hidden");
+            }
+        }
+
+        if key_times_f32.len() == 1 && vis_vals[0] == "visible" {
+            s.push_str(&format!(
+                r#"<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{c}" fill-opacity="0.7"/>"#,
+                x = x_vals[0],
+                y = y_vals[0],
+                w = w,
+                h = h,
+                c = rgb_hex(fill),
+            ));
+        } else {
+            let mut x_attr = String::new();
+            let mut y_attr = String::new();
+            let mut class_attr = r#" class="h""#.to_string();
+
+            let mut animates = Vec::new();
+
+            let (kt_x, vals_x) = simplify_discrete_animation(&key_times_f32, &x_vals);
+            if vals_x.len() == 1 {
+                x_attr = format!(r#" x="{}""#, vals_x[0]);
+            } else {
+                let kt_str = format_key_time_list(&kt_x);
+                let val_str = format_val_list(&vals_x);
+                animates.push(format!(
+                    r#"  <animate attributeName="x" calcMode="discrete" values="{val_str}" keyTimes="{kt_str}" dur="{dur}" begin="t.begin" fill="freeze"/>"#,
+                    val_str = val_str,
+                    kt_str = kt_str,
+                    dur = format_time(total_ms)
+                ));
+            }
+
+            let (kt_y, vals_y) = simplify_discrete_animation(&key_times_f32, &y_vals);
+            if vals_y.len() == 1 {
+                y_attr = format!(r#" y="{}""#, vals_y[0]);
+            } else {
+                let kt_str = format_key_time_list(&kt_y);
+                let val_str = format_val_list(&vals_y);
+                animates.push(format!(
+                    r#"  <animate attributeName="y" calcMode="discrete" values="{val_str}" keyTimes="{kt_str}" dur="{dur}" begin="t.begin" fill="freeze"/>"#,
+                    val_str = val_str,
+                    kt_str = kt_str,
+                    dur = format_time(total_ms)
+                ));
+            }
+
+            let (kt_vis, vals_vis) = simplify_discrete_animation(&key_times_f32, &vis_vals);
+            if vals_vis.len() == 1 {
+                if vals_vis[0] == "visible" {
+                    class_attr = String::new();
+                }
+            } else {
+                let kt_str = format_key_time_list(&kt_vis);
+                let val_str = format_val_list(&vals_vis);
+                animates.push(format!(
+                    r#"  <animate attributeName="visibility" calcMode="discrete" values="{val_str}" keyTimes="{kt_str}" dur="{dur}" begin="t.begin" fill="freeze"/>"#,
+                    val_str = val_str,
+                    kt_str = kt_str,
+                    dur = format_time(total_ms)
+                ));
+            }
+
+            if animates.is_empty() {
+                s.push_str(&format!(
+                    r#"<rect{x_attr}{y_attr} width="{w}" height="{h}" fill="{c}" fill-opacity="0.7"{class_attr}/>"#,
+                    x_attr = x_attr,
+                    y_attr = y_attr,
+                    w = w,
+                    h = h,
+                    c = rgb_hex(fill),
+                    class_attr = class_attr,
+                ));
+            } else {
+                s.push_str(&format!(
+                    r#"<rect{x_attr}{y_attr} width="{w}" height="{h}" fill="{c}" fill-opacity="0.7"{class_attr}>
+{animates}
+</rect>
+"#,
+                    x_attr = x_attr,
+                    y_attr = y_attr,
+                    w = w,
+                    h = h,
+                    c = rgb_hex(fill),
+                    class_attr = class_attr,
+                    animates = animates.join("\n"),
+                ));
+            }
+        }
+    }
+    s
+}
+
+impl SvgDoc {
+    pub fn to_svg(&self) -> String {
+        // 1. Gather color classes
+        let mut text_color_counts: HashMap<[u8; 3], usize> = HashMap::new();
+        for te in &self.text_elements {
+            for tspan in &te.tspans {
+                *text_color_counts.entry(tspan.fg).or_default() += 1;
+            }
+        }
+        let most_common_text_color = text_color_counts
+            .iter()
+            .max_by_key(|&(_, count)| count)
+            .map(|(&color, _)| color);
+
+        let mut color_counts: HashMap<[u8; 3], usize> = HashMap::new();
+        for bg in &self.bg_rects {
+            *color_counts.entry(bg.fill).or_default() += 1;
+        }
+        for te in &self.text_elements {
+            for tspan in &te.tspans {
+                *color_counts.entry(tspan.fg).or_default() += 1;
+            }
+        }
+
+        let mut color_classes: HashMap<[u8; 3], String> = HashMap::new();
+        let mut class_id = 0;
+        let mut sorted_colors: Vec<_> = color_counts.keys().cloned().collect();
+        sorted_colors.sort();
+        for color in sorted_colors {
+            if Some(color) == most_common_text_color {
+                continue;
+            }
+            if color_counts[&color] >= 5 {
+                color_classes.insert(color, format!("c{}", class_id));
+                class_id += 1;
+            }
+        }
+
+        // 2. Assemble style block
+        let mut style = self.style_block.clone();
+        let mut extra_css = String::new();
+        extra_css.push_str(".h { visibility: hidden; }\n");
+        let letter_spacing_style = if self.letter_spacing != 0.0 {
+            format!("letter-spacing: {}px; ", format_seconds(self.letter_spacing))
+        } else {
+            String::new()
+        };
+        let fill_style = if let Some(default_fg) = most_common_text_color {
+            format!("fill: {}; ", rgb_hex(default_fg))
+        } else {
+            String::new()
+        };
+        if !letter_spacing_style.is_empty() || !fill_style.is_empty() {
+            extra_css.push_str(&format!(
+                "text, tspan {{ {}{} }}\n",
+                letter_spacing_style,
+                fill_style
+            ));
+        }
+        let mut sorted_entries: Vec<_> = color_classes.iter().collect();
+        sorted_entries
+            .sort_by_key(|(_, class_name)| class_name[1..].parse::<usize>().unwrap_or(0));
+        for (color, class_name) in sorted_entries {
+            extra_css.push_str(&format!(
+                ".{} {{ fill: {}; }}\n",
+                class_name,
+                rgb_hex(*color)
+            ));
+        }
+
+        if style.ends_with("</style>\n") {
+            style.truncate(style.len() - 10);
+            style.push_str(&extra_css);
+            style.push_str("</style>\n");
+        } else {
+            style.push_str("<style>\n");
+            style.push_str(&extra_css);
+            style.push_str("</style>\n");
+        }
+
+        let mut s = String::with_capacity(128 * 1024);
+        s.push_str(&format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" font-family="{font}" font-size="{fs}" xml:space="preserve">
+{style}"#,
+            w = self.canvas_w,
+            h = self.canvas_h,
+            font = escape_attr(&self.font_family),
+            fs = self.font_size,
+            style = style,
+        ));
+
+        // Canvas/Frame background optimization
+        let needs_canvas_bg = self.frame_clip_path.is_some()
+            || self.frame_bg_x != 0
+            || self.frame_bg_y != 0
+            || self.frame_bg_w != self.canvas_w
+            || self.frame_bg_h != self.canvas_h
+            || self.frame_bg_fill != self.canvas_bg;
+
+        if needs_canvas_bg {
+            s.push_str(&format!(
+                r#"<rect width="{w}" height="{h}" fill="{bg}"/>
+"#,
+                w = self.canvas_w,
+                h = self.canvas_h,
+                bg = rgb_hex(self.canvas_bg),
+            ));
+        }
+
+        // Clip path
+        if let Some((x, y, w, h, r)) = self.frame_clip_path {
+            s.push_str(&format!(
+                r#"<defs><clipPath id="frame-clip"><rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}" ry="{r}"/></clipPath></defs>"#,
+            ));
+        }
+
+        // Frame background (formatted dynamically to omit x=0 and y=0 if they are zero)
+        let mut frame_bg_attrs = Vec::new();
+        if self.frame_bg_x != 0 {
+            frame_bg_attrs.push(format!(r#"x="{}""#, self.frame_bg_x));
+        }
+        if self.frame_bg_y != 0 {
+            frame_bg_attrs.push(format!(r#"y="{}""#, self.frame_bg_y));
+        }
+        frame_bg_attrs.push(format!(r#"width="{}""#, self.frame_bg_w));
+        frame_bg_attrs.push(format!(r#"height="{}""#, self.frame_bg_h));
+        frame_bg_attrs.push(format!(r#"fill="{}""#, rgb_hex(self.frame_bg_fill)));
+        if self.frame_clip_path.is_some() {
+            frame_bg_attrs.push(r#"clip-path="url(#frame-clip)""#.to_string());
+        }
+        s.push_str(&format!(
+            "<rect {}/>\n",
+            frame_bg_attrs.join(" ")
+        ));
+
+        // Window bar circles
+        for circle in &self.window_bar_circles {
+            s.push_str(&circle.to_svg_string());
+        }
+
+        // Master timer - rendered directly as an animate element under the svg root
+        s.push_str(&format!(
+            r#"<animate id="t" attributeName="x" from="0" to="0" dur="{dur}" begin="0s;t.end"/>
+"#,
+            dur = format_seconds(self.master_timer_dur)
+        ));
+
+        // Background rects
+        let total_ms = (self.master_timer_dur * 1000.0).round() as u32;
+        for rect in &self.bg_rects {
+            let is_bg_static = is_static(rect.start_ms, rect.end_ms, total_ms);
+            let fill_attr = if let Some(cls) = color_classes.get(&rect.fill) {
+                if !is_bg_static {
+                    format!(r#" class="{} h""#, cls)
+                } else {
+                    format!(r#" class="{}""#, cls)
+                }
+            } else {
+                if !is_bg_static {
+                    format!(r#" fill="{}" class="h""#, rgb_hex(rect.fill))
+                } else {
+                    format!(r#" fill="{}""#, rgb_hex(rect.fill))
+                }
+            };
+            let rect_clip = if let Some(ref path) = rect.clip_path {
+                format!(r#" clip-path="url(#{})""#, path)
+            } else {
+                String::new()
+            };
+            if is_bg_static {
+                s.push_str(&format!(
+                    r#"<rect x="{x}" y="{y}" width="{w}" height="{h}"{fill}{clip}/>"#,
+                    x = rect.x,
+                    y = rect.y,
+                    w = rect.w,
+                    h = rect.h,
+                    fill = fill_attr,
+                    clip = rect_clip,
+                ));
+            } else {
+                let anim_str = if let Some(ref anim) = rect.y_animation {
+                    anim.to_svg_string()
+                } else {
+                    String::new()
+                };
+                let set_str = if rect.end_ms >= total_ms || total_ms.saturating_sub(rect.end_ms) <= 200 {
+                    format!(
+                        r#"<set attributeName="visibility" to="visible" begin="{}"/>"#,
+                        format_begin(rect.start_ms)
+                    )
+                } else {
+                    format!(
+                        r#"<set attributeName="visibility" to="visible" begin="{}" end="t.begin+{}"/>"#,
+                        format_begin(rect.start_ms),
+                        format_time(rect.end_ms)
+                    )
+                };
+                s.push_str(&format!(
+                    r#"<rect x="{x}" y="{y}" width="{w}" height="{h}"{fill}{clip}>{set}{anim}</rect>"#,
+                    x = rect.x,
+                    y = rect.y,
+                    w = rect.w,
+                    h = rect.h,
+                    fill = fill_attr,
+                    clip = rect_clip,
+                    set = set_str,
+                    anim = anim_str,
+                ));
+            }
+        }
+
+        // Text elements
+        for te in &self.text_elements {
+            s.push_str(&te.to_svg_string(&color_classes, total_ms, self.letter_spacing, most_common_text_color));
+        }
+
+        // Cursor rects
+        s.push_str(&serialize_cursor_rects(&self.cursor_rects, total_ms));
+
+        s.push_str("\n</svg>\n");
+        s
+    }
+}
+
+pub fn optimize_tspans(elements: &mut [TextElement]) {
+    for te in elements {
+        if te.tspans.is_empty() {
+            continue;
+        }
+        te.tspans
+            .sort_by(|a, b| a.x_coords[0].partial_cmp(&b.x_coords[0]).unwrap());
+
+        let mut merged: Vec<TSpan> = Vec::new();
+        for tspan in std::mem::take(&mut te.tspans) {
+            if let Some(last) = merged.last_mut() {
+                if last.fg == tspan.fg
+                    && last.bold == tspan.bold
+                    && last.italic == tspan.italic
+                    && last.underline == tspan.underline
+                    && last.strikethrough == tspan.strikethrough
+                    && last.is_box == tspan.is_box
+                    && last.scale_y == tspan.scale_y
+                    && last.cell_center_y_offset == tspan.cell_center_y_offset
+                    && last.char_center_y_offset == tspan.char_center_y_offset
+                    && last.letter_spacing == tspan.letter_spacing
+                    && last.start_ms == tspan.start_ms
+                    && last.end_ms == tspan.end_ms
+                {
+                    let cell_w = last.cell_w as f32;
+                    let expected_next_x = last.x_coords.last().unwrap() + cell_w;
+                    let gap_cells = ((tspan.x_coords[0] - expected_next_x) / cell_w).round() as i32;
+                    if gap_cells > 0 && gap_cells <= 4 && !last.underline && !last.strikethrough {
+                        for g in 0..gap_cells {
+                            last.x_coords.push(expected_next_x + g as f32 * cell_w);
+                            last.text.push(' ');
+                        }
+                    }
+                    last.x_coords.extend(&tspan.x_coords);
+                    last.text.push_str(&tspan.text);
+                    continue;
+                }
+            }
+            merged.push(tspan);
+        }
+        te.tspans = merged;
+    }
+}
+
+pub fn group_text_elements_by_row_and_time(elements: &mut Vec<TextElement>) {
+    if elements.is_empty() {
+        return;
+    }
+    elements.sort_by(|a, b| {
+        a.y.cmp(&b.y)
+            .then(a.start_ms.cmp(&b.start_ms))
+            .then(a.end_ms.cmp(&b.end_ms))
+    });
+
+    let mut merged: Vec<TextElement> = Vec::new();
+    for mut te in std::mem::take(elements) {
+        if let Some(last) = merged.last_mut() {
+            if last.y == te.y
+                && last.start_ms == te.start_ms
+                && last.end_ms == te.end_ms
+            {
+                last.tspans.append(&mut te.tspans);
+                continue;
+            }
+        }
+        merged.push(te);
+    }
+    *elements = merged;
+}
+
+pub fn optimize_bg_rect_scroll(bg_rects: &mut Vec<BgRect>) {
+    bg_rects.sort_by_key(|r| r.start_ms);
+
+    let mut i = 0;
+    while i < bg_rects.len() {
+        let mut merged = false;
+        for j in (i + 1)..bg_rects.len() {
+            if bg_rects[i].x == bg_rects[j].x
+                && bg_rects[i].w == bg_rects[j].w
+                && bg_rects[i].h == bg_rects[j].h
+                && bg_rects[i].fill == bg_rects[j].fill
+                && bg_rects[i].clip_path == bg_rects[j].clip_path
+            {
+                if bg_rects[i].end_ms == bg_rects[j].start_ms {
+                    let r2_y = bg_rects[j].y;
+                    let r2_start = bg_rects[j].start_ms;
+                    let r2_end = bg_rects[j].end_ms;
+
+                    let r1 = &mut bg_rects[i];
+                    r1.end_ms = r2_end;
+                    if let Some(ref mut anim) = r1.y_animation {
+                        anim.segments.push((r2_y, r2_start));
+                        anim.dur_ms = r2_end - anim.begin_ms;
+                    } else {
+                        r1.y_animation = Some(YAnimation {
+                            begin_ms: r1.start_ms,
+                            segments: vec![(r1.y, r1.start_ms), (r2_y, r2_start)],
+                            dur_ms: r2_end - r1.start_ms,
+                        });
+                    }
+                    bg_rects.remove(j);
+                    merged = true;
+                    break;
+                }
+            }
+        }
+        if !merged {
+            i += 1;
+        }
+    }
+}
+
+pub fn optimize_bg_rects(bg_rects: &mut Vec<BgRect>) {
+    if bg_rects.is_empty() {
+        return;
+    }
+    bg_rects.sort_by(|a, b| {
+        a.y.cmp(&b.y)
+            .then(a.h.cmp(&b.h))
+            .then(a.fill.cmp(&b.fill))
+            .then(a.start_ms.cmp(&b.start_ms))
+            .then(a.end_ms.cmp(&b.end_ms))
+            .then(a.clip_path.cmp(&b.clip_path))
+            .then(a.x.cmp(&b.x))
+    });
+
+    let mut merged: Vec<BgRect> = Vec::new();
+    for rect in std::mem::take(bg_rects) {
+        if let Some(last) = merged.last_mut() {
+            if last.y == rect.y
+                && last.h == rect.h
+                && last.fill == rect.fill
+                && last.start_ms == rect.start_ms
+                && last.end_ms == rect.end_ms
+                && last.clip_path == rect.clip_path
+                && last.x + last.w == rect.x
+            {
+                last.w += rect.w;
+                continue;
+            }
+        }
+        merged.push(rect);
+    }
+    *bg_rects = merged;
+}
+
+pub fn optimize_rows(elements: &mut Vec<TextElement>) {
+    elements.sort_by_key(|e| e.start_ms);
+
+    let mut i = 0;
+    while i < elements.len() {
+        let mut merged = false;
+        for j in (i + 1)..elements.len() {
+            if elements[i].content_equals(&elements[j]) {
+                if elements[i].end_ms == elements[j].start_ms {
+                    let el2_y = elements[j].y;
+                    let el2_start = elements[j].start_ms;
+                    let el2_end = elements[j].end_ms;
+
+                    let el1 = &mut elements[i];
+                    let el1_old_end = el1.end_ms;
+                    el1.end_ms = el2_end;
+
+                    // Extend end_ms of any tspans that were active at the end of the previous phase
+                    for tspan in &mut el1.tspans {
+                        if tspan.end_ms == el1_old_end {
+                            tspan.end_ms = el2_end;
+                        }
+                    }
+
+                    if let Some(ref mut anim) = el1.y_animation {
+                        anim.segments.push((el2_y, el2_start));
+                        anim.dur_ms = el2_end - anim.begin_ms;
+                    } else {
+                        el1.y_animation = Some(YAnimation {
+                            begin_ms: el1.start_ms,
+                            segments: vec![(el1.y, el1.start_ms), (el2_y, el2_start)],
+                            dur_ms: el2_end - el1.start_ms,
+                        });
+                    }
+                    elements.remove(j);
+                    merged = true;
+                    break;
+                }
+            }
+        }
+        if !merged {
+            i += 1;
+        }
+    }
+}
+pub fn group_text_elements_final(elements: &mut Vec<TextElement>) {
+    if elements.is_empty() {
+        return;
+    }
+    elements.sort_by(|a, b| {
+        a.y.cmp(&b.y).then_with(|| {
+            match (&a.y_animation, &b.y_animation) {
+                (None, None) => std::cmp::Ordering::Equal,
+                (None, Some(_)) => std::cmp::Ordering::Less,
+                (Some(_), None) => std::cmp::Ordering::Greater,
+                (Some(ax), Some(bx)) => {
+                    ax.begin_ms.cmp(&bx.begin_ms)
+                        .then(ax.dur_ms.cmp(&bx.dur_ms))
+                        .then_with(|| ax.segments.cmp(&bx.segments))
+                }
+            }
+        })
+    });
+
+    let mut merged: Vec<TextElement> = Vec::new();
+    for mut te in std::mem::take(elements) {
+        if let Some(last) = merged.last_mut() {
+            if last.y == te.y && last.y_animation == te.y_animation {
+                last.start_ms = last.start_ms.min(te.start_ms);
+                last.end_ms = last.end_ms.max(te.end_ms);
+                last.tspans.append(&mut te.tspans);
+                continue;
+            }
+        }
+        merged.push(te);
+    }
+    for te in &mut merged {
+        te.tspans.sort_by(|a, b| a.x_coords[0].partial_cmp(&b.x_coords[0]).unwrap_or(std::cmp::Ordering::Equal));
+    }
+    *elements = merged;
 }
 
 fn render_from_frames(
@@ -332,7 +1394,6 @@ fn render_from_frames(
 
     // Build cell spans: track when each cell changes across frames.
     let mut cell_spans: Vec<CellSpan> = Vec::new();
-    // Current state per cell: (visual, start_ms, default_bg at start)
     let mut current: Vec<(CellVisual, u32, [u8; 3])> = Vec::with_capacity(num_cells);
 
     // Initialize with first frame.
@@ -346,13 +1407,11 @@ fn render_from_frames(
         for idx in 0..num_cells {
             let new_visual = CellVisual::from_snap(&frame.cells[idx]);
             let (ref old_visual, start_ms, old_default_bg) = current[idx];
-            // If visual changed, or default_bg changed (which affects "blank" rendering)
             if *old_visual != new_visual
                 || (old_visual.bg == old_default_bg
                     && new_visual.bg == frame.default_bg
                     && old_default_bg != frame.default_bg)
             {
-                // Flush the old span if it's not visually blank
                 if !old_visual.is_blank(old_default_bg) {
                     let row = (idx / cols as usize) as u16;
                     let col = (idx % cols as usize) as u16;
@@ -387,9 +1446,61 @@ fn render_from_frames(
         }
     }
 
+    // Split cell spans row-by-row to align typing transitions and avoid overlapping lifetimes.
+    let mut split_cell_spans = Vec::new();
+    for r in 0..rows {
+        // Find spans on this row
+        let mut row_spans: Vec<CellSpan> = cell_spans.iter().filter(|s| s.row == r).cloned().collect();
+        if row_spans.is_empty() {
+            continue;
+        }
+
+        // Group by end_ms
+        row_spans.sort_by_key(|s| s.end_ms);
+
+        let mut i = 0;
+        while i < row_spans.len() {
+            let end = row_spans[i].end_ms;
+            let mut group = Vec::new();
+            while i < row_spans.len() && row_spans[i].end_ms == end {
+                group.push(row_spans[i].clone());
+                i += 1;
+            }
+
+            // Find the max start_ms in this group
+            let max_start = group.iter().map(|s| s.start_ms).max().unwrap_or(0);
+
+            // Split the spans in this group at max_start
+            for span in group {
+                if span.start_ms < max_start {
+                    // Split into [start_ms, max_start] and [max_start, end_ms]
+                    split_cell_spans.push(CellSpan {
+                        row: span.row,
+                        col: span.col,
+                        start_ms: span.start_ms,
+                        end_ms: max_start,
+                        visual: span.visual.clone(),
+                        default_bg: span.default_bg,
+                    });
+                    split_cell_spans.push(CellSpan {
+                        row: span.row,
+                        col: span.col,
+                        start_ms: max_start,
+                        end_ms: span.end_ms,
+                        visual: span.visual.clone(),
+                        default_bg: span.default_bg,
+                    });
+                } else {
+                    split_cell_spans.push(span);
+                }
+            }
+        }
+    }
+    cell_spans = split_cell_spans;
+
     // Build cursor spans.
     let mut cursor_spans: Vec<CursorSpan> = Vec::new();
-    let mut cur_cursor: Option<(u16, u16, u32, [u8; 3])> = None; // (col, row, start_ms, color)
+    let mut cur_cursor: Option<(u16, u16, u32, [u8; 3])> = None;
 
     for frame in frames.iter() {
         let cc = frame.cursor_color.unwrap_or(frame.default_fg);
@@ -422,7 +1533,6 @@ fn render_from_frames(
             (None, None) => {}
         }
     }
-    // Flush remaining cursor.
     if let Some((cx, cy, start, color)) = cur_cursor {
         cursor_spans.push(CursorSpan {
             col: cx,
@@ -442,83 +1552,12 @@ fn render_from_frames(
         }
     }
 
-    let mut s = String::with_capacity(64 * 1024);
-    s.push_str(&format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" font-family="{font}" font-size="{fs}" xml:space="preserve">
-{style}"#,
-        w = canvas_w,
-        h = canvas_h,
-        font = escape_attr(&font_family),
-        fs = opts.font_size,
-        style = generate_style_block(frames, opts)?
-    ));
-
-    // Canvas background (static).
-    s.push_str(&format!(
-        r#"<rect width="{w}" height="{h}" fill="{bg}"/>
-"#,
-        w = canvas_w,
-        h = canvas_h,
-        bg = rgb_hex(cfg.frame_style.margin_fill),
-    ));
-
-    // Clip path for rounded corners.
-    if cfg.frame_style.border_radius_px > 0 {
-        s.push_str(&format!(
-            r#"<defs><clipPath id="frame-clip"><rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}" ry="{r}"/></clipPath></defs>"#,
-            x = cfg.frame_x,
-            y = cfg.frame_y,
-            w = cfg.frame_w,
-            h = cfg.frame_h,
-            r = cfg.frame_style.border_radius_px.min(cfg.frame_w / 2).min(cfg.frame_h / 2),
-        ));
-    }
-
-    // Frame background (static).
-    let clip_attr = if cfg.frame_style.border_radius_px > 0 {
-        r#" clip-path="url(#frame-clip)""#
-    } else {
-        ""
-    };
-    s.push_str(&format!(
-        r#"<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{bg}"{clip}/>
-"#,
-        x = cfg.frame_x,
-        y = cfg.frame_y,
-        w = cfg.frame_w,
-        h = cfg.frame_h,
-        bg = rgb_hex(frames[0].default_bg),
-        clip = clip_attr,
-    ));
-
-    // Window bar (static).
-    if cfg.frame_style.window_bar.enabled() {
-        emit_window_bar(&mut s, cfg);
-    }
-
-    // Master timer.
-    s.push_str(&format!(
-        r#"<rect width="0" height="0"><animate id="t" attributeName="x" from="0" to="0" dur="{dur}s" repeatCount="indefinite"/></rect>
-"#,
-        dur = total_s
-    ));
-
     let cell_w = cfg.cell_width_px.max(1);
     let cell_h = cfg.cell_height_px.max(1);
-    // Compute the baseline offset from the top of the cell so that the glyph
-    // bbox is vertically centred, mirroring the GIF renderer's logic.
-    //
-    // When font metrics are available (char_height_px > 0), scale them from
-    // the GIF font size to the SVG font size and apply the same centering
-    // formula: baseline = ascent_svg + (cell_h - char_h_svg) / 2.
-    //
-    // When metrics are absent (old recordings), fall back to the historical
-    // approximation of 0.8 * font_size (no centering) — this preserves the
-    // previous behaviour for recordings that pre-date this feature.
+
     assert!(
         cfg.char_height_px > 0 && cfg.font_size_px > 0.0,
-        "font metrics are always required; ViewportConfig::with_font_metrics was never called"
+        "font metrics are always required"
     );
     let scale = opts.font_size / cfg.font_size_px;
     let letter_spacing_svg = cfg.letter_spacing * scale;
@@ -531,161 +1570,199 @@ fn render_from_frames(
         (ascent_svg + extra / 2.0).round() as u32
     };
 
-    // Determine if all spans cover the full duration (static content optimization).
-    let is_static =
-        |span_start: u32, span_end: u32| -> bool { span_start == 0 && span_end >= total_ms };
-
-    // Emit cell spans grouped by time window for efficiency.
-    // First: background rects.
+    // Construct SVG Doc structures
+    let mut bg_rects = Vec::new();
     for span in &cell_spans {
+        if span.start_ms == span.end_ms {
+            continue;
+        }
         if span.visual.bg == span.default_bg {
             continue;
         }
         let x = cfg.content_x + span.col as u32 * cell_w;
         let y = cfg.content_y + span.row as u32 * cell_h;
-        if is_static(span.start_ms, span.end_ms) {
-            s.push_str(&format!(
-                r#"<rect x="{x}" y="{y}" width="{cw}" height="{ch}" fill="{f}"{clip}/>"#,
-                cw = cell_w,
-                ch = cell_h,
-                f = rgb_hex(span.visual.bg),
-                clip = clip_attr,
-            ));
-        } else {
-            let begin_s = span.start_ms as f32 / 1000.0;
-            let end_s = span.end_ms as f32 / 1000.0;
-            s.push_str(&format!(
-                r#"<rect x="{x}" y="{y}" width="{cw}" height="{ch}" fill="{f}"{clip} visibility="hidden"><set attributeName="visibility" to="visible" begin="t.begin+{b}s" end="t.begin+{e}s"/></rect>"#,
-                cw = cell_w,
-                ch = cell_h,
-                f = rgb_hex(span.visual.bg),
-                clip = clip_attr,
-                b = begin_s,
-                e = end_s,
-            ));
-        }
+        bg_rects.push(BgRect {
+            x,
+            y,
+            w: cell_w,
+            h: cell_h,
+            fill: span.visual.bg,
+            start_ms: span.start_ms,
+            end_ms: span.end_ms,
+            clip_path: if cfg.frame_style.border_radius_px > 0 {
+                Some("url(#frame-clip)".to_string())
+            } else {
+                None
+            },
+            y_animation: None,
+        });
     }
 
-    // Text spans.
+    let mut text_elements = Vec::new();
     for span in &cell_spans {
+        if span.start_ms == span.end_ms {
+            continue;
+        }
         if span.visual.text.is_empty() {
             continue;
         }
         let x = cfg.content_x + span.col as u32 * cell_w;
         let y = cfg.content_y + span.row as u32 * cell_h + baseline;
-        let weight = if span.visual.flags & style_flags::BOLD != 0 {
-            " font-weight=\"bold\""
-        } else {
-            ""
-        };
-        let italic = if span.visual.flags & style_flags::ITALIC != 0 {
-            " font-style=\"italic\""
-        } else {
-            ""
-        };
-        let decoration = if span.visual.flags & style_flags::UNDERLINE != 0
-            && span.visual.flags & style_flags::STRIKETHROUGH != 0
-        {
-            " text-decoration=\"underline line-through\""
-        } else if span.visual.flags & style_flags::UNDERLINE != 0 {
-            " text-decoration=\"underline\""
-        } else if span.visual.flags & style_flags::STRIKETHROUGH != 0 {
-            " text-decoration=\"line-through\""
-        } else {
-            ""
-        };
 
         let is_box = span.visual.text.chars().any(is_box_drawing);
+        let mut scale_y = 1.0;
+        let mut cell_center_y_offset = 0.0;
+        let mut char_center_y_offset = 0.0;
 
-        let text_elem = if is_box {
-            let text_length = cell_w;
-            let scale = opts.font_size / cfg.font_size_px;
-            let char_h_svg = cfg.char_height_px as f32 * scale;
-            let ascent_svg = cfg.ascent_px as f32 * scale;
-            let scale_y = (cell_h as f32 / char_h_svg).max(1.0);
-            let transform = if scale_y > 1.0 {
-                let cell_center_y = (y as f32 - baseline as f32) + (cell_h as f32 / 2.0);
-                let char_center_y = y as f32 - ascent_svg + (char_h_svg / 2.0);
-                format!(
-                    r#" transform="translate(0, {cy}) scale(1, {scale_y}) translate(0, -{char_center_y})""#,
-                    cy = cell_center_y,
-                    char_center_y = char_center_y,
-                    scale_y = scale_y
-                )
-            } else {
-                String::new()
-            };
-            format!(
-                r#"<text x="{x}" y="{y}" fill="{fg}"{w}{i}{d}{transform} textLength="{text_length}" lengthAdjust="spacingAndGlyphs">{txt}</text>"#,
-                fg = rgb_hex(span.visual.fg),
-                w = weight,
-                i = italic,
-                d = decoration,
-                transform = transform,
-                text_length = text_length,
-                txt = escape_text(&span.visual.text),
-            )
+        if is_box {
+            let scale_font = opts.font_size / cfg.font_size_px;
+            let char_h_svg = cfg.char_height_px as f32 * scale_font;
+            let ascent_svg = cfg.ascent_px as f32 * scale_font;
+            scale_y = (cell_h as f32 / char_h_svg).max(1.0);
+
+            cell_center_y_offset = -(baseline as f32) + (cell_h as f32 / 2.0);
+            char_center_y_offset = -ascent_svg + (char_h_svg / 2.0);
+        }
+
+        let draw_x = if is_box {
+            x as f32
         } else {
-            let draw_x = x as f32 + offset_x_svg;
-            let style = if letter_spacing_svg != 0.0 {
-                format!(r#" style="letter-spacing: {:.2}px;""#, letter_spacing_svg)
-            } else {
-                String::new()
-            };
-            format!(
-                r#"<text x="{x}" y="{y}" fill="{fg}"{w}{i}{d}{s}>{txt}</text>"#,
-                x = draw_x,
-                y = y,
-                fg = rgb_hex(span.visual.fg),
-                w = weight,
-                i = italic,
-                d = decoration,
-                s = style,
-                txt = escape_text(&span.visual.text),
-            )
+            x as f32 + offset_x_svg
         };
 
-        if is_static(span.start_ms, span.end_ms) {
-            s.push_str(&text_elem);
-        } else {
-            let begin_s = span.start_ms as f32 / 1000.0;
-            let end_s = span.end_ms as f32 / 1000.0;
-            s.push_str(&format!(
-                r#"<g visibility="hidden"><set attributeName="visibility" to="visible" begin="t.begin+{b}s" end="t.begin+{e}s"/>{elem}</g>"#,
-                b = begin_s,
-                e = end_s,
-                elem = text_elem,
-            ));
+        let char_count = span.visual.text.chars().count();
+        let mut x_coords = Vec::with_capacity(char_count);
+        x_coords.push(draw_x);
+        for i in 1..char_count {
+            x_coords.push(draw_x + (i as f32 * cell_w as f32 / char_count as f32));
         }
+
+        let tspan = TSpan {
+            x_coords,
+            text: span.visual.text.clone(),
+            fg: span.visual.fg,
+            bold: span.visual.flags & style_flags::BOLD != 0,
+            italic: span.visual.flags & style_flags::ITALIC != 0,
+            underline: span.visual.flags & style_flags::UNDERLINE != 0,
+            strikethrough: span.visual.flags & style_flags::STRIKETHROUGH != 0,
+            is_box,
+            scale_y,
+            cell_center_y_offset,
+            char_center_y_offset,
+            cell_w,
+            cell_h,
+            baseline,
+            letter_spacing: if is_box { 0.0 } else { letter_spacing_svg },
+            start_ms: span.start_ms,
+            end_ms: span.end_ms,
+        };
+
+        text_elements.push(TextElement {
+            y,
+            y_animation: None,
+            start_ms: span.start_ms,
+            end_ms: span.end_ms,
+            tspans: vec![tspan],
+        });
     }
 
-    // Cursor spans.
+    let mut cursor_rects = Vec::new();
     for span in &cursor_spans {
+        if span.start_ms == span.end_ms {
+            continue;
+        }
         let x = cfg.content_x + span.col as u32 * cell_w;
         let y = cfg.content_y + span.row as u32 * cell_h;
-        if is_static(span.start_ms, span.end_ms) {
-            s.push_str(&format!(
-                r#"<rect x="{x}" y="{y}" width="{cw}" height="{ch}" fill="{c}" fill-opacity="0.7"/>"#,
-                cw = cell_w,
-                ch = cell_h,
-                c = rgb_hex(span.color),
-            ));
+        cursor_rects.push(CursorRect {
+            x,
+            y,
+            w: cell_w,
+            h: cell_h,
+            fill: span.color,
+            start_ms: span.start_ms,
+            end_ms: span.end_ms,
+        });
+    }
+
+    // Run optimizations
+    group_text_elements_by_row_and_time(&mut text_elements);
+    optimize_tspans(&mut text_elements);
+    optimize_bg_rects(&mut bg_rects);
+    optimize_bg_rect_scroll(&mut bg_rects);
+    optimize_rows(&mut text_elements);
+    group_text_elements_final(&mut text_elements);
+
+    let mut window_bar_circles = Vec::new();
+    if cfg.frame_style.window_bar.enabled() {
+        let style = cfg.frame_style.window_bar;
+        let (radius, gap) = window_bar_dot_metrics(cfg.bar_h);
+        let dots_w = radius * 2 * 3 + gap * 2;
+        let start_x = if style.align_right() {
+            cfg.frame_x + cfg.frame_w.saturating_sub(dots_w + gap)
         } else {
-            let begin_s = span.start_ms as f32 / 1000.0;
-            let end_s = span.end_ms as f32 / 1000.0;
-            s.push_str(&format!(
-                r#"<rect x="{x}" y="{y}" width="{cw}" height="{ch}" fill="{c}" fill-opacity="0.7" visibility="hidden"><set attributeName="visibility" to="visible" begin="t.begin+{b}s" end="t.begin+{e}s"/></rect>"#,
-                cw = cell_w,
-                ch = cell_h,
-                c = rgb_hex(span.color),
-                b = begin_s,
-                e = end_s,
-            ));
+            cfg.frame_x + gap
+        };
+        let cy = cfg.frame_y + cfg.bar_h / 2;
+        for (idx, color) in [[255, 95, 86], [255, 189, 46], [39, 201, 63]]
+            .iter()
+            .enumerate()
+        {
+            let cx = start_x + idx as u32 * (radius * 2 + gap) + radius;
+            if style.outlined() {
+                window_bar_circles.push(WindowBarCircle {
+                    cx,
+                    cy,
+                    r: radius,
+                    fill: None,
+                    stroke: Some(*color),
+                });
+            } else {
+                window_bar_circles.push(WindowBarCircle {
+                    cx,
+                    cy,
+                    r: radius,
+                    fill: Some(*color),
+                    stroke: None,
+                });
+            }
         }
     }
 
-    s.push_str("\n</svg>\n");
-    Ok(s)
+    let doc = SvgDoc {
+        canvas_w,
+        canvas_h,
+        font_family,
+        font_size: opts.font_size,
+        letter_spacing: letter_spacing_svg,
+        style_block: generate_style_block(frames, opts)?,
+        canvas_bg: cfg.frame_style.margin_fill,
+        frame_bg_x: cfg.frame_x,
+        frame_bg_y: cfg.frame_y,
+        frame_bg_w: cfg.frame_w,
+        frame_bg_h: cfg.frame_h,
+        frame_bg_fill: frames[0].default_bg,
+        frame_clip_path: if cfg.frame_style.border_radius_px > 0 {
+            Some((
+                cfg.frame_x,
+                cfg.frame_y,
+                cfg.frame_w,
+                cfg.frame_h,
+                cfg.frame_style
+                    .border_radius_px
+                    .min(cfg.frame_w / 2)
+                    .min(cfg.frame_h / 2),
+            ))
+        } else {
+            None
+        },
+        window_bar_circles,
+        master_timer_dur: total_s,
+        bg_rects,
+        text_elements,
+        cursor_rects,
+    };
+
+    Ok(doc.to_svg())
 }
 
 fn run_svg_stream_worker(
@@ -744,37 +1821,6 @@ fn dim_color(fg: [u8; 3], bg: [u8; 3]) -> [u8; 3] {
         ((fg[1] as u16 + bg[1] as u16) / 2) as u8,
         ((fg[2] as u16 + bg[2] as u16) / 2) as u8,
     ]
-}
-
-fn emit_window_bar(s: &mut String, cfg: ViewportConfig) {
-    let style = cfg.frame_style.window_bar;
-    let (radius, gap) = window_bar_dot_metrics(cfg.bar_h);
-    let dots_w = radius * 2 * 3 + gap * 2;
-    let start_x = if style.align_right() {
-        cfg.frame_x + cfg.frame_w.saturating_sub(dots_w + gap)
-    } else {
-        cfg.frame_x + gap
-    };
-    let cy = cfg.frame_y + cfg.bar_h / 2;
-    for (idx, color) in [[255, 95, 86], [255, 189, 46], [39, 201, 63]]
-        .iter()
-        .enumerate()
-    {
-        let cx = start_x + idx as u32 * (radius * 2 + gap) + radius;
-        if style.outlined() {
-            s.push_str(&format!(
-                r#"<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{stroke}" stroke-width="2"/>"#,
-                r = radius,
-                stroke = rgb_hex(*color),
-            ));
-        } else {
-            s.push_str(&format!(
-                r#"<circle cx="{cx}" cy="{cy}" r="{r}" fill="{fill}"/>"#,
-                r = radius,
-                fill = rgb_hex(*color),
-            ));
-        }
-    }
 }
 
 /// Escape a string for use as an XML attribute value.
@@ -919,9 +1965,360 @@ mod tests {
         }
 
         let result = render_svg_to_string(&rec, &SvgOptions::default());
-        assert!(result.is_ok(), "Rendering SVG with CJK characters should succeed via full font fallback");
+        assert!(
+            result.is_ok(),
+            "Rendering SVG with CJK characters should succeed via full font fallback"
+        );
         let svg = result.unwrap();
         assert!(svg.contains("font-family: 'Noto Sans Mono CJK JP'"));
         assert!(svg.contains("url(data:font/woff2;base64,"));
+    }
+
+    #[test]
+    fn test_optimize_tspans() {
+        let mut te = TextElement {
+            y: 20,
+            y_animation: None,
+            start_ms: 0,
+            end_ms: 1000,
+            tspans: vec![
+                TSpan {
+                    x_coords: vec![10.0],
+                    text: "a".to_string(),
+                    fg: [255, 0, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 0,
+                    end_ms: 1000,
+                },
+                TSpan {
+                    x_coords: vec![20.0],
+                    text: "b".to_string(),
+                    fg: [255, 0, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 0,
+                    end_ms: 1000,
+                },
+            ],
+        };
+        optimize_tspans(std::slice::from_mut(&mut te));
+        assert_eq!(te.tspans.len(), 1);
+        assert_eq!(te.tspans[0].text, "ab");
+        assert_eq!(te.tspans[0].x_coords, vec![10.0, 20.0]);
+    }
+
+    #[test]
+    fn test_optimize_bg_rects() {
+        let mut rects = vec![
+            BgRect {
+                x: 10,
+                y: 20,
+                w: 10,
+                h: 20,
+                fill: [255, 0, 0],
+                start_ms: 0,
+                end_ms: 1000,
+                clip_path: None,
+                y_animation: None,
+            },
+            BgRect {
+                x: 20,
+                y: 20,
+                w: 10,
+                h: 20,
+                fill: [255, 0, 0],
+                start_ms: 0,
+                end_ms: 1000,
+                clip_path: None,
+                y_animation: None,
+            },
+        ];
+        optimize_bg_rects(&mut rects);
+        assert_eq!(rects.len(), 1);
+        assert_eq!(rects[0].x, 10);
+        assert_eq!(rects[0].w, 20);
+    }
+
+    #[test]
+    fn test_optimize_bg_rect_scroll() {
+        let mut rects = vec![
+            BgRect {
+                x: 10,
+                y: 20,
+                w: 10,
+                h: 20,
+                fill: [255, 0, 0],
+                start_ms: 0,
+                end_ms: 500,
+                clip_path: None,
+                y_animation: None,
+            },
+            BgRect {
+                x: 10,
+                y: 40,
+                w: 10,
+                h: 20,
+                fill: [255, 0, 0],
+                start_ms: 500,
+                end_ms: 1000,
+                clip_path: None,
+                y_animation: None,
+            },
+        ];
+        optimize_bg_rect_scroll(&mut rects);
+        assert_eq!(rects.len(), 1);
+        assert_eq!(rects[0].start_ms, 0);
+        assert_eq!(rects[0].end_ms, 1000);
+        let anim = rects[0].y_animation.as_ref().unwrap();
+        assert_eq!(anim.begin_ms, 0);
+        assert_eq!(anim.dur_ms, 1000);
+        assert_eq!(anim.segments, vec![(20, 0), (40, 500)]);
+    }
+
+    #[test]
+    fn test_optimize_rows() {
+        let mut te_list = vec![
+            TextElement {
+                y: 20,
+                y_animation: None,
+                start_ms: 0,
+                end_ms: 500,
+                tspans: vec![TSpan {
+                    x_coords: vec![10.0],
+                    text: "hello".to_string(),
+                    fg: [255, 0, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 0,
+                    end_ms: 500,
+                }],
+            },
+            TextElement {
+                y: 40,
+                y_animation: None,
+                start_ms: 500,
+                end_ms: 1000,
+                tspans: vec![TSpan {
+                    x_coords: vec![10.0],
+                    text: "hello".to_string(),
+                    fg: [255, 0, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 500,
+                    end_ms: 1000,
+                }],
+            },
+        ];
+        optimize_rows(&mut te_list);
+        assert_eq!(te_list.len(), 1);
+        assert_eq!(te_list[0].start_ms, 0);
+        assert_eq!(te_list[0].end_ms, 1000);
+        let anim = te_list[0].y_animation.as_ref().unwrap();
+        assert_eq!(anim.begin_ms, 0);
+        assert_eq!(anim.dur_ms, 1000);
+        assert_eq!(anim.segments, vec![(20, 0), (40, 500)]);
+    }
+
+    #[test]
+    fn test_group_text_elements_by_row_and_time() {
+        let mut elements = vec![
+            TextElement {
+                y: 20,
+                y_animation: None,
+                start_ms: 100,
+                end_ms: 200,
+                tspans: vec![TSpan {
+                    x_coords: vec![10.0],
+                    text: "a".to_string(),
+                    fg: [255, 0, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 100,
+                    end_ms: 200,
+                }],
+            },
+            TextElement {
+                y: 20,
+                y_animation: None,
+                start_ms: 100,
+                end_ms: 200,
+                tspans: vec![TSpan {
+                    x_coords: vec![20.0],
+                    text: "b".to_string(),
+                    fg: [255, 0, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 100,
+                    end_ms: 200,
+                }],
+            },
+            TextElement {
+                y: 40,
+                y_animation: None,
+                start_ms: 100,
+                end_ms: 200,
+                tspans: vec![TSpan {
+                    x_coords: vec![10.0],
+                    text: "c".to_string(),
+                    fg: [255, 0, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 100,
+                    end_ms: 200,
+                }],
+            },
+        ];
+
+        group_text_elements_by_row_and_time(&mut elements);
+        assert_eq!(elements.len(), 2);
+        
+        // Element at y=20 (a and b should be merged)
+        assert_eq!(elements[0].y, 20);
+        assert_eq!(elements[0].start_ms, 100);
+        assert_eq!(elements[0].end_ms, 200);
+        assert_eq!(elements[0].tspans.len(), 2);
+        assert_eq!(elements[0].tspans[0].text, "a");
+        assert_eq!(elements[0].tspans[1].text, "b");
+
+        // Element at y=40 (c should remain separate)
+        assert_eq!(elements[1].y, 40);
+        assert_eq!(elements[1].tspans.len(), 1);
+        assert_eq!(elements[1].tspans[0].text, "c");
+    }
+
+    #[test]
+    fn test_group_text_elements_final() {
+        let mut elements = vec![
+            TextElement {
+                y: 20,
+                y_animation: None,
+                start_ms: 100,
+                end_ms: 200,
+                tspans: vec![TSpan {
+                    x_coords: vec![10.0],
+                    text: "a".to_string(),
+                    fg: [255, 0, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 100,
+                    end_ms: 200,
+                }],
+            },
+            TextElement {
+                y: 20,
+                y_animation: None,
+                start_ms: 300,
+                end_ms: 400,
+                tspans: vec![TSpan {
+                    x_coords: vec![20.0],
+                    text: "b".to_string(),
+                    fg: [255, 0, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 300,
+                    end_ms: 400,
+                }],
+            },
+        ];
+
+        group_text_elements_final(&mut elements);
+        assert_eq!(elements.len(), 1);
+        assert_eq!(elements[0].y, 20);
+        assert_eq!(elements[0].start_ms, 100);
+        assert_eq!(elements[0].end_ms, 400);
+        assert_eq!(elements[0].tspans.len(), 2);
+        assert_eq!(elements[0].tspans[0].text, "a");
+        assert_eq!(elements[0].tspans[1].text, "b");
     }
 }

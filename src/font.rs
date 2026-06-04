@@ -180,11 +180,7 @@ impl FontSet {
             (false, true) => &self.italic,
             (false, false) => &self.regular,
         };
-        if list.is_empty() {
-            &self.regular
-        } else {
-            list
-        }
+        if list.is_empty() { &self.regular } else { list }
     }
 
     /// Select the best `(font_index, &FontArc)` for `ch` given cell style flags.

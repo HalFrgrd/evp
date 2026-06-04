@@ -124,6 +124,10 @@ fn main() -> ExitCode {
 
 fn real_main() -> Result<()> {
     let cli = Cli::parse();
+    run_cli(cli)
+}
+
+fn run_cli(cli: Cli) -> Result<()> {
     let evp_start = Instant::now();
 
     if let Some(command) = cli.command {
@@ -133,15 +137,62 @@ fn real_main() -> Result<()> {
     init_tracing(&cli, evp_start);
     log_build_info_debug();
 
-    // Either parse the user's script file, or use the embedded demo.
-    let script = if cli.run_test_script {
+    if cli.run_test_script {
         info!("running embedded test tape (--run-test-script)");
-        evp::parse_script(EMBEDDED_TEST_TAPE).context("parsing embedded test tape")?
+        let script = evp::parse_script(EMBEDDED_TEST_TAPE).context("parsing embedded test tape")?;
+        run_script(&cli, &script, evp_start)?;
     } else {
         let path = cli.script.as_ref().expect("clap guarantees this is set");
-        evp::parse_script_file(path).with_context(|| format!("parsing {}", path.display()))?
-    };
+        let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+        match evp::recording_from_json(&bytes) {
+            Ok(rec) => {
+                info!(
+                    frames = rec.frames.len(),
+                    cols = rec.cols,
+                    rows = rec.rows,
+                    "loaded JSON recording"
+                );
 
+                let output_paths = if cli.output.is_empty() {
+                    bail!("--output is required when rendering from a JSON recording");
+                } else {
+                    cli.output.clone()
+                };
+
+                let font_size = if rec.font_size_px > 0.0 {
+                    rec.font_size_px
+                } else {
+                    16.0
+                };
+                let render_opts = evp::RenderOptions {
+                    font_path: None,
+                    font_size,
+                    line_height: 1.0,
+                    letter_spacing: rec.letter_spacing,
+                    frame_style: rec.frame_style.clone(),
+                };
+
+                for path in &output_paths {
+                    let backend = backend_for_output(path, &render_opts, !cli.no_embed_fonts)?;
+                    info!(path = %path.display(), "rendering from JSON recording");
+                    evp::renderer::render_recording(&rec, backend, path.clone())
+                        .with_context(|| format!("failed to render {}", path.display()))?;
+                }
+                info!(elapsed_ms = evp_start.elapsed().as_millis(), "evp finished");
+            }
+            Err(_) => {
+                // Fall back to treating it as a script file.
+                let script = evp::parse_script_file(path)
+                    .with_context(|| format!("parsing {}", path.display()))?;
+                run_script(&cli, &script, evp_start)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn run_script(cli: &Cli, script: &evp::Script, evp_start: Instant) -> Result<()> {
     let render_opts = evp::RenderOptions {
         font_path: script.settings.font_family.clone(),
         font_size: script.settings.font_size,
@@ -183,7 +234,7 @@ fn real_main() -> Result<()> {
     }
 
     let stats =
-        evp::run_and_render(&script, renderers).context("running script + streaming renders")?;
+        evp::run_and_render(script, renderers).context("running script + streaming renders")?;
     info!(frames = stats.captured_frames, "frames captured");
     info!(elapsed_ms = evp_start.elapsed().as_millis(), "evp finished");
     Ok(())
@@ -257,10 +308,10 @@ fn init_tracing(cli: &Cli, start: Instant) {
         .unwrap_or_else(|| {
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))
         });
-    tracing_subscriber::fmt()
+    let _ = tracing_subscriber::fmt()
         .with_env_filter(filter.clone())
         .with_timer(Uptime(start))
-        .init();
+        .try_init();
     info!(
         start_time = %humantime::format_rfc3339_micros(SystemTime::now()),
         %filter,
@@ -322,5 +373,80 @@ mod tests {
             cli.output,
             vec![PathBuf::from("demo.gif"), PathBuf::from("demo.svg")]
         );
+    }
+
+    use evp::recording::{CellSnap, Frame, Recording};
+    use evp::style::FrameStyle;
+
+    fn dummy_recording() -> Recording {
+        let blank = CellSnap::blank([255, 255, 255], [0, 0, 0]);
+        Recording {
+            cols: 80,
+            rows: 24,
+            framerate: 30,
+            cell_width_px: 8,
+            cell_height_px: 16,
+            font_size_px: 16.0,
+            char_height_px: 16,
+            ascent_px: 12,
+            letter_spacing: 0.0,
+            frame_style: FrameStyle::default(),
+            frames: vec![Frame::Key {
+                t_ms: 0,
+                cursor: None,
+                default_fg: [255, 255, 255],
+                default_bg: [0, 0, 0],
+                cursor_color: None,
+                cursor_accent: None,
+                cells: vec![blank; 80 * 24],
+            }],
+        }
+    }
+
+    #[test]
+    fn test_json_rendering_requires_output() {
+        let rec = dummy_recording();
+        let json_bytes = serde_json::to_vec(&rec).unwrap();
+        let temp_dir = std::env::temp_dir();
+        let path = temp_dir.join("test_rec_no_output.json");
+        std::fs::write(&path, json_bytes).unwrap();
+
+        let cli = Cli::try_parse_from(["evp", path.to_str().unwrap()]).unwrap();
+        let result = run_cli(cli);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("--output is required")
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_json_rendering_success() {
+        let rec = dummy_recording();
+        let json_bytes = serde_json::to_vec(&rec).unwrap();
+        let temp_dir = std::env::temp_dir();
+        let json_path = temp_dir.join("test_rec_success.json");
+        std::fs::write(&json_path, json_bytes).unwrap();
+
+        let output_path = temp_dir.join("test_output.json");
+
+        let cli = Cli::try_parse_from([
+            "evp",
+            json_path.to_str().unwrap(),
+            "--output",
+            output_path.to_str().unwrap(),
+        ])
+        .unwrap();
+
+        let result = run_cli(cli);
+        assert!(result.is_ok());
+        assert!(output_path.exists());
+
+        let _ = std::fs::remove_file(json_path);
+        let _ = std::fs::remove_file(output_path);
     }
 }

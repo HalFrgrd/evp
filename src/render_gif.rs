@@ -701,5 +701,3 @@ fn dim_color(fg: [u8; 3], bg: [u8; 3]) -> [u8; 3] {
         ((fg[2] as u16 + bg[2] as u16) / 2) as u8,
     ]
 }
-
-
