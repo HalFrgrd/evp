@@ -98,6 +98,7 @@ fn generate_style_block(frames: &[RawFrame], opts: &SvgOptions) -> Result<String
             continue;
         }
 
+        let mut embed_comment = None;
         let (font_bytes, format_str, mime_type) = match info.subset(chars) {
             Ok(subset) => (subset, "woff2", "font/woff2"),
             Err(err) => {
@@ -107,6 +108,10 @@ fn generate_style_block(frames: &[RawFrame], opts: &SvgOptions) -> Result<String
                     chars.len(),
                     err
                 );
+                embed_comment = Some(format!(
+                    "/* Font subsetting failed for '{}'; embedding the full font data in this SVG. */\n",
+                    info.family_name
+                ));
                 if let Some(ref woff2) = info.woff2_bytes {
                     (woff2.clone(), "woff2", "font/woff2")
                 } else {
@@ -123,6 +128,10 @@ fn generate_style_block(frames: &[RawFrame], opts: &SvgOptions) -> Result<String
 
         let encoded = BASE64_STANDARD.encode(font_bytes);
         let src = format!("url(data:{mime_type};base64,{encoded})");
+
+        if let Some(comment) = embed_comment {
+            style.push_str(&comment);
+        }
 
         let css_template = format!(
             "@font-face {{ font-family: '{}'; src: {} format('{}'); font-weight: {}; font-style: {}; }}\n",
@@ -1972,6 +1981,9 @@ mod tests {
         let svg = result.unwrap();
         assert!(svg.contains("font-family: 'Noto Sans Mono CJK JP'"));
         assert!(svg.contains("url(data:font/woff2;base64,"));
+        assert!(svg.contains(
+            "Font subsetting failed for 'Noto Sans Mono CJK JP'; embedding the full font data in this SVG."
+        ));
     }
 
     #[test]
