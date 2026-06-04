@@ -71,7 +71,7 @@ vergen-gitcl = { version = "10.0.0-beta.8", features = ["build", "cargo", "rustc
 # build parallelism. `strip = "symbols"` drops debug + symbol tables
 # from the final ELF \u2014 with the static-musl build this typically
 # halves the on-disk size.
-# [profile.release]
-# lto = "fat"
-# codegen-units = 1
-# strip = "symbols"
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
