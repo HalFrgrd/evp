@@ -19,6 +19,10 @@ renderer threads.
 - embedded, character-subsetted fonts (so SVG renders the same everywhere)
 - selectable SVG text
 - TODO: mouse support
+- TODO: resize support
+- TODO: process metrics
+- TODO: show the key inputs on screen overlay
+- render from a json recording
 
 ## Output Formats
 

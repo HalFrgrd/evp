@@ -50,6 +50,7 @@ use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
 
 use crate::font::load_font_family;
+use crate::font::SvgFontEmbeddingPolicy;
 use base64::prelude::*;
 use std::collections::{BTreeSet, HashMap};
 
@@ -99,17 +100,60 @@ fn generate_style_block(frames: &[RawFrame], opts: &SvgOptions) -> Result<String
         }
 
         let mut embed_comment = None;
-        let (font_bytes, format_str, mime_type) = match info.subset(chars) {
-            Ok(subset) => (subset, "woff2", "font/woff2"),
+        let (font_bytes, format_str, mime_type) = match info.svg_embedding_policy() {
+            Ok(SvgFontEmbeddingPolicy::AllowSubsetting) => match info.subset(chars) {
+                Ok(subset) => (subset, "woff2", "font/woff2"),
+                Err(err) => {
+                    tracing::warn!(
+                        "failed to subset font '{}' ({} chars), embedding the entire font: {:?}",
+                        info.family_name,
+                        chars.len(),
+                        err
+                    );
+                    embed_comment = Some(format!(
+                        "/* Font subsetting failed for '{}'; embedding the full font data in this SVG. */\n",
+                        info.family_name
+                    ));
+                    if let Some(ref woff2) = info.woff2_bytes {
+                        (woff2.clone(), "woff2", "font/woff2")
+                    } else {
+                        let is_otf = info.ttf_bytes.starts_with(b"OTTO");
+                        let (fmt, mime) = if is_otf {
+                            ("opentype", "font/opentype")
+                        } else {
+                            ("truetype", "font/truetype")
+                        };
+                        (info.ttf_bytes.clone(), fmt, mime)
+                    }
+                }
+            },
+            Ok(SvgFontEmbeddingPolicy::EmbedFullFont { reason }) => {
+                embed_comment = Some(format!("/* {} */\n", reason));
+                if let Some(ref woff2) = info.woff2_bytes {
+                    (woff2.clone(), "woff2", "font/woff2")
+                } else {
+                    let is_otf = info.ttf_bytes.starts_with(b"OTTO");
+                    let (fmt, mime) = if is_otf {
+                        ("opentype", "font/opentype")
+                    } else {
+                        ("truetype", "font/truetype")
+                    };
+                    (info.ttf_bytes.clone(), fmt, mime)
+                }
+            }
+            Ok(SvgFontEmbeddingPolicy::OmitFont { reason }) => {
+                style.push_str(&format!("/* {} */\n", reason));
+                continue;
+            }
             Err(err) => {
                 tracing::warn!(
-                    "failed to subset font '{}' ({} chars), embedding the entire font: {:?}",
+                    "failed to inspect font permissions for '{}' ({} chars), embedding the entire font: {:?}",
                     info.family_name,
                     chars.len(),
                     err
                 );
                 embed_comment = Some(format!(
-                    "/* Font subsetting failed for '{}'; embedding the full font data in this SVG. */\n",
+                    "/* Font permission check failed for '{}'; embedding the full font data in this SVG. */\n",
                     info.family_name
                 ));
                 if let Some(ref woff2) = info.woff2_bytes {

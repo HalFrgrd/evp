@@ -12,6 +12,13 @@ use anyhow::{Context, Result, anyhow};
 use tracing::warn;
 use woff2_patched::convert_woff2_to_ttf;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SvgFontEmbeddingPolicy {
+    AllowSubsetting,
+    EmbedFullFont { reason: String },
+    OmitFont { reason: String },
+}
+
 struct EmbeddedFont {
     name: &'static str,
     bytes: &'static [u8],
@@ -150,6 +157,57 @@ pub struct FontInfo {
 }
 
 impl FontInfo {
+    fn svg_embedding_policy_from_flags(
+        family_name: &str,
+        embedding_is_lenient: bool,
+        embed_only_bitmaps: bool,
+        allow_subsetting: bool,
+        embedding_desc: &str,
+    ) -> SvgFontEmbeddingPolicy {
+        if embed_only_bitmaps {
+            return SvgFontEmbeddingPolicy::OmitFont {
+                reason: format!(
+                    "Font permissions for '{}' allow only bitmap embedding; omitting embedded font data from this SVG.",
+                    family_name
+                ),
+            };
+        }
+
+        if !embedding_is_lenient {
+            return SvgFontEmbeddingPolicy::OmitFont {
+                reason: format!(
+                    "Font permissions for '{}' do not allow outline embedding ({}); omitting embedded font data from this SVG.",
+                    family_name, embedding_desc
+                ),
+            };
+        }
+
+        if !allow_subsetting {
+            return SvgFontEmbeddingPolicy::EmbedFullFont {
+                reason: format!(
+                    "Font permissions for '{}' disallow subsetting; embedding the full font data in this SVG.",
+                    family_name
+                ),
+            };
+        }
+
+        SvgFontEmbeddingPolicy::AllowSubsetting
+    }
+
+    pub fn svg_embedding_policy(&self) -> Result<SvgFontEmbeddingPolicy> {
+        let reader = font_subset::FontReader::new(&self.ttf_bytes).map_err(|e| anyhow!("{e:?}"))?;
+        let font = reader.read().map_err(|e| anyhow!("{e:?}"))?;
+        let permissions = font.permissions();
+
+        Ok(Self::svg_embedding_policy_from_flags(
+            &self.family_name,
+            permissions.embedding.is_lenient(),
+            permissions.embed_only_bitmaps,
+            permissions.allow_subsetting,
+            &format!("{:?}", permissions.embedding),
+        ))
+    }
+
     pub fn subset(&self, chars: &BTreeSet<char>) -> Result<Vec<u8>> {
         if chars.is_empty() {
             return Err(anyhow!("no characters to subset"));
@@ -159,6 +217,45 @@ impl FontInfo {
         let font = reader.read().map_err(|e| anyhow!("{e:?}"))?;
         let subset = font.subset(chars).map_err(|e| anyhow!("{e:?}"))?;
         Ok(subset.to_woff2())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FontInfo, SvgFontEmbeddingPolicy};
+
+    #[test]
+    fn svg_policy_omits_bitmap_only_fonts() {
+        let policy = FontInfo::svg_embedding_policy_from_flags(
+            "Example Font",
+            true,
+            true,
+            true,
+            "Installable",
+        );
+        assert_eq!(
+            policy,
+            SvgFontEmbeddingPolicy::OmitFont {
+                reason: "Font permissions for 'Example Font' allow only bitmap embedding; omitting embedded font data from this SVG.".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn svg_policy_full_embeds_when_subsetting_disallowed() {
+        let policy = FontInfo::svg_embedding_policy_from_flags(
+            "Example Font",
+            true,
+            false,
+            false,
+            "Installable",
+        );
+        assert_eq!(
+            policy,
+            SvgFontEmbeddingPolicy::EmbedFullFont {
+                reason: "Font permissions for 'Example Font' disallow subsetting; embedding the full font data in this SVG.".to_string(),
+            }
+        );
     }
 }
 
