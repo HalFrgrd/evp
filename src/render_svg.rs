@@ -327,13 +327,40 @@ impl TSpan {
         parent_end_ms: u32,
         total_ms: u32,
         default_letter_spacing: f32,
+        default_fg: Option<[u8; 3]>,
     ) -> String {
-        let x_str = self
-            .x_coords
-            .iter()
-            .map(|x| format!("{:.2}", x))
-            .collect::<Vec<_>>()
-            .join(" ");
+        let x_str = if self.x_coords.len() > 1 && {
+            let step = self.cell_w as f32;
+            let mut uniform = true;
+            for i in 1..self.x_coords.len() {
+                let expected = self.x_coords[0] + i as f32 * step;
+                if (self.x_coords[i] - expected).abs() > 1e-3 {
+                    uniform = false;
+                    break;
+                }
+            }
+            uniform
+        } {
+            let formatted = format!("{:.2}", self.x_coords[0]);
+            let mut trimmed = formatted.trim_end_matches('0');
+            if trimmed.ends_with('.') {
+                trimmed = &trimmed[..trimmed.len() - 1];
+            }
+            trimmed.to_string()
+        } else {
+            self.x_coords
+                .iter()
+                .map(|x| {
+                    let formatted = format!("{:.2}", x);
+                    let mut trimmed = formatted.trim_end_matches('0');
+                    if trimmed.ends_with('.') {
+                        trimmed = &trimmed[..trimmed.len() - 1];
+                    }
+                    trimmed.to_string()
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
         let weight = if self.bold {
             " font-weight=\"bold\""
         } else {
@@ -356,7 +383,7 @@ impl TSpan {
         let style = if (self.letter_spacing - default_letter_spacing).abs() < 1e-5 {
             String::new()
         } else {
-            format!(r#" style="letter-spacing: {:.2}px;""#, self.letter_spacing)
+            format!(r#" style="letter-spacing: {}px;""#, format_seconds(self.letter_spacing))
         };
 
         let is_tspan_static = is_static(self.start_ms, self.end_ms, total_ms);
@@ -370,21 +397,34 @@ impl TSpan {
                 format!(r#" class="{}""#, cls)
             }
         } else {
-            if is_hidden {
-                format!(r#" fill="{}" class="h""#, rgb_hex(self.fg))
+            if Some(self.fg) == default_fg {
+                if is_hidden {
+                    r#" class="h""#.to_string()
+                } else {
+                    String::new()
+                }
             } else {
-                format!(r#" fill="{}""#, rgb_hex(self.fg))
+                if is_hidden {
+                    format!(r#" fill="{}" class="h""#, rgb_hex(self.fg))
+                } else {
+                    format!(r#" fill="{}""#, rgb_hex(self.fg))
+                }
             }
         };
 
         let set_str = if is_hidden {
-            let begin_s = self.start_ms as f32 / 1000.0;
-            let end_s = self.end_ms as f32 / 1000.0;
-            format!(
-                r#"<set attributeName="visibility" to="visible" begin="t.begin+{b:.2}s" end="t.begin+{e:.2}s"/>"#,
-                b = begin_s,
-                e = end_s
-            )
+            if self.end_ms >= total_ms || total_ms.saturating_sub(self.end_ms) <= 200 {
+                format!(
+                    r#"<set attributeName="visibility" to="visible" begin="{}"/>"#,
+                    format_begin(self.start_ms)
+                )
+            } else {
+                format!(
+                    r#"<set attributeName="visibility" to="visible" begin="{}" end="t.begin+{}"/>"#,
+                    format_begin(self.start_ms),
+                    format_time(self.end_ms)
+                )
+            }
         } else {
             String::new()
         };
@@ -421,17 +461,15 @@ impl YAnimation {
         let key_times_str = self
             .segments
             .iter()
-            .map(|(_, start)| format!("{:.6}", (start - self.begin_ms) as f32 / self.dur_ms as f32))
+            .map(|(_, start)| format_key_time((start - self.begin_ms) as f32 / self.dur_ms as f32))
             .collect::<Vec<_>>()
             .join(";");
-        let dur_s = self.dur_ms as f32 / 1000.0;
-        let begin_s = self.begin_ms as f32 / 1000.0;
         format!(
-            r#"<animate attributeName="y" calcMode="discrete" values="{values}" keyTimes="{key_times}" dur="{dur:.2}s" begin="t.begin+{begin:.2}s" fill="freeze"/>"#,
+            r#"<animate attributeName="y" calcMode="discrete" values="{values}" keyTimes="{key_times}" dur="{dur}" begin="{begin}" fill="freeze"/>"#,
             values = values_str,
             key_times = key_times_str,
-            dur = dur_s,
-            begin = begin_s,
+            dur = format_time(self.dur_ms),
+            begin = format_begin(self.begin_ms),
         )
     }
 }
@@ -473,6 +511,7 @@ impl TextElement {
         color_classes: &HashMap<[u8; 3], String>,
         total_ms: u32,
         default_letter_spacing: f32,
+        default_fg: Option<[u8; 3]>,
     ) -> String {
         let mut text_tags = Vec::new();
         let mut current_non_box: Vec<&TSpan> = Vec::new();
@@ -490,7 +529,7 @@ impl TextElement {
                 s.push_str(&anim.to_svg_string());
             }
             for tspan in non_box.iter() {
-                s.push_str(&tspan.to_svg_string(color_classes, parent_start, parent_end, total_ms, default_letter_spacing));
+                s.push_str(&tspan.to_svg_string(color_classes, parent_start, parent_end, total_ms, default_letter_spacing, default_fg));
             }
             s.push_str("</text>");
             tags.push(s);
@@ -528,7 +567,7 @@ impl TextElement {
                 if let Some(ref anim) = self.y_animation {
                     s.push_str(&anim.to_svg_string());
                 }
-                s.push_str(&tspan.to_svg_string(color_classes, parent_start, parent_end, total_ms, default_letter_spacing));
+                s.push_str(&tspan.to_svg_string(color_classes, parent_start, parent_end, total_ms, default_letter_spacing, default_fg));
                 s.push_str("</text>");
                 text_tags.push(s);
             } else {
@@ -540,8 +579,6 @@ impl TextElement {
         if is_static(self.start_ms, self.end_ms, total_ms) {
             text_tags.join("")
         } else {
-            let begin_s = self.start_ms as f32 / 1000.0;
-            let end_s = self.end_ms as f32 / 1000.0;
             if text_tags.len() == 1 {
                 let tag = &text_tags[0];
                 if let Some(idx) = tag.find('>') {
@@ -549,23 +586,39 @@ impl TextElement {
                     opt.push_str(&tag[..idx]);
                     opt.push_str(r#" class="h""#);
                     opt.push_str(">");
-                    opt.push_str(&format!(
-                        r#"<set attributeName="visibility" to="visible" begin="t.begin+{b:.2}s" end="t.begin+{e:.2}s"/>"#,
-                        b = begin_s,
-                        e = end_s
-                    ));
+                    let set_str = if self.end_ms >= total_ms || total_ms.saturating_sub(self.end_ms) <= 200 {
+                        format!(
+                            r#"<set attributeName="visibility" to="visible" begin="{}"/>"#,
+                            format_begin(self.start_ms)
+                        )
+                    } else {
+                        format!(
+                            r#"<set attributeName="visibility" to="visible" begin="{}" end="t.begin+{}"/>"#,
+                            format_begin(self.start_ms),
+                            format_time(self.end_ms)
+                        )
+                    };
+                    opt.push_str(&set_str);
                     opt.push_str(&tag[idx + 1..]);
                     opt
                 } else {
                     tag.clone()
                 }
             } else {
-                format!(
-                    r#"<g class="h"><set attributeName="visibility" to="visible" begin="t.begin+{b:.2}s" end="t.begin+{e:.2}s"/>{}</g>"#,
-                    text_tags.join(""),
-                    b = begin_s,
-                    e = end_s,
-                )
+                if self.end_ms >= total_ms || total_ms.saturating_sub(self.end_ms) <= 200 {
+                    format!(
+                        r#"<g class="h"><set attributeName="visibility" to="visible" begin="{}"/>{}</g>"#,
+                        format_begin(self.start_ms),
+                        text_tags.join(""),
+                    )
+                } else {
+                    format!(
+                        r#"<g class="h"><set attributeName="visibility" to="visible" begin="{}" end="t.begin+{}"/>{}</g>"#,
+                        format_begin(self.start_ms),
+                        format_time(self.end_ms),
+                        text_tags.join(""),
+                    )
+                }
             }
         }
     }
@@ -650,7 +703,67 @@ pub struct SvgDoc {
 }
 
 fn is_static(start_ms: u32, end_ms: u32, total_ms: u32) -> bool {
-    start_ms == 0 && end_ms >= total_ms
+    start_ms <= 40 && (end_ms >= total_ms || total_ms.saturating_sub(end_ms) <= 200)
+}
+
+fn format_seconds(s: f32) -> String {
+    let formatted = format!("{:.3}", s);
+    let mut trimmed = formatted.trim_end_matches('0');
+    if trimmed.ends_with('.') {
+        trimmed = &trimmed[..trimmed.len() - 1];
+    }
+    trimmed.to_string()
+}
+
+fn format_key_time(s: f32) -> String {
+    let formatted = format!("{:.4}", s);
+    let mut trimmed = formatted.trim_end_matches('0');
+    if trimmed.ends_with('.') {
+        trimmed = &trimmed[..trimmed.len() - 1];
+    }
+    if trimmed.is_empty() {
+        "0".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn format_time(ms: u32) -> String {
+    format_seconds(ms as f32 / 1000.0)
+}
+
+fn format_begin(ms: u32) -> String {
+    if ms <= 40 {
+        "t.begin".to_string()
+    } else {
+        format!("t.begin+{}", format_time(ms))
+    }
+}
+
+fn simplify_discrete_animation<T: PartialEq + Clone>(
+    key_times: &[f32],
+    values: &[T],
+) -> (Vec<f32>, Vec<T>) {
+    if key_times.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let mut simplified_kt = vec![key_times[0]];
+    let mut simplified_vals = vec![values[0].clone()];
+    for i in 1..values.len() {
+        if values[i] != values[i - 1] {
+            simplified_kt.push(key_times[i]);
+            simplified_vals.push(values[i].clone());
+        }
+    }
+    (simplified_kt, simplified_vals)
+}
+
+fn format_key_time_list(kt: &[f32]) -> String {
+    kt.iter().map(|&k| format_key_time(k)).collect::<Vec<_>>().join(";")
+}
+
+fn format_val_list<T: std::fmt::Display>(vals: &[T]) -> String {
+    vals.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(";")
 }
 
 fn serialize_cursor_rects(cursors: &[CursorRect], total_ms: u32) -> String {
@@ -675,7 +788,7 @@ fn serialize_cursor_rects(cursors: &[CursorRect], total_ms: u32) -> String {
         boundaries.sort_unstable();
         boundaries.dedup();
 
-        let mut key_times = Vec::new();
+        let mut key_times_f32 = Vec::new();
         let mut x_vals = Vec::new();
         let mut y_vals = Vec::new();
         let mut vis_vals = Vec::new();
@@ -687,7 +800,7 @@ fn serialize_cursor_rects(cursors: &[CursorRect], total_ms: u32) -> String {
             let start = boundaries[i];
             let end = boundaries[i + 1];
             let k = start as f32 / total_ms as f32;
-            key_times.push(format!("{:.6}", k));
+            key_times_f32.push(k);
 
             let active = list.iter().find(|c| c.start_ms <= start && c.end_ms >= end);
             if let Some(c) = active {
@@ -703,7 +816,7 @@ fn serialize_cursor_rects(cursors: &[CursorRect], total_ms: u32) -> String {
             }
         }
 
-        if key_times.len() == 1 && vis_vals[0] == "visible" {
+        if key_times_f32.len() == 1 && vis_vals[0] == "visible" {
             s.push_str(&format!(
                 r#"<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{c}" fill-opacity="0.7"/>"#,
                 x = x_vals[0],
@@ -713,28 +826,81 @@ fn serialize_cursor_rects(cursors: &[CursorRect], total_ms: u32) -> String {
                 c = rgb_hex(fill),
             ));
         } else {
-            let key_times_str = key_times.join(";");
-            let x_vals_str = x_vals.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(";");
-            let y_vals_str = y_vals.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(";");
-            let vis_vals_str = vis_vals.join(";");
-            let dur_s = total_ms as f32 / 1000.0;
+            let mut x_attr = String::new();
+            let mut y_attr = String::new();
+            let mut class_attr = r#" class="h""#.to_string();
 
-            s.push_str(&format!(
-                r#"<rect width="{w}" height="{h}" fill="{c}" fill-opacity="0.7" class="h">
-  <animate attributeName="x" calcMode="discrete" values="{x_vals}" keyTimes="{kt}" dur="{dur:.2}s" begin="t.begin" fill="freeze"/>
-  <animate attributeName="y" calcMode="discrete" values="{y_vals}" keyTimes="{kt}" dur="{dur:.2}s" begin="t.begin" fill="freeze"/>
-  <animate attributeName="visibility" calcMode="discrete" values="{vis_vals}" keyTimes="{kt}" dur="{dur:.2}s" begin="t.begin" fill="freeze"/>
+            let mut animates = Vec::new();
+
+            let (kt_x, vals_x) = simplify_discrete_animation(&key_times_f32, &x_vals);
+            if vals_x.len() == 1 {
+                x_attr = format!(r#" x="{}""#, vals_x[0]);
+            } else {
+                let kt_str = format_key_time_list(&kt_x);
+                let val_str = format_val_list(&vals_x);
+                animates.push(format!(
+                    r#"  <animate attributeName="x" calcMode="discrete" values="{val_str}" keyTimes="{kt_str}" dur="{dur}" begin="t.begin" fill="freeze"/>"#,
+                    val_str = val_str,
+                    kt_str = kt_str,
+                    dur = format_time(total_ms)
+                ));
+            }
+
+            let (kt_y, vals_y) = simplify_discrete_animation(&key_times_f32, &y_vals);
+            if vals_y.len() == 1 {
+                y_attr = format!(r#" y="{}""#, vals_y[0]);
+            } else {
+                let kt_str = format_key_time_list(&kt_y);
+                let val_str = format_val_list(&vals_y);
+                animates.push(format!(
+                    r#"  <animate attributeName="y" calcMode="discrete" values="{val_str}" keyTimes="{kt_str}" dur="{dur}" begin="t.begin" fill="freeze"/>"#,
+                    val_str = val_str,
+                    kt_str = kt_str,
+                    dur = format_time(total_ms)
+                ));
+            }
+
+            let (kt_vis, vals_vis) = simplify_discrete_animation(&key_times_f32, &vis_vals);
+            if vals_vis.len() == 1 {
+                if vals_vis[0] == "visible" {
+                    class_attr = String::new();
+                }
+            } else {
+                let kt_str = format_key_time_list(&kt_vis);
+                let val_str = format_val_list(&vals_vis);
+                animates.push(format!(
+                    r#"  <animate attributeName="visibility" calcMode="discrete" values="{val_str}" keyTimes="{kt_str}" dur="{dur}" begin="t.begin" fill="freeze"/>"#,
+                    val_str = val_str,
+                    kt_str = kt_str,
+                    dur = format_time(total_ms)
+                ));
+            }
+
+            if animates.is_empty() {
+                s.push_str(&format!(
+                    r#"<rect{x_attr}{y_attr} width="{w}" height="{h}" fill="{c}" fill-opacity="0.7"{class_attr}/>"#,
+                    x_attr = x_attr,
+                    y_attr = y_attr,
+                    w = w,
+                    h = h,
+                    c = rgb_hex(fill),
+                    class_attr = class_attr,
+                ));
+            } else {
+                s.push_str(&format!(
+                    r#"<rect{x_attr}{y_attr} width="{w}" height="{h}" fill="{c}" fill-opacity="0.7"{class_attr}>
+{animates}
 </rect>
 "#,
-                w = w,
-                h = h,
-                c = rgb_hex(fill),
-                x_vals = x_vals_str,
-                y_vals = y_vals_str,
-                vis_vals = vis_vals_str,
-                kt = key_times_str,
-                dur = dur_s,
-            ));
+                    x_attr = x_attr,
+                    y_attr = y_attr,
+                    w = w,
+                    h = h,
+                    c = rgb_hex(fill),
+                    class_attr = class_attr,
+                    animates = animates.join("\n"),
+                ));
+            }
         }
     }
     s
@@ -743,6 +909,17 @@ fn serialize_cursor_rects(cursors: &[CursorRect], total_ms: u32) -> String {
 impl SvgDoc {
     pub fn to_svg(&self) -> String {
         // 1. Gather color classes
+        let mut text_color_counts: HashMap<[u8; 3], usize> = HashMap::new();
+        for te in &self.text_elements {
+            for tspan in &te.tspans {
+                *text_color_counts.entry(tspan.fg).or_default() += 1;
+            }
+        }
+        let most_common_text_color = text_color_counts
+            .iter()
+            .max_by_key(|&(_, count)| count)
+            .map(|(&color, _)| color);
+
         let mut color_counts: HashMap<[u8; 3], usize> = HashMap::new();
         for bg in &self.bg_rects {
             *color_counts.entry(bg.fill).or_default() += 1;
@@ -758,6 +935,9 @@ impl SvgDoc {
         let mut sorted_colors: Vec<_> = color_counts.keys().cloned().collect();
         sorted_colors.sort();
         for color in sorted_colors {
+            if Some(color) == most_common_text_color {
+                continue;
+            }
             if color_counts[&color] >= 5 {
                 color_classes.insert(color, format!("c{}", class_id));
                 class_id += 1;
@@ -768,10 +948,21 @@ impl SvgDoc {
         let mut style = self.style_block.clone();
         let mut extra_css = String::new();
         extra_css.push_str(".h { visibility: hidden; }\n");
-        if self.letter_spacing != 0.0 {
+        let letter_spacing_style = if self.letter_spacing != 0.0 {
+            format!("letter-spacing: {}px; ", format_seconds(self.letter_spacing))
+        } else {
+            String::new()
+        };
+        let fill_style = if let Some(default_fg) = most_common_text_color {
+            format!("fill: {}; ", rgb_hex(default_fg))
+        } else {
+            String::new()
+        };
+        if !letter_spacing_style.is_empty() || !fill_style.is_empty() {
             extra_css.push_str(&format!(
-                "text, tspan {{ letter-spacing: {:.2}px; }}\n",
-                self.letter_spacing
+                "text, tspan {{ {}{} }}\n",
+                letter_spacing_style,
+                fill_style
             ));
         }
         let mut sorted_entries: Vec<_> = color_classes.iter().collect();
@@ -807,14 +998,23 @@ impl SvgDoc {
             style = style,
         ));
 
-        // Canvas background
-        s.push_str(&format!(
-            r#"<rect width="{w}" height="{h}" fill="{bg}"/>
+        // Canvas/Frame background optimization
+        let needs_canvas_bg = self.frame_clip_path.is_some()
+            || self.frame_bg_x != 0
+            || self.frame_bg_y != 0
+            || self.frame_bg_w != self.canvas_w
+            || self.frame_bg_h != self.canvas_h
+            || self.frame_bg_fill != self.canvas_bg;
+
+        if needs_canvas_bg {
+            s.push_str(&format!(
+                r#"<rect width="{w}" height="{h}" fill="{bg}"/>
 "#,
-            w = self.canvas_w,
-            h = self.canvas_h,
-            bg = rgb_hex(self.canvas_bg),
-        ));
+                w = self.canvas_w,
+                h = self.canvas_h,
+                bg = rgb_hex(self.canvas_bg),
+            ));
+        }
 
         // Clip path
         if let Some((x, y, w, h, r)) = self.frame_clip_path {
@@ -823,21 +1023,23 @@ impl SvgDoc {
             ));
         }
 
-        // Frame background
-        let clip_attr = if self.frame_clip_path.is_some() {
-            r#" clip-path="url(#frame-clip)""#
-        } else {
-            ""
-        };
+        // Frame background (formatted dynamically to omit x=0 and y=0 if they are zero)
+        let mut frame_bg_attrs = Vec::new();
+        if self.frame_bg_x != 0 {
+            frame_bg_attrs.push(format!(r#"x="{}""#, self.frame_bg_x));
+        }
+        if self.frame_bg_y != 0 {
+            frame_bg_attrs.push(format!(r#"y="{}""#, self.frame_bg_y));
+        }
+        frame_bg_attrs.push(format!(r#"width="{}""#, self.frame_bg_w));
+        frame_bg_attrs.push(format!(r#"height="{}""#, self.frame_bg_h));
+        frame_bg_attrs.push(format!(r#"fill="{}""#, rgb_hex(self.frame_bg_fill)));
+        if self.frame_clip_path.is_some() {
+            frame_bg_attrs.push(r#"clip-path="url(#frame-clip)""#.to_string());
+        }
         s.push_str(&format!(
-            r#"<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{bg}"{clip}/>
-"#,
-            x = self.frame_bg_x,
-            y = self.frame_bg_y,
-            w = self.frame_bg_w,
-            h = self.frame_bg_h,
-            bg = rgb_hex(self.frame_bg_fill),
-            clip = clip_attr,
+            "<rect {}/>\n",
+            frame_bg_attrs.join(" ")
         ));
 
         // Window bar circles
@@ -845,11 +1047,11 @@ impl SvgDoc {
             s.push_str(&circle.to_svg_string());
         }
 
-        // Master timer
+        // Master timer - rendered directly as an animate element under the svg root
         s.push_str(&format!(
-            r#"<rect width="0" height="0"><animate id="t" attributeName="x" from="0" to="0" dur="{dur}s" begin="0s;t.end"/></rect>
+            r#"<animate id="t" attributeName="x" from="0" to="0" dur="{dur}" begin="0s;t.end"/>
 "#,
-            dur = self.master_timer_dur
+            dur = format_seconds(self.master_timer_dur)
         ));
 
         // Background rects
@@ -869,10 +1071,10 @@ impl SvgDoc {
                     format!(r#" fill="{}""#, rgb_hex(rect.fill))
                 }
             };
-            let rect_clip = if rect.clip_path.is_some() {
-                clip_attr
+            let rect_clip = if let Some(ref path) = rect.clip_path {
+                format!(r#" clip-path="url(#{})""#, path)
             } else {
-                ""
+                String::new()
             };
             if is_bg_static {
                 s.push_str(&format!(
@@ -885,23 +1087,32 @@ impl SvgDoc {
                     clip = rect_clip,
                 ));
             } else {
-                let begin_s = rect.start_ms as f32 / 1000.0;
-                let end_s = rect.end_ms as f32 / 1000.0;
                 let anim_str = if let Some(ref anim) = rect.y_animation {
                     anim.to_svg_string()
                 } else {
                     String::new()
                 };
+                let set_str = if rect.end_ms >= total_ms || total_ms.saturating_sub(rect.end_ms) <= 200 {
+                    format!(
+                        r#"<set attributeName="visibility" to="visible" begin="{}"/>"#,
+                        format_begin(rect.start_ms)
+                    )
+                } else {
+                    format!(
+                        r#"<set attributeName="visibility" to="visible" begin="{}" end="t.begin+{}"/>"#,
+                        format_begin(rect.start_ms),
+                        format_time(rect.end_ms)
+                    )
+                };
                 s.push_str(&format!(
-                    r#"<rect x="{x}" y="{y}" width="{w}" height="{h}"{fill}{clip}><set attributeName="visibility" to="visible" begin="t.begin+{b:.2}s" end="t.begin+{e:.2}s"/>{anim}</rect>"#,
+                    r#"<rect x="{x}" y="{y}" width="{w}" height="{h}"{fill}{clip}>{set}{anim}</rect>"#,
                     x = rect.x,
                     y = rect.y,
                     w = rect.w,
                     h = rect.h,
                     fill = fill_attr,
                     clip = rect_clip,
-                    b = begin_s,
-                    e = end_s,
+                    set = set_str,
                     anim = anim_str,
                 ));
             }
@@ -909,7 +1120,7 @@ impl SvgDoc {
 
         // Text elements
         for te in &self.text_elements {
-            s.push_str(&te.to_svg_string(&color_classes, total_ms, self.letter_spacing));
+            s.push_str(&te.to_svg_string(&color_classes, total_ms, self.letter_spacing, most_common_text_color));
         }
 
         // Cursor rects
@@ -944,6 +1155,15 @@ pub fn optimize_tspans(elements: &mut [TextElement]) {
                     && last.start_ms == tspan.start_ms
                     && last.end_ms == tspan.end_ms
                 {
+                    let cell_w = last.cell_w as f32;
+                    let expected_next_x = last.x_coords.last().unwrap() + cell_w;
+                    let gap_cells = ((tspan.x_coords[0] - expected_next_x) / cell_w).round() as i32;
+                    if gap_cells > 0 && gap_cells <= 4 && !last.underline && !last.strikethrough {
+                        for g in 0..gap_cells {
+                            last.x_coords.push(expected_next_x + g as f32 * cell_w);
+                            last.text.push(' ');
+                        }
+                    }
                     last.x_coords.extend(&tspan.x_coords);
                     last.text.push_str(&tspan.text);
                     continue;
@@ -1101,6 +1321,42 @@ pub fn optimize_rows(elements: &mut Vec<TextElement>) {
             i += 1;
         }
     }
+}
+pub fn group_text_elements_final(elements: &mut Vec<TextElement>) {
+    if elements.is_empty() {
+        return;
+    }
+    elements.sort_by(|a, b| {
+        a.y.cmp(&b.y).then_with(|| {
+            match (&a.y_animation, &b.y_animation) {
+                (None, None) => std::cmp::Ordering::Equal,
+                (None, Some(_)) => std::cmp::Ordering::Less,
+                (Some(_), None) => std::cmp::Ordering::Greater,
+                (Some(ax), Some(bx)) => {
+                    ax.begin_ms.cmp(&bx.begin_ms)
+                        .then(ax.dur_ms.cmp(&bx.dur_ms))
+                        .then_with(|| ax.segments.cmp(&bx.segments))
+                }
+            }
+        })
+    });
+
+    let mut merged: Vec<TextElement> = Vec::new();
+    for mut te in std::mem::take(elements) {
+        if let Some(last) = merged.last_mut() {
+            if last.y == te.y && last.y_animation == te.y_animation {
+                last.start_ms = last.start_ms.min(te.start_ms);
+                last.end_ms = last.end_ms.max(te.end_ms);
+                last.tspans.append(&mut te.tspans);
+                continue;
+            }
+        }
+        merged.push(te);
+    }
+    for te in &mut merged {
+        te.tspans.sort_by(|a, b| a.x_coords[0].partial_cmp(&b.x_coords[0]).unwrap_or(std::cmp::Ordering::Equal));
+    }
+    *elements = merged;
 }
 
 fn render_from_frames(
@@ -1434,6 +1690,7 @@ fn render_from_frames(
     optimize_bg_rects(&mut bg_rects);
     optimize_bg_rect_scroll(&mut bg_rects);
     optimize_rows(&mut text_elements);
+    group_text_elements_final(&mut text_elements);
 
     let mut window_bar_circles = Vec::new();
     if cfg.frame_style.window_bar.enabled() {
@@ -1998,5 +2255,70 @@ mod tests {
         assert_eq!(elements[1].y, 40);
         assert_eq!(elements[1].tspans.len(), 1);
         assert_eq!(elements[1].tspans[0].text, "c");
+    }
+
+    #[test]
+    fn test_group_text_elements_final() {
+        let mut elements = vec![
+            TextElement {
+                y: 20,
+                y_animation: None,
+                start_ms: 100,
+                end_ms: 200,
+                tspans: vec![TSpan {
+                    x_coords: vec![10.0],
+                    text: "a".to_string(),
+                    fg: [255, 0, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 100,
+                    end_ms: 200,
+                }],
+            },
+            TextElement {
+                y: 20,
+                y_animation: None,
+                start_ms: 300,
+                end_ms: 400,
+                tspans: vec![TSpan {
+                    x_coords: vec![20.0],
+                    text: "b".to_string(),
+                    fg: [255, 0, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 300,
+                    end_ms: 400,
+                }],
+            },
+        ];
+
+        group_text_elements_final(&mut elements);
+        assert_eq!(elements.len(), 1);
+        assert_eq!(elements[0].y, 20);
+        assert_eq!(elements[0].start_ms, 100);
+        assert_eq!(elements[0].end_ms, 400);
+        assert_eq!(elements[0].tspans.len(), 2);
+        assert_eq!(elements[0].tspans[0].text, "a");
+        assert_eq!(elements[0].tspans[1].text, "b");
     }
 }
