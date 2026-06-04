@@ -680,7 +680,7 @@ impl SvgDoc {
 
         // Master timer
         s.push_str(&format!(
-            r#"<rect width="0" height="0"><animate id="t" attributeName="x" from="0" to="0" dur="{dur}s" repeatCount="indefinite"/></rect>
+            r#"<rect width="0" height="0"><animate id="t" attributeName="x" from="0" to="0" dur="{dur}s" begin="0s;t.end"/></rect>
 "#,
             dur = self.master_timer_dur
         ));
