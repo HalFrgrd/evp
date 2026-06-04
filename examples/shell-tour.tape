@@ -7,7 +7,7 @@ Output shell-tour.gif
 
 Set Shell bash --norc
 Set Width 1000
-Set Height 500
+Set Height 400
 Set FontSize 18
 Set TypingSpeed 40ms
 Set Framerate 30
@@ -29,4 +29,28 @@ Wait
 
 Type "date -u +%Y-%m-%dT%H:%M:%SZ"
 Enter
-Sleep 1s
+Sleep 100ms
+
+Type "printf '\x1b[41mfoo1\x1b[0m\n'"
+Enter
+Sleep 100ms
+
+Type "printf '\x1b[42mfoo2\x1b[0m\n'"
+Enter
+Sleep 100ms
+
+Type "printf '\x1b[43mfoo3\x1b[0m\n'"
+Enter
+Sleep 100ms
+
+Type "printf '\x1b[44mfoo4\x1b[0m\n'"
+Enter
+Sleep 100ms
+
+Type "printf '\x1b[45mfoo5\x1b[0m\n'"
+Enter
+Sleep 100ms
+
+Type "printf '\x1b[46mfoo6\x1b[0m\n'"
+Enter
+Sleep 100ms
