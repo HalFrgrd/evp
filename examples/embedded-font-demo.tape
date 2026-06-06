@@ -20,7 +20,7 @@ Type "printf '%s\n' 'Embedded symbols: 🯁🯂🯃 🬛 🮐 🮑 🮔 🮖 �
 Enter
 Sleep 700ms
 
-Type "printf '%s\n' '╭─────────────╮\n│   hello!   │\n╰─────────────╯'"
+Type "printf '%s\n%s\n%s\n' '╭─────────────╮' '│   hello!    │' '╰─────────────╯'"
 Enter
 Sleep 700ms
 

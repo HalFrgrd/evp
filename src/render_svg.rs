@@ -1170,6 +1170,8 @@ pub fn optimize_tspans(elements: &mut [TextElement]) {
                     && last.letter_spacing == tspan.letter_spacing
                     && last.start_ms == tspan.start_ms
                     && last.end_ms == tspan.end_ms
+                    && !last.text.chars().any(|c| c as u32 > 0xFFFF)
+                    && !tspan.text.chars().any(|c| c as u32 > 0xFFFF)
                 {
                     let cell_w = last.cell_w as f32;
                     let expected_next_x = last.x_coords.last().unwrap() + cell_w;
@@ -2178,6 +2180,61 @@ mod tests {
         assert_eq!(te.tspans.len(), 1);
         assert_eq!(te.tspans[0].text, "ab");
         assert_eq!(te.tspans[0].x_coords, vec![10.0, 20.0]);
+    }
+
+    #[test]
+    fn test_optimize_tspans_skips_surrogate_pairs() {
+        let mut te = TextElement {
+            y: 20,
+            y_animation: None,
+            start_ms: 0,
+            end_ms: 1000,
+            tspans: vec![
+                TSpan {
+                    x_coords: vec![10.0],
+                    text: "🯁".to_string(),
+                    fg: [255, 0, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 0,
+                    end_ms: 1000,
+                },
+                TSpan {
+                    x_coords: vec![20.0],
+                    text: "🯂".to_string(),
+                    fg: [255, 0, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 0,
+                    end_ms: 1000,
+                },
+            ],
+        };
+        optimize_tspans(std::slice::from_mut(&mut te));
+        // Should not be merged because they contain surrogate pairs (code points > 0xFFFF)
+        assert_eq!(te.tspans.len(), 2);
+        assert_eq!(te.tspans[0].text, "🯁");
+        assert_eq!(te.tspans[1].text, "🯂");
     }
 
     #[test]
