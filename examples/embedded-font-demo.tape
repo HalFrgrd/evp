@@ -12,8 +12,15 @@ Set FontSize 24
 Set TypingSpeed 25ms
 Set Framerate 30
 
+Env PROMPT_COMMAND ""
+Env PS1 "> "
+
 Sleep 400ms
 Type "printf '%s\n' 'Embedded symbols: 🯁🯂🯃 🬛 🮐 🮑 🮔 🮖 🮘 ⣾ ⣷ ⣯ ⣟ ⡿ ⢿ ⣻ ⣽'"
+Enter
+Sleep 700ms
+
+Type "printf '%s\n' '╭─────────────╮\n│   hello!   │\n╰─────────────╯'"
 Enter
 Sleep 700ms
 
