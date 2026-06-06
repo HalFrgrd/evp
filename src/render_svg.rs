@@ -382,38 +382,18 @@ impl TSpan {
         default_letter_spacing: f32,
         default_fg: Option<[u8; 3]>,
     ) -> String {
-        let x_str = if self.x_coords.len() > 1 && {
-            let step = self.cell_w as f32;
-            let mut uniform = true;
-            for i in 1..self.x_coords.len() {
-                let expected = self.x_coords[0] + i as f32 * step;
-                if (self.x_coords[i] - expected).abs() > 1e-3 {
-                    uniform = false;
-                    break;
+        let x_str = self.x_coords
+            .iter()
+            .map(|x| {
+                let formatted = format!("{:.2}", x);
+                let mut trimmed = formatted.trim_end_matches('0');
+                if trimmed.ends_with('.') {
+                    trimmed = &trimmed[..trimmed.len() - 1];
                 }
-            }
-            uniform
-        } {
-            let formatted = format!("{:.2}", self.x_coords[0]);
-            let mut trimmed = formatted.trim_end_matches('0');
-            if trimmed.ends_with('.') {
-                trimmed = &trimmed[..trimmed.len() - 1];
-            }
-            trimmed.to_string()
-        } else {
-            self.x_coords
-                .iter()
-                .map(|x| {
-                    let formatted = format!("{:.2}", x);
-                    let mut trimmed = formatted.trim_end_matches('0');
-                    if trimmed.ends_with('.') {
-                        trimmed = &trimmed[..trimmed.len() - 1];
-                    }
-                    trimmed.to_string()
-                })
-                .collect::<Vec<_>>()
-                .join(" ")
-        };
+                trimmed.to_string()
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
         let weight = if self.bold {
             " font-weight=\"bold\""
         } else {
@@ -582,7 +562,17 @@ impl TextElement {
             if tspan.is_box {
                 flush_non_box(&mut current_non_box, &mut text_tags);
 
-                let text_length = tspan.cell_w;
+                let text_length = if let (Some(&first_x), Some(&last_x)) = (tspan.x_coords.first(), tspan.x_coords.last()) {
+                    let val = (last_x - first_x) + tspan.cell_w as f32;
+                    let formatted = format!("{:.2}", val);
+                    let mut trimmed = formatted.trim_end_matches('0');
+                    if trimmed.ends_with('.') {
+                        trimmed = &trimmed[..trimmed.len() - 1];
+                    }
+                    trimmed.to_string()
+                } else {
+                    tspan.cell_w.to_string()
+                };
                 let scale_y = tspan.scale_y;
                 let y = self.y;
                 let transform = if scale_y > 1.0 {
@@ -2049,6 +2039,91 @@ mod tests {
 
         let svg = te.to_svg_string(&HashMap::new(), 1000, 0.0, None);
         assert!(svg.contains(r#"begin="t.begin+0.6" end="t.begin+0.95""#));
+    }
+
+    #[test]
+    fn test_box_drawing_svg_rendering() {
+        let mut te = TextElement {
+            y: 20,
+            y_animation: None,
+            start_ms: 0,
+            end_ms: 1000,
+            tspans: vec![
+                TSpan {
+                    x_coords: vec![100.0],
+                    text: "╭".to_string(),
+                    fg: [255, 255, 255],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: true,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 0,
+                    end_ms: 1000,
+                },
+                TSpan {
+                    x_coords: vec![110.0],
+                    text: "─".to_string(),
+                    fg: [255, 255, 255],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: true,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 0,
+                    end_ms: 1000,
+                },
+                TSpan {
+                    x_coords: vec![120.0],
+                    text: "╮".to_string(),
+                    fg: [255, 255, 255],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: true,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 0,
+                    end_ms: 1000,
+                },
+            ],
+        };
+
+        // First, verify that optimize_tspans correctly merges them
+        optimize_tspans(std::slice::from_mut(&mut te));
+        assert_eq!(te.tspans.len(), 1);
+        assert_eq!(te.tspans[0].text, "╭─╮");
+        assert_eq!(te.tspans[0].x_coords, vec![100.0, 110.0, 120.0]);
+
+        // Next, render to SVG string and inspect it
+        let svg = te.to_svg_string(&HashMap::new(), 1000, 0.0, None);
+
+        // 1. The <text> wrapper element must have textLength="30" (120 - 100 + 10 = 30)
+        assert!(svg.contains(r#"textLength="30""#), "SVG does not contain correct textLength: {}", svg);
+
+        // 2. The inner <tspan> must NOT have optimized single x="100", but instead
+        // the full array of coordinates x="100 110 120"
+        assert!(svg.contains(r#"x="100 110 120""#), "SVG does not contain explicit x coords: {}", svg);
     }
 
     #[test]
