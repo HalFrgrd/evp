@@ -984,6 +984,7 @@ impl SvgDoc {
         let mut style = self.style_block.clone();
         let mut extra_css = String::new();
         extra_css.push_str(".h { visibility: hidden; }\n");
+        extra_css.push_str("text, tspan { font-kerning: none; font-variant-ligatures: none; text-rendering: geometricPrecision; }\n");
         let letter_spacing_style = if self.letter_spacing != 0.0 {
             format!("letter-spacing: {}px; ", format_seconds(self.letter_spacing))
         } else {
