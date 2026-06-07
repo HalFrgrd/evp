@@ -749,6 +749,7 @@ fn write_screenshot(frame: &RawFrame, script: &Script, path: &std::path::Path) -
             window_bar_size_px: script.settings.window_bar_size,
             border_radius_px: script.settings.border_radius,
         },
+        no_system_fonts: false,
     };
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()

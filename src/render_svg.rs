@@ -49,6 +49,7 @@ use crate::render_common::is_box_drawing;
 use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
 
+use ab_glyph::Font;
 use crate::font::load_font_family;
 use crate::font::SvgFontEmbeddingPolicy;
 use base64::prelude::*;
@@ -61,6 +62,25 @@ use crate::{
 };
 
 fn generate_style_block(frames: &[RawFrame], opts: &SvgOptions) -> Result<String> {
+    let loaded = load_font_family(opts.font_path.as_deref())?;
+
+    if opts.no_system_fonts {
+        for frame in frames {
+            for cell in &frame.cells {
+                for c in cell.text.chars() {
+                    let (_, font) = loaded.font_set.select_for_char(cell.flags, c);
+                    if font.glyph_id(c).0 == 0 {
+                        return Err(anyhow::anyhow!(
+                            "Glyph not found in embedded fonts for character '{}' (U+{:04X})",
+                            c,
+                            c as u32
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     if !opts.embed_fonts {
         return Ok(String::new());
     }
@@ -68,7 +88,6 @@ fn generate_style_block(frames: &[RawFrame], opts: &SvgOptions) -> Result<String
     let mut style = String::new();
     style.push_str("<style>\n");
 
-    let loaded = load_font_family(opts.font_path.as_deref())?;
     let mut used_fonts: HashMap<usize, BTreeSet<char>> = HashMap::new();
 
     // Check which fonts are actually selected/used by cells.
@@ -204,6 +223,8 @@ pub struct SvgOptions {
     /// Whether to embed base64-encoded subset font data in the SVG.
     /// If false, relies entirely on system fonts.
     pub embed_fonts: bool,
+    /// Whether to exclude system fonts from the font-family stack.
+    pub no_system_fonts: bool,
 }
 
 pub struct SvgStreamHandle {
@@ -239,6 +260,7 @@ impl Default for SvgOptions {
             font_family: "'JetBrainsMono Nerd Font Mono', 'Noto Sans Mono', 'Noto Emoji', 'Noto Sans Symbols 2', 'Noto Sans Mono CJK JP', 'unifont_upper', 'unifont_csur', ui-monospace, Menlo, Consolas, 'DejaVu Sans Mono', monospace".to_string(),
             font_size: 16.0,
             embed_fonts: true,
+            no_system_fonts: false,
         }
     }
 }
@@ -1562,7 +1584,27 @@ fn render_from_frames(
     }
 
     // Now emit SVG.
-    let mut font_family = opts.font_family.clone();
+    let mut font_family = if opts.no_system_fonts {
+        const SYSTEM_FONTS: &[&str] = &[
+            "ui-monospace",
+            "Menlo",
+            "Consolas",
+            "'DejaVu Sans Mono'",
+            "\"DejaVu Sans Mono\"",
+            "monospace",
+        ];
+        opts.font_family
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|&s| {
+                !SYSTEM_FONTS.iter().any(|&sys| s.eq_ignore_ascii_case(sys))
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    } else {
+        opts.font_family.clone()
+    };
+
     if let Some(ref path) = opts.font_path {
         if let Ok(loaded) = load_font_family(Some(path)) {
             let primary = &loaded.font_set.fonts[loaded.font_set.regular[0]];
@@ -2041,6 +2083,31 @@ mod tests {
 
         let svg = te.to_svg_string(&HashMap::new(), 1000, 0.0, None);
         assert!(svg.contains(r#"begin="t.begin+0.6" end="t.begin+0.95""#));
+    }
+
+    #[test]
+    fn test_no_system_fonts_validation() {
+        let mut rec = synth_recording();
+        let mut opts = SvgOptions::default();
+        opts.no_system_fonts = true;
+        let result = render_svg_to_string(&rec, &opts);
+        assert!(result.is_ok());
+        let svg = result.unwrap();
+        assert!(!svg.contains("ui-monospace"));
+        assert!(!svg.contains("Menlo"));
+
+        if let Frame::Key { cells, .. } = &mut rec.frames[0] {
+            cells[2] = CellSnap {
+                text: "\u{10FFFF}".into(),
+                fg: [255, 255, 255],
+                bg: [0, 0, 0],
+                flags: 0,
+            };
+        }
+        let result_failed = render_svg_to_string(&rec, &opts);
+        assert!(result_failed.is_err());
+        let err_msg = result_failed.unwrap_err().to_string();
+        assert!(err_msg.contains("Glyph not found in embedded fonts for character"));
     }
 
     #[test]

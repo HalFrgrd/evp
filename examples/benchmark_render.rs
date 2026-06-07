@@ -46,6 +46,7 @@ fn main() -> anyhow::Result<()> {
         line_height: 1.0,
         letter_spacing: 1.0,
         frame_style: FrameStyle::default(),
+        no_system_fonts: false,
     };
 
     let mut render_ms_total = 0u128;

@@ -77,6 +77,9 @@ struct Cli {
     /// Do not embed base64 font data inside the generated SVG output.
     #[arg(long = "no-embed-fonts")]
     no_embed_fonts: bool,
+    /// Do not use system fallback fonts. Fail if any rendered glyph is missing from the loaded/embedded fonts.
+    #[arg(long = "no-system-fonts")]
+    no_system_fonts: bool,
     /// Explicit log level override.
     #[arg(long, value_enum)]
     log_level: Option<LogLevel>,
@@ -170,10 +173,11 @@ fn run_cli(cli: Cli) -> Result<()> {
                     line_height: 1.0,
                     letter_spacing: rec.letter_spacing,
                     frame_style: rec.frame_style.clone(),
+                    no_system_fonts: cli.no_system_fonts,
                 };
 
                 for path in &output_paths {
-                    let backend = backend_for_output(path, &render_opts, !cli.no_embed_fonts)?;
+                    let backend = backend_for_output(path, &render_opts, !cli.no_embed_fonts, cli.no_system_fonts)?;
                     info!(path = %path.display(), "rendering from JSON recording");
                     evp::renderer::render_recording(&rec, backend, path.clone())
                         .with_context(|| format!("failed to render {}", path.display()))?;
@@ -208,6 +212,7 @@ fn run_script(cli: &Cli, script: &evp::Script, evp_start: Instant) -> Result<()>
             window_bar_size_px: script.settings.window_bar_size,
             border_radius_px: script.settings.border_radius,
         },
+        no_system_fonts: cli.no_system_fonts,
     };
 
     info!(events = script.events.len(), "script loaded");
@@ -227,7 +232,7 @@ fn run_script(cli: &Cli, script: &evp::Script, evp_start: Instant) -> Result<()>
     let mut renderers = Vec::with_capacity(output_paths.len());
     for path in &output_paths {
         renderers.push((
-            backend_for_output(path, &render_opts, !cli.no_embed_fonts)?,
+            backend_for_output(path, &render_opts, !cli.no_embed_fonts, cli.no_system_fonts)?,
             path.clone(),
         ));
         info!(path = %path.display(), "streaming render while recording");
@@ -244,15 +249,19 @@ fn backend_for_output(
     path: &std::path::Path,
     render_opts: &evp::RenderOptions,
     embed_fonts: bool,
+    no_system_fonts: bool,
 ) -> Result<evp::renderer::RendererBackend> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if ext.eq_ignore_ascii_case("gif") {
-        Ok(evp::renderer::RendererBackend::Gif(render_opts.clone()))
+        let mut r_opts = render_opts.clone();
+        r_opts.no_system_fonts = no_system_fonts;
+        Ok(evp::renderer::RendererBackend::Gif(r_opts))
     } else if ext.eq_ignore_ascii_case("svg") || ext.eq_ignore_ascii_case("svgz") {
         Ok(evp::renderer::RendererBackend::Svg(evp::SvgOptions {
             font_path: render_opts.font_path.clone(),
             font_size: render_opts.font_size,
             embed_fonts,
+            no_system_fonts,
             ..Default::default()
         }))
     } else if ext.eq_ignore_ascii_case("json") {
@@ -345,6 +354,12 @@ mod tests {
             cli.command,
             Some(Commands::Validate { script }) if script == PathBuf::from("demo.tape")
         ));
+    }
+
+    #[test]
+    fn parses_no_system_fonts_flag() {
+        let cli = Cli::try_parse_from(["evp", "demo.tape", "--no-system-fonts"]).unwrap();
+        assert!(cli.no_system_fonts);
     }
 
     #[test]

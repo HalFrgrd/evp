@@ -135,6 +135,7 @@ pub struct RenderOptions {
     ///     this.dimensions.device.char.width + Math.round(this._optionsService.rawOptions.letterSpacing);
     pub letter_spacing: f32,
     pub frame_style: FrameStyle,
+    pub no_system_fonts: bool,
 }
 
 impl Default for RenderOptions {
@@ -145,6 +146,7 @@ impl Default for RenderOptions {
             line_height: 1.0,
             letter_spacing: 1.0,
             frame_style: FrameStyle::default(),
+            no_system_fonts: false,
         }
     }
 }

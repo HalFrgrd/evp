@@ -97,6 +97,7 @@ fn run() -> Result<bool> {
             window_bar_size_px: script.settings.window_bar_size,
             border_radius_px: script.settings.border_radius,
         },
+        no_system_fonts: false,
     };
 
     let cpu_set = current_cpu_affinity().unwrap_or_else(|| "(unknown)".to_string());

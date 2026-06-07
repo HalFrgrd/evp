@@ -188,11 +188,12 @@ pub fn spawn_gif_stream(
     cfg.char_height_px = char_height_px;
     cfg.ascent_px = ascent_px;
 
+    let no_system_fonts = opts.no_system_fonts;
     let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) =
         bounded(RAW_FRAME_CONSUMER_CHANNEL_CAPACITY);
     let join = thread::Builder::new()
         .name("evp-gif-stream".into())
-        .spawn(move || run_gif_stream_worker(rx, output, font_set, scale, baseline, cfg))
+        .spawn(move || run_gif_stream_worker(rx, output, font_set, scale, baseline, cfg, no_system_fonts))
         .expect("failed to spawn gif stream worker");
 
     Ok(GifStreamHandle { tx, join })
@@ -251,6 +252,20 @@ pub fn render_png_frame(frame: &RawFrame, opts: &RenderOptions, out: &Path) -> R
         opts.letter_spacing,
     );
     let mut glyph_cache = GlyphCache::new();
+    if opts.no_system_fonts {
+        for cell in &frame.cells {
+            for ch in cell.text.chars() {
+                let (_, font) = font_set.select_for_char(cell.flags, ch);
+                if font.glyph_id(ch).0 == 0 {
+                    return Err(anyhow!(
+                        "Glyph not found in embedded fonts for character '{}' (U+{:04X})",
+                        ch,
+                        ch as u32
+                    ));
+                }
+            }
+        }
+    }
     let buf = rasterize_raw_frame(frame, &font_set, scale, baseline, cfg, &mut glyph_cache);
     lodepng::encode24_file(out, &buf, cfg.canvas_w as usize, cfg.canvas_h as usize)
         .with_context(|| format!("encoding {}", out.display()))
@@ -278,6 +293,7 @@ fn run_gif_stream_worker(
     scale: PxScale,
     baseline: u32,
     cfg: ViewportConfig,
+    no_system_fonts: bool,
 ) -> Result<()> {
     let (collector, writer) = gifski::new(Settings {
         width: Some(cfg.canvas_w),
@@ -312,6 +328,20 @@ fn run_gif_stream_worker(
         .expect("failed to spawn gif writer thread");
 
     while let Ok(frame) = rx.recv() {
+        if no_system_fonts {
+            for cell in &frame.cells {
+                for ch in cell.text.chars() {
+                    let (_, font) = font_set.select_for_char(cell.flags, ch);
+                    if font.glyph_id(ch).0 == 0 {
+                        return Err(anyhow!(
+                            "Glyph not found in embedded fonts for character '{}' (U+{:04X})",
+                            ch,
+                            ch as u32
+                        ));
+                    }
+                }
+            }
+        }
         let buf = rasterize_raw_frame(&frame, &font_set, scale, baseline, cfg, &mut glyph_cache);
 
         last_seen_t_ms = frame.t_ms;
