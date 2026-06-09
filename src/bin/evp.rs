@@ -177,7 +177,12 @@ fn run_cli(cli: Cli) -> Result<()> {
                 };
 
                 for path in &output_paths {
-                    let backend = backend_for_output(path, &render_opts, !cli.no_embed_fonts, cli.no_system_fonts)?;
+                    let backend = backend_for_output(
+                        path,
+                        &render_opts,
+                        !cli.no_embed_fonts,
+                        cli.no_system_fonts,
+                    )?;
                     info!(path = %path.display(), "rendering from JSON recording");
                     evp::renderer::render_recording(&rec, backend, path.clone())
                         .with_context(|| format!("failed to render {}", path.display()))?;

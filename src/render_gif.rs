@@ -193,7 +193,9 @@ pub fn spawn_gif_stream(
         bounded(RAW_FRAME_CONSUMER_CHANNEL_CAPACITY);
     let join = thread::Builder::new()
         .name("evp-gif-stream".into())
-        .spawn(move || run_gif_stream_worker(rx, output, font_set, scale, baseline, cfg, no_system_fonts))
+        .spawn(move || {
+            run_gif_stream_worker(rx, output, font_set, scale, baseline, cfg, no_system_fonts)
+        })
         .expect("failed to spawn gif stream worker");
 
     Ok(GifStreamHandle { tx, join })
