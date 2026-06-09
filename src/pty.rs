@@ -101,6 +101,37 @@ impl Pty {
                     }
                 };
                 cmd.env("TERM", "xterm-256color");
+
+                let is_utf8_locale = |val: &str| -> bool {
+                    let val_lower = val.to_lowercase();
+                    val_lower.contains("utf-8") || val_lower.contains("utf8")
+                };
+
+                let get_effective_env = |name: &str| -> Option<String> {
+                    if let Some((_, v)) = env.iter().find(|(k, _)| k == name) {
+                        Some(v.clone())
+                    } else {
+                        std::env::var(name).ok()
+                    }
+                };
+
+                let has_utf8 = {
+                    if let Some(lc_all) = get_effective_env("LC_ALL") {
+                        is_utf8_locale(&lc_all)
+                    } else if let Some(lc_ctype) = get_effective_env("LC_CTYPE") {
+                        is_utf8_locale(&lc_ctype)
+                    } else if let Some(lang) = get_effective_env("LANG") {
+                        is_utf8_locale(&lang)
+                    } else {
+                        false
+                    }
+                };
+
+                if !has_utf8 {
+                    cmd.env("LANG", "C.UTF-8");
+                    cmd.env("LC_ALL", "C.UTF-8");
+                }
+
                 for (k, v) in env {
                     cmd.env(k, v);
                 }
@@ -212,6 +243,48 @@ mod tests {
             parse_shell_command("/bin/sh").unwrap(),
             vec!["/bin/sh".to_string()]
         );
+    }
+
+    #[test]
+    fn test_pty_spawn_sets_utf8_locale_if_missing() {
+        use super::{Pty, PtySize};
+
+        let (pty, _child) = Pty::spawn(
+            Some("printenv LANG"),
+            &[],
+            PtySize {
+                cols: 80,
+                rows: 24,
+                px_w: 640,
+                px_h: 380,
+            },
+        )
+        .unwrap();
+
+        let mut buf = [0u8; 1024];
+        let mut output = String::new();
+        let mut attempts = 0;
+        let fd = unsafe { std::os::fd::BorrowedFd::borrow_raw(pty.fd()) };
+        loop {
+            match nix::unistd::read(&fd, &mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    output.push_str(&String::from_utf8_lossy(&buf[..n]));
+                }
+                Err(nix::errno::Errno::EAGAIN) => {
+                    attempts += 1;
+                    if attempts > 100 {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(_) => break,
+            }
+        }
+
+        assert!(!output.is_empty());
+        let val = output.trim();
+        assert!(val.to_lowercase().contains("utf-8") || val.to_lowercase().contains("utf8"));
     }
 }
 

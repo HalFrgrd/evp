@@ -49,11 +49,12 @@ use crate::render_common::is_box_drawing;
 use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
 
-use ab_glyph::Font;
-use crate::font::load_font_family;
 use crate::font::SvgFontEmbeddingPolicy;
+use crate::font::load_font_family;
+use ab_glyph::Font;
 use base64::prelude::*;
 use std::collections::{BTreeSet, HashMap};
+use unicode_width::UnicodeWidthChar;
 
 use crate::{
     recording::{RawFrame, Recording, style_flags},
@@ -353,6 +354,58 @@ impl CellVisual {
     }
 }
 
+fn is_wide_char(ch: char) -> bool {
+    ch.width() == Some(2)
+}
+
+fn get_frame_visuals(frame: &RawFrame) -> Vec<CellVisual> {
+    let cols = frame.cols as usize;
+    let rows = frame.rows as usize;
+    let default_bg = frame.default_bg;
+    let mut visuals = Vec::with_capacity(frame.cells.len());
+
+    for r in 0..rows {
+        let mut last_active = None;
+        for c in (0..cols).rev() {
+            let idx = r * cols + c;
+            let cell = &frame.cells[idx];
+            if !cell.text.is_empty() || cell.bg != default_bg {
+                last_active = Some(c);
+                break;
+            }
+        }
+
+        for c in 0..cols {
+            let idx = r * cols + c;
+            let cell = &frame.cells[idx];
+            let mut visual = CellVisual::from_snap(cell);
+
+            let prev_is_wide = if c > 0 {
+                let prev_idx = r * cols + (c - 1);
+                let prev_cell = &frame.cells[prev_idx];
+                prev_cell
+                    .text
+                    .chars()
+                    .next()
+                    .map(is_wide_char)
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+
+            if visual.text.is_empty()
+                && last_active.is_some()
+                && c <= last_active.unwrap()
+                && !prev_is_wide
+            {
+                visual.text = " ".to_string();
+            }
+            visuals.push(visual);
+        }
+    }
+    visuals
+}
+
 /// A time span during which a cell has a particular visual state.
 #[derive(Clone)]
 struct CellSpan {
@@ -374,6 +427,132 @@ struct CursorSpan {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct StyleKeyframe {
+    pub start_ms: u32,
+    pub fg: [u8; 3],
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strikethrough: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum AnimatedProperty {
+    Fg(Vec<(u32, [u8; 3])>),
+    FontWeight(Vec<(u32, bool)>),
+    FontStyle(Vec<(u32, bool)>),
+    TextDecoration(Vec<(u32, (bool, bool))>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StyleAnimation {
+    pub begin_ms: u32,
+    pub dur_ms: u32,
+    pub property: AnimatedProperty,
+}
+
+impl StyleAnimation {
+    fn to_svg_string(&self, color_classes: &HashMap<[u8; 3], String>, is_hidden: bool) -> String {
+        let (attr_name, values): (&str, Vec<String>) = match &self.property {
+            AnimatedProperty::Fg(keyframes) => {
+                let use_class = keyframes
+                    .iter()
+                    .all(|(_, color)| color_classes.contains_key(color));
+                if use_class {
+                    let vals = keyframes
+                        .iter()
+                        .map(|(_, color)| color_classes.get(color).cloned().unwrap_or_default())
+                        .collect();
+                    ("class", vals)
+                } else {
+                    let vals = keyframes.iter().map(|(_, color)| rgb_hex(*color)).collect();
+                    ("fill", vals)
+                }
+            }
+            AnimatedProperty::FontWeight(keyframes) => {
+                let vals = keyframes
+                    .iter()
+                    .map(|(_, bold)| {
+                        if *bold {
+                            "bold".to_string()
+                        } else {
+                            "normal".to_string()
+                        }
+                    })
+                    .collect();
+                ("font-weight", vals)
+            }
+            AnimatedProperty::FontStyle(keyframes) => {
+                let vals = keyframes
+                    .iter()
+                    .map(|(_, italic)| {
+                        if *italic {
+                            "italic".to_string()
+                        } else {
+                            "normal".to_string()
+                        }
+                    })
+                    .collect();
+                ("font-style", vals)
+            }
+            AnimatedProperty::TextDecoration(keyframes) => {
+                let vals = keyframes
+                    .iter()
+                    .map(|(_, (u, s))| {
+                        if *u && *s {
+                            "underline line-through".to_string()
+                        } else if *u {
+                            "underline".to_string()
+                        } else if *s {
+                            "line-through".to_string()
+                        } else {
+                            "none".to_string()
+                        }
+                    })
+                    .collect();
+                ("text-decoration", vals)
+            }
+        };
+
+        let key_times_str = match &self.property {
+            AnimatedProperty::Fg(kf) => kf
+                .iter()
+                .map(|(t, _)| format_key_time((*t - self.begin_ms) as f32 / self.dur_ms as f32))
+                .collect::<Vec<_>>()
+                .join(";"),
+            AnimatedProperty::FontWeight(kf) => kf
+                .iter()
+                .map(|(t, _)| format_key_time((*t - self.begin_ms) as f32 / self.dur_ms as f32))
+                .collect::<Vec<_>>()
+                .join(";"),
+            AnimatedProperty::FontStyle(kf) => kf
+                .iter()
+                .map(|(t, _)| format_key_time((*t - self.begin_ms) as f32 / self.dur_ms as f32))
+                .collect::<Vec<_>>()
+                .join(";"),
+            AnimatedProperty::TextDecoration(kf) => kf
+                .iter()
+                .map(|(t, _)| format_key_time((*t - self.begin_ms) as f32 / self.dur_ms as f32))
+                .collect::<Vec<_>>()
+                .join(";"),
+        };
+
+        let values_str = values.join(";");
+        let fill_freeze = if is_hidden { "" } else { r#" fill="freeze""# };
+
+        format!(
+            r#"<animate attributeName="{attr}" calcMode="discrete" values="{values}" keyTimes="{key_times}" dur="{dur}" begin="{begin}"{freeze} />"#,
+            attr = attr_name,
+            values = values_str,
+            key_times = key_times_str,
+            dur = format_time(self.dur_ms),
+            begin = format_begin(self.begin_ms),
+            freeze = fill_freeze,
+        )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct TSpan {
     pub x_coords: Vec<f32>,
     pub text: String,
@@ -392,6 +571,8 @@ pub struct TSpan {
     pub letter_spacing: f32,
     pub start_ms: u32,
     pub end_ms: u32,
+    pub style_animations: Vec<StyleAnimation>,
+    pub style_history: Vec<StyleKeyframe>,
 }
 
 impl TSpan {
@@ -404,7 +585,8 @@ impl TSpan {
         default_letter_spacing: f32,
         default_fg: Option<[u8; 3]>,
     ) -> String {
-        let x_str = self.x_coords
+        let x_str = self
+            .x_coords
             .iter()
             .map(|x| {
                 let formatted = format!("{:.2}", x);
@@ -416,55 +598,48 @@ impl TSpan {
             })
             .collect::<Vec<_>>()
             .join(" ");
-        let weight = if self.bold {
-            " font-weight=\"bold\""
-        } else {
-            ""
-        };
-        let italic = if self.italic {
-            " font-style=\"italic\""
-        } else {
-            ""
-        };
-        let decoration = if self.underline && self.strikethrough {
-            " text-decoration=\"underline line-through\""
-        } else if self.underline {
-            " text-decoration=\"underline\""
-        } else if self.strikethrough {
-            " text-decoration=\"line-through\""
-        } else {
-            ""
-        };
         let style = if (self.letter_spacing - default_letter_spacing).abs() < 1e-5 {
             String::new()
         } else {
-            format!(r#" style="letter-spacing: {}px;""#, format_seconds(self.letter_spacing))
+            format!(
+                r#" style="letter-spacing: {}px;""#,
+                format_seconds(self.letter_spacing)
+            )
         };
 
         let is_tspan_static = is_static(self.start_ms, self.end_ms, total_ms);
         let matches_parent = self.start_ms <= parent_start_ms && self.end_ms >= parent_end_ms;
         let is_hidden = !is_tspan_static && !matches_parent;
 
-        let fill_attr = if let Some(cls) = color_classes.get(&self.fg) {
-            if is_hidden {
-                format!(r#" class="{} h""#, cls)
-            } else {
-                format!(r#" class="{}""#, cls)
-            }
+        let mut style_classes = Vec::new();
+        if self.bold {
+            style_classes.push("b");
+        }
+        if self.italic {
+            style_classes.push("i");
+        }
+        if self.underline && self.strikethrough {
+            style_classes.push("us");
+        } else if self.underline {
+            style_classes.push("u");
+        } else if self.strikethrough {
+            style_classes.push("s");
+        }
+        if is_hidden {
+            style_classes.push("h");
+        }
+
+        let mut fill_attr = String::new();
+        if let Some(cls) = color_classes.get(&self.fg) {
+            style_classes.push(cls);
+        } else if Some(self.fg) != default_fg {
+            fill_attr = format!(r#" fill="{}""#, rgb_hex(self.fg));
+        }
+
+        let class_attr = if !style_classes.is_empty() {
+            format!(r#" class="{}""#, style_classes.join(" "))
         } else {
-            if Some(self.fg) == default_fg {
-                if is_hidden {
-                    r#" class="h""#.to_string()
-                } else {
-                    String::new()
-                }
-            } else {
-                if is_hidden {
-                    format!(r#" fill="{}" class="h""#, rgb_hex(self.fg))
-                } else {
-                    format!(r#" fill="{}""#, rgb_hex(self.fg))
-                }
-            }
+            String::new()
         };
 
         let set_str = if is_hidden {
@@ -473,15 +648,19 @@ impl TSpan {
             String::new()
         };
 
+        let mut anim_str = String::new();
+        for anim in &self.style_animations {
+            anim_str.push_str(&anim.to_svg_string(color_classes, is_hidden));
+        }
+
         format!(
-            r#"<tspan x="{x}"{fill}{w}{i}{d}{s}>{set}{txt}</tspan>"#,
+            r#"<tspan x="{x}"{fill}{cls}{s}>{set}{anim}{txt}</tspan>"#,
             x = x_str,
             fill = fill_attr,
-            w = weight,
-            i = italic,
-            d = decoration,
+            cls = class_attr,
             s = style,
             set = set_str,
+            anim = anim_str,
             txt = escape_text(&self.text),
         )
     }
@@ -573,7 +752,14 @@ impl TextElement {
                 s.push_str(&anim.to_svg_string());
             }
             for tspan in non_box.iter() {
-                s.push_str(&tspan.to_svg_string(color_classes, parent_start, parent_end, total_ms, default_letter_spacing, default_fg));
+                s.push_str(&tspan.to_svg_string(
+                    color_classes,
+                    parent_start,
+                    parent_end,
+                    total_ms,
+                    default_letter_spacing,
+                    default_fg,
+                ));
             }
             s.push_str("</text>");
             tags.push(s);
@@ -584,7 +770,9 @@ impl TextElement {
             if tspan.is_box {
                 flush_non_box(&mut current_non_box, &mut text_tags);
 
-                let text_length = if let (Some(&first_x), Some(&last_x)) = (tspan.x_coords.first(), tspan.x_coords.last()) {
+                let text_length = if let (Some(&first_x), Some(&last_x)) =
+                    (tspan.x_coords.first(), tspan.x_coords.last())
+                {
                     let val = (last_x - first_x) + tspan.cell_w as f32;
                     let formatted = format!("{:.2}", val);
                     let mut trimmed = formatted.trim_end_matches('0');
@@ -621,7 +809,14 @@ impl TextElement {
                 if let Some(ref anim) = self.y_animation {
                     s.push_str(&anim.to_svg_string());
                 }
-                s.push_str(&tspan.to_svg_string(color_classes, parent_start, parent_end, total_ms, default_letter_spacing, default_fg));
+                s.push_str(&tspan.to_svg_string(
+                    color_classes,
+                    parent_start,
+                    parent_end,
+                    total_ms,
+                    default_letter_spacing,
+                    default_fg,
+                ));
                 s.push_str("</text>");
                 text_tags.push(s);
             } else {
@@ -807,11 +1002,17 @@ fn simplify_discrete_animation<T: PartialEq + Clone>(
 }
 
 fn format_key_time_list(kt: &[f32]) -> String {
-    kt.iter().map(|&k| format_key_time(k)).collect::<Vec<_>>().join(";")
+    kt.iter()
+        .map(|&k| format_key_time(k))
+        .collect::<Vec<_>>()
+        .join(";")
 }
 
 fn format_val_list<T: std::fmt::Display>(vals: &[T]) -> String {
-    vals.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(";")
+    vals.iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join(";")
 }
 
 fn serialize_cursor_rects(cursors: &[CursorRect], total_ms: u32) -> String {
@@ -821,7 +1022,10 @@ fn serialize_cursor_rects(cursors: &[CursorRect], total_ms: u32) -> String {
 
     let mut groups: HashMap<(u32, u32, [u8; 3]), Vec<CursorRect>> = HashMap::new();
     for c in cursors {
-        groups.entry((c.w, c.h, c.fill)).or_default().push(c.clone());
+        groups
+            .entry((c.w, c.h, c.fill))
+            .or_default()
+            .push(c.clone());
     }
 
     let mut s = String::new();
@@ -996,9 +1200,17 @@ impl SvgDoc {
         let mut style = self.style_block.clone();
         let mut extra_css = String::new();
         extra_css.push_str(".h { visibility: hidden; }\n");
+        extra_css.push_str(".b { font-weight: bold; }\n");
+        extra_css.push_str(".i { font-style: italic; }\n");
+        extra_css.push_str(".u { text-decoration: underline; }\n");
+        extra_css.push_str(".s { text-decoration: line-through; }\n");
+        extra_css.push_str(".us { text-decoration: underline line-through; }\n");
         extra_css.push_str("text, tspan { font-kerning: none; font-variant-ligatures: none; text-rendering: geometricPrecision; }\n");
         let letter_spacing_style = if self.letter_spacing != 0.0 {
-            format!("letter-spacing: {}px; ", format_seconds(self.letter_spacing))
+            format!(
+                "letter-spacing: {}px; ",
+                format_seconds(self.letter_spacing)
+            )
         } else {
             String::new()
         };
@@ -1010,13 +1222,11 @@ impl SvgDoc {
         if !letter_spacing_style.is_empty() || !fill_style.is_empty() {
             extra_css.push_str(&format!(
                 "text, tspan {{ {}{} }}\n",
-                letter_spacing_style,
-                fill_style
+                letter_spacing_style, fill_style
             ));
         }
         let mut sorted_entries: Vec<_> = color_classes.iter().collect();
-        sorted_entries
-            .sort_by_key(|(_, class_name)| class_name[1..].parse::<usize>().unwrap_or(0));
+        sorted_entries.sort_by_key(|(_, class_name)| class_name[1..].parse::<usize>().unwrap_or(0));
         for (color, class_name) in sorted_entries {
             extra_css.push_str(&format!(
                 ".{} {{ fill: {}; }}\n",
@@ -1086,10 +1296,7 @@ impl SvgDoc {
         if self.frame_clip_path.is_some() {
             frame_bg_attrs.push(r#"clip-path="url(#frame-clip)""#.to_string());
         }
-        s.push_str(&format!(
-            "<rect {}/>\n",
-            frame_bg_attrs.join(" ")
-        ));
+        s.push_str(&format!("<rect {}/>\n", frame_bg_attrs.join(" ")));
 
         // Window bar circles
         for circle in &self.window_bar_circles {
@@ -1158,7 +1365,12 @@ impl SvgDoc {
 
         // Text elements
         for te in &self.text_elements {
-            s.push_str(&te.to_svg_string(&color_classes, total_ms, self.letter_spacing, most_common_text_color));
+            s.push_str(&te.to_svg_string(
+                &color_classes,
+                total_ms,
+                self.letter_spacing,
+                most_common_text_color,
+            ));
         }
 
         // Cursor rects
@@ -1174,12 +1386,17 @@ pub fn optimize_tspans(elements: &mut [TextElement]) {
         if te.tspans.is_empty() {
             continue;
         }
-        te.tspans
-            .sort_by(|a, b| a.x_coords[0].partial_cmp(&b.x_coords[0]).unwrap());
+        te.tspans.sort_by(|a, b| {
+            a.x_coords[0]
+                .partial_cmp(&b.x_coords[0])
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.start_ms.cmp(&b.start_ms))
+        });
 
         let mut merged: Vec<TSpan> = Vec::new();
         for tspan in std::mem::take(&mut te.tspans) {
             if let Some(last) = merged.last_mut() {
+                // Scenario A: Horizontal merge (same timeframe, adjacent x, same styling)
                 if last.fg == tspan.fg
                     && last.bold == tspan.bold
                     && last.italic == tspan.italic
@@ -1192,25 +1409,172 @@ pub fn optimize_tspans(elements: &mut [TextElement]) {
                     && last.letter_spacing == tspan.letter_spacing
                     && last.start_ms == tspan.start_ms
                     && last.end_ms == tspan.end_ms
+                    && last.style_animations.is_empty()
+                    && tspan.style_animations.is_empty()
                     && !last.text.chars().any(|c| c as u32 > 0xFFFF)
                     && !tspan.text.chars().any(|c| c as u32 > 0xFFFF)
                 {
-                    let cell_w = last.cell_w as f32;
-                    let expected_next_x = last.x_coords.last().unwrap() + cell_w;
-                    let gap_cells = ((tspan.x_coords[0] - expected_next_x) / cell_w).round() as i32;
-                    if gap_cells > 0 && gap_cells <= 4 && !last.underline && !last.strikethrough {
-                        for g in 0..gap_cells {
-                            last.x_coords.push(expected_next_x + g as f32 * cell_w);
-                            last.text.push(' ');
-                        }
-                    }
                     last.x_coords.extend(&tspan.x_coords);
                     last.text.push_str(&tspan.text);
+                    continue;
+                }
+
+                // Scenario B: Temporal merge (same coordinates/text, consecutive times, differing in styles/color)
+                if last.x_coords == tspan.x_coords
+                    && last.text == tspan.text
+                    && last.is_box == tspan.is_box
+                    && last.scale_y == tspan.scale_y
+                    && last.cell_center_y_offset == tspan.cell_center_y_offset
+                    && last.char_center_y_offset == tspan.char_center_y_offset
+                    && last.letter_spacing == tspan.letter_spacing
+                    && last.end_ms == tspan.start_ms
+                {
+                    if last.style_history.is_empty() {
+                        last.style_history = vec![
+                            StyleKeyframe {
+                                start_ms: last.start_ms,
+                                fg: last.fg,
+                                bold: last.bold,
+                                italic: last.italic,
+                                underline: last.underline,
+                                strikethrough: last.strikethrough,
+                            },
+                            StyleKeyframe {
+                                start_ms: tspan.start_ms,
+                                fg: tspan.fg,
+                                bold: tspan.bold,
+                                italic: tspan.italic,
+                                underline: tspan.underline,
+                                strikethrough: tspan.strikethrough,
+                            },
+                        ];
+                    } else {
+                        last.style_history.push(StyleKeyframe {
+                            start_ms: tspan.start_ms,
+                            fg: tspan.fg,
+                            bold: tspan.bold,
+                            italic: tspan.italic,
+                            underline: tspan.underline,
+                            strikethrough: tspan.strikethrough,
+                        });
+                    }
+                    last.end_ms = tspan.end_ms;
                     continue;
                 }
             }
             merged.push(tspan);
         }
+
+        // Finalize all style animations
+        for tspan in &mut merged {
+            if !tspan.style_history.is_empty() {
+                let dur_ms = tspan.end_ms - tspan.start_ms;
+                let mut anims = Vec::new();
+
+                // Fg animation
+                {
+                    let mut kf = Vec::new();
+                    for hist in &tspan.style_history {
+                        kf.push((hist.start_ms, hist.fg));
+                    }
+                    let mut unique_kf: Vec<(u32, [u8; 3])> = Vec::new();
+                    for item in kf {
+                        if let Some(last_item) = unique_kf.last() {
+                            if last_item.1 != item.1 {
+                                unique_kf.push(item);
+                            }
+                        } else {
+                            unique_kf.push(item);
+                        }
+                    }
+                    if unique_kf.len() > 1 {
+                        anims.push(StyleAnimation {
+                            begin_ms: tspan.start_ms,
+                            dur_ms,
+                            property: AnimatedProperty::Fg(unique_kf),
+                        });
+                    }
+                }
+
+                // FontWeight animation
+                {
+                    let mut kf = Vec::new();
+                    for hist in &tspan.style_history {
+                        kf.push((hist.start_ms, hist.bold));
+                    }
+                    let mut unique_kf: Vec<(u32, bool)> = Vec::new();
+                    for item in kf {
+                        if let Some(last_item) = unique_kf.last() {
+                            if last_item.1 != item.1 {
+                                unique_kf.push(item);
+                            }
+                        } else {
+                            unique_kf.push(item);
+                        }
+                    }
+                    if unique_kf.len() > 1 {
+                        anims.push(StyleAnimation {
+                            begin_ms: tspan.start_ms,
+                            dur_ms,
+                            property: AnimatedProperty::FontWeight(unique_kf),
+                        });
+                    }
+                }
+
+                // FontStyle animation
+                {
+                    let mut kf = Vec::new();
+                    for hist in &tspan.style_history {
+                        kf.push((hist.start_ms, hist.italic));
+                    }
+                    let mut unique_kf: Vec<(u32, bool)> = Vec::new();
+                    for item in kf {
+                        if let Some(last_item) = unique_kf.last() {
+                            if last_item.1 != item.1 {
+                                unique_kf.push(item);
+                            }
+                        } else {
+                            unique_kf.push(item);
+                        }
+                    }
+                    if unique_kf.len() > 1 {
+                        anims.push(StyleAnimation {
+                            begin_ms: tspan.start_ms,
+                            dur_ms,
+                            property: AnimatedProperty::FontStyle(unique_kf),
+                        });
+                    }
+                }
+
+                // TextDecoration animation
+                {
+                    let mut kf = Vec::new();
+                    for hist in &tspan.style_history {
+                        kf.push((hist.start_ms, (hist.underline, hist.strikethrough)));
+                    }
+                    let mut unique_kf: Vec<(u32, (bool, bool))> = Vec::new();
+                    for item in kf {
+                        if let Some(last_item) = unique_kf.last() {
+                            if last_item.1 != item.1 {
+                                unique_kf.push(item);
+                            }
+                        } else {
+                            unique_kf.push(item);
+                        }
+                    }
+                    if unique_kf.len() > 1 {
+                        anims.push(StyleAnimation {
+                            begin_ms: tspan.start_ms,
+                            dur_ms,
+                            property: AnimatedProperty::TextDecoration(unique_kf),
+                        });
+                    }
+                }
+
+                tspan.style_animations = anims;
+            }
+        }
+
         te.tspans = merged;
     }
 }
@@ -1228,10 +1592,7 @@ pub fn group_text_elements_by_row_and_time(elements: &mut Vec<TextElement>) {
     let mut merged: Vec<TextElement> = Vec::new();
     for mut te in std::mem::take(elements) {
         if let Some(last) = merged.last_mut() {
-            if last.y == te.y
-                && last.start_ms == te.start_ms
-                && last.end_ms == te.end_ms
-            {
+            if last.y == te.y && last.start_ms == te.start_ms && last.end_ms == te.end_ms {
                 last.tspans.append(&mut te.tspans);
                 continue;
             }
@@ -1367,18 +1728,17 @@ pub fn group_text_elements_final(elements: &mut Vec<TextElement>) {
         return;
     }
     elements.sort_by(|a, b| {
-        a.y.cmp(&b.y).then_with(|| {
-            match (&a.y_animation, &b.y_animation) {
+        a.y.cmp(&b.y)
+            .then_with(|| match (&a.y_animation, &b.y_animation) {
                 (None, None) => std::cmp::Ordering::Equal,
                 (None, Some(_)) => std::cmp::Ordering::Less,
                 (Some(_), None) => std::cmp::Ordering::Greater,
-                (Some(ax), Some(bx)) => {
-                    ax.begin_ms.cmp(&bx.begin_ms)
-                        .then(ax.dur_ms.cmp(&bx.dur_ms))
-                        .then_with(|| ax.segments.cmp(&bx.segments))
-                }
-            }
-        })
+                (Some(ax), Some(bx)) => ax
+                    .begin_ms
+                    .cmp(&bx.begin_ms)
+                    .then(ax.dur_ms.cmp(&bx.dur_ms))
+                    .then_with(|| ax.segments.cmp(&bx.segments)),
+            })
     });
 
     let mut merged: Vec<TextElement> = Vec::new();
@@ -1394,9 +1754,60 @@ pub fn group_text_elements_final(elements: &mut Vec<TextElement>) {
         merged.push(te);
     }
     for te in &mut merged {
-        te.tspans.sort_by(|a, b| a.x_coords[0].partial_cmp(&b.x_coords[0]).unwrap_or(std::cmp::Ordering::Equal));
+        te.tspans.sort_by(|a, b| {
+            a.x_coords[0]
+                .partial_cmp(&b.x_coords[0])
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
     }
     *elements = merged;
+}
+
+pub fn append_newlines_to_final_tspans(elements: &mut [TextElement]) {
+    for te in elements {
+        if te.tspans.is_empty() {
+            continue;
+        }
+
+        // Collect all unique time boundaries (start_ms and end_ms) for tspans in this TextElement.
+        let mut boundaries = Vec::new();
+        for tspan in &te.tspans {
+            boundaries.push(tspan.start_ms);
+            boundaries.push(tspan.end_ms);
+        }
+        boundaries.sort_unstable();
+        boundaries.dedup();
+
+        if boundaries.len() < 2 {
+            continue;
+        }
+
+        let mut final_indices = std::collections::BTreeSet::new();
+
+        for i in 0..(boundaries.len() - 1) {
+            let start = boundaries[i];
+            let end = boundaries[i + 1];
+
+            // Find all tspans active in this interval [start, end)
+            let mut active_indices = Vec::new();
+            for (idx, tspan) in te.tspans.iter().enumerate() {
+                if tspan.start_ms <= start && tspan.end_ms >= end {
+                    active_indices.push(idx);
+                }
+            }
+
+            // Since tspans are sorted by x_coords[0] ascending, the last active tspan index
+            // is the rightmost one.
+            if let Some(&max_idx) = active_indices.last() {
+                final_indices.insert(max_idx);
+            }
+        }
+
+        // Append newline to all final tspans
+        for idx in final_indices {
+            te.tspans[idx].text.push('\n');
+        }
+    }
 }
 
 fn render_from_frames(
@@ -1437,15 +1848,16 @@ fn render_from_frames(
     let mut current: Vec<(CellVisual, u32, [u8; 3])> = Vec::with_capacity(num_cells);
 
     // Initialize with first frame.
-    let first = &frames[0];
-    for cell in &first.cells {
-        current.push((CellVisual::from_snap(cell), first.t_ms, first.default_bg));
+    let first_visuals = get_frame_visuals(&frames[0]);
+    for visual in first_visuals {
+        current.push((visual, frames[0].t_ms, frames[0].default_bg));
     }
 
     // Process subsequent frames.
     for frame in frames.iter().skip(1) {
+        let frame_visuals = get_frame_visuals(frame);
         for idx in 0..num_cells {
-            let new_visual = CellVisual::from_snap(&frame.cells[idx]);
+            let new_visual = frame_visuals[idx].clone();
             let (ref old_visual, start_ms, old_default_bg) = current[idx];
             if *old_visual != new_visual
                 || (old_visual.bg == old_default_bg
@@ -1490,7 +1902,8 @@ fn render_from_frames(
     let mut split_cell_spans = Vec::new();
     for r in 0..rows {
         // Find spans on this row
-        let mut row_spans: Vec<CellSpan> = cell_spans.iter().filter(|s| s.row == r).cloned().collect();
+        let mut row_spans: Vec<CellSpan> =
+            cell_spans.iter().filter(|s| s.row == r).cloned().collect();
         if row_spans.is_empty() {
             continue;
         }
@@ -1596,9 +2009,7 @@ fn render_from_frames(
         opts.font_family
             .split(',')
             .map(|s| s.trim())
-            .filter(|&s| {
-                !SYSTEM_FONTS.iter().any(|&sys| s.eq_ignore_ascii_case(sys))
-            })
+            .filter(|&s| !SYSTEM_FONTS.iter().any(|&sys| s.eq_ignore_ascii_case(sys)))
             .collect::<Vec<_>>()
             .join(", ")
     } else {
@@ -1715,6 +2126,8 @@ fn render_from_frames(
             letter_spacing: if is_box { 0.0 } else { letter_spacing_svg },
             start_ms: span.start_ms,
             end_ms: span.end_ms,
+            style_animations: Vec::new(),
+            style_history: Vec::new(),
         };
 
         text_elements.push(TextElement {
@@ -1751,6 +2164,28 @@ fn render_from_frames(
     optimize_bg_rect_scroll(&mut bg_rects);
     optimize_rows(&mut text_elements);
     group_text_elements_final(&mut text_elements);
+    optimize_tspans(&mut text_elements);
+
+    // Append newline characters at the end of the final tspan block for each row/interval.
+    append_newlines_to_final_tspans(&mut text_elements);
+
+    // Clean up redundant y_animations that don't change y coordinate
+    for te in &mut text_elements {
+        if let Some(ref anim) = te.y_animation {
+            let first_y = anim.segments[0].0;
+            if anim.segments.iter().all(|(y, _)| *y == first_y) {
+                te.y_animation = None;
+            }
+        }
+    }
+    for rect in &mut bg_rects {
+        if let Some(ref anim) = rect.y_animation {
+            let first_y = anim.segments[0].0;
+            if anim.segments.iter().all(|(y, _)| *y == first_y) {
+                rect.y_animation = None;
+            }
+        }
+    }
 
     let mut window_bar_circles = Vec::new();
     if cfg.frame_style.window_bar.enabled() {
@@ -1958,8 +2393,8 @@ mod tests {
         assert!(svg.starts_with("<?xml"));
         assert!(svg.contains("<svg"));
         assert!(svg.ends_with("</svg>\n"));
-        // Text content present.
-        assert!(svg.contains(">h<") || svg.contains(">hi<"));
+        // Text content present (now includes trailing newline).
+        assert!(svg.contains(">h\n<") || svg.contains(">hi\n<"));
         // Master timer.
         assert!(svg.contains(r#"id="t""#));
     }
@@ -2078,6 +2513,8 @@ mod tests {
                 letter_spacing: 0.0,
                 start_ms: 600,
                 end_ms: 950,
+                style_animations: Vec::new(),
+                style_history: Vec::new(),
             }],
         };
 
@@ -2136,6 +2573,8 @@ mod tests {
                     letter_spacing: 0.0,
                     start_ms: 0,
                     end_ms: 1000,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
                 },
                 TSpan {
                     x_coords: vec![110.0],
@@ -2155,6 +2594,8 @@ mod tests {
                     letter_spacing: 0.0,
                     start_ms: 0,
                     end_ms: 1000,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
                 },
                 TSpan {
                     x_coords: vec![120.0],
@@ -2174,6 +2615,8 @@ mod tests {
                     letter_spacing: 0.0,
                     start_ms: 0,
                     end_ms: 1000,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
                 },
             ],
         };
@@ -2188,11 +2631,19 @@ mod tests {
         let svg = te.to_svg_string(&HashMap::new(), 1000, 0.0, None);
 
         // 1. The <text> wrapper element must have textLength="30" (120 - 100 + 10 = 30)
-        assert!(svg.contains(r#"textLength="30""#), "SVG does not contain correct textLength: {}", svg);
+        assert!(
+            svg.contains(r#"textLength="30""#),
+            "SVG does not contain correct textLength: {}",
+            svg
+        );
 
         // 2. The inner <tspan> must NOT have optimized single x="100", but instead
         // the full array of coordinates x="100 110 120"
-        assert!(svg.contains(r#"x="100 110 120""#), "SVG does not contain explicit x coords: {}", svg);
+        assert!(
+            svg.contains(r#"x="100 110 120""#),
+            "SVG does not contain explicit x coords: {}",
+            svg
+        );
     }
 
     #[test]
@@ -2221,6 +2672,8 @@ mod tests {
                     letter_spacing: 0.0,
                     start_ms: 0,
                     end_ms: 1000,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
                 },
                 TSpan {
                     x_coords: vec![20.0],
@@ -2240,6 +2693,8 @@ mod tests {
                     letter_spacing: 0.0,
                     start_ms: 0,
                     end_ms: 1000,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
                 },
             ],
         };
@@ -2247,6 +2702,74 @@ mod tests {
         assert_eq!(te.tspans.len(), 1);
         assert_eq!(te.tspans[0].text, "ab");
         assert_eq!(te.tspans[0].x_coords, vec![10.0, 20.0]);
+    }
+
+    #[test]
+    fn test_optimize_tspans_temporal_merge() {
+        let mut te = TextElement {
+            y: 20,
+            y_animation: None,
+            start_ms: 0,
+            end_ms: 200,
+            tspans: vec![
+                TSpan {
+                    x_coords: vec![10.0],
+                    text: "a".to_string(),
+                    fg: [255, 0, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 0,
+                    end_ms: 100,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
+                },
+                TSpan {
+                    x_coords: vec![10.0],
+                    text: "a".to_string(),
+                    fg: [0, 255, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 100,
+                    end_ms: 200,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
+                },
+            ],
+        };
+        optimize_tspans(std::slice::from_mut(&mut te));
+        assert_eq!(te.tspans.len(), 1);
+        assert_eq!(te.tspans[0].text, "a");
+        assert_eq!(te.tspans[0].x_coords, vec![10.0]);
+        assert_eq!(te.tspans[0].style_animations.len(), 1);
+        let anim = &te.tspans[0].style_animations[0];
+        assert_eq!(anim.begin_ms, 0);
+        assert_eq!(anim.dur_ms, 200);
+        match &anim.property {
+            AnimatedProperty::Fg(kf) => {
+                assert_eq!(kf, &vec![(0, [255, 0, 0]), (100, [0, 255, 0])]);
+            }
+            _ => panic!("Expected Fg animation"),
+        }
     }
 
     #[test]
@@ -2275,6 +2798,8 @@ mod tests {
                     letter_spacing: 0.0,
                     start_ms: 0,
                     end_ms: 1000,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
                 },
                 TSpan {
                     x_coords: vec![20.0],
@@ -2294,6 +2819,8 @@ mod tests {
                     letter_spacing: 0.0,
                     start_ms: 0,
                     end_ms: 1000,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
                 },
             ],
         };
@@ -2398,6 +2925,8 @@ mod tests {
                     letter_spacing: 0.0,
                     start_ms: 0,
                     end_ms: 500,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
                 }],
             },
             TextElement {
@@ -2423,6 +2952,8 @@ mod tests {
                     letter_spacing: 0.0,
                     start_ms: 500,
                     end_ms: 1000,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
                 }],
             },
         ];
@@ -2462,6 +2993,8 @@ mod tests {
                     letter_spacing: 0.0,
                     start_ms: 100,
                     end_ms: 200,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
                 }],
             },
             TextElement {
@@ -2487,6 +3020,8 @@ mod tests {
                     letter_spacing: 0.0,
                     start_ms: 100,
                     end_ms: 200,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
                 }],
             },
             TextElement {
@@ -2512,13 +3047,15 @@ mod tests {
                     letter_spacing: 0.0,
                     start_ms: 100,
                     end_ms: 200,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
                 }],
             },
         ];
 
         group_text_elements_by_row_and_time(&mut elements);
         assert_eq!(elements.len(), 2);
-        
+
         // Element at y=20 (a and b should be merged)
         assert_eq!(elements[0].y, 20);
         assert_eq!(elements[0].start_ms, 100);
@@ -2559,6 +3096,8 @@ mod tests {
                     letter_spacing: 0.0,
                     start_ms: 100,
                     end_ms: 200,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
                 }],
             },
             TextElement {
@@ -2584,6 +3123,8 @@ mod tests {
                     letter_spacing: 0.0,
                     start_ms: 300,
                     end_ms: 400,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
                 }],
             },
         ];
@@ -2597,4 +3138,94 @@ mod tests {
         assert_eq!(elements[0].tspans[0].text, "a");
         assert_eq!(elements[0].tspans[1].text, "b");
     }
+
+    #[test]
+    fn test_append_newlines_to_final_tspans() {
+        let mut te = TextElement {
+            y: 20,
+            y_animation: None,
+            start_ms: 0,
+            end_ms: 200,
+            tspans: vec![
+                TSpan {
+                    x_coords: vec![10.0],
+                    text: "hello".to_string(),
+                    fg: [255, 0, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 0,
+                    end_ms: 100,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
+                },
+                TSpan {
+                    x_coords: vec![10.0],
+                    text: "hello".to_string(),
+                    fg: [0, 255, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 100,
+                    end_ms: 200,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
+                },
+                TSpan {
+                    x_coords: vec![20.0],
+                    text: "world".to_string(),
+                    fg: [0, 255, 0],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 100,
+                    end_ms: 200,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
+                },
+            ],
+        };
+
+        // Sort them just like they would be in render_from_frames
+        te.tspans.sort_by(|a, b| {
+            a.x_coords[0]
+                .partial_cmp(&b.x_coords[0])
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.start_ms.cmp(&b.start_ms))
+        });
+
+        append_newlines_to_final_tspans(std::slice::from_mut(&mut te));
+
+        assert_eq!(te.tspans[0].text, "hello\n");
+        assert_eq!(te.tspans[1].text, "hello");
+        assert_eq!(te.tspans[2].text, "world\n");
+    }
 }
+
