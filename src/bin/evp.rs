@@ -80,6 +80,9 @@ struct Cli {
     /// Do not use system fallback fonts. Fail if any rendered glyph is missing from the loaded/embedded fonts.
     #[arg(long = "no-system-fonts")]
     no_system_fonts: bool,
+    /// Mimic VHS behavior (only allow a single word for the shell, use VHS default shell options and prompt colors).
+    #[arg(long = "mimic-vhs")]
+    mimic_vhs: bool,
     /// Explicit log level override.
     #[arg(long, value_enum)]
     log_level: Option<LogLevel>,
@@ -202,6 +205,10 @@ fn run_cli(cli: Cli) -> Result<()> {
 }
 
 fn run_script(cli: &Cli, script: &evp::Script, evp_start: Instant) -> Result<()> {
+    let mut script = script.clone();
+    if cli.mimic_vhs {
+        script.settings.mimic_vhs = true;
+    }
     let render_opts = evp::RenderOptions {
         font_path: script.settings.font_family.clone(),
         font_size: script.settings.font_size,
@@ -244,7 +251,7 @@ fn run_script(cli: &Cli, script: &evp::Script, evp_start: Instant) -> Result<()>
     }
 
     let stats =
-        evp::run_and_render(script, renderers).context("running script + streaming renders")?;
+        evp::run_and_render(&script, renderers).context("running script + streaming renders")?;
     info!(frames = stats.captured_frames, "frames captured");
     info!(elapsed_ms = evp_start.elapsed().as_millis(), "evp finished");
     Ok(())

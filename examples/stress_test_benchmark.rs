@@ -81,6 +81,7 @@ fn run() -> Result<bool> {
     // Drop any `Output` directive in the tape; the binary controls the
     // output path itself.
     script.outputs.clear();
+    script.settings.mimic_vhs = true;
 
     let render_opts = crate::RenderOptions {
         font_path: None,

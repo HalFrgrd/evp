@@ -16,7 +16,7 @@ use std::{
     process::Command,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use libghostty_vt::Terminal;
 use nix::{
     errno::Errno,
@@ -71,35 +71,116 @@ impl Pty {
         shell: Option<&str>,
         env: &[(String, String)],
         size: PtySize,
+        mimic_vhs: bool,
     ) -> Result<(Self, Child)> {
+        // Resolved command list and environment variables
+        let mut shell_cmd = Vec::new();
+        let mut extra_envs = Vec::new();
+
+        if mimic_vhs {
+            let shell_name = match shell {
+                Some(raw) if !raw.trim().is_empty() => {
+                    let raw = raw.trim();
+                    let parts = parse_shell_command(raw)?;
+                    if parts.len() != 1 {
+                        bail!("shell command has more than one word: `{}`", raw);
+                    }
+                    parts[0].clone()
+                }
+                _ => "bash".to_string(),
+            };
+
+            let (cmd_args, extra_env) = match shell_name.as_str() {
+                "bash" => (
+                    vec!["bash".to_string(), "--noprofile".to_string(), "--norc".to_string(), "--login".to_string(), "+o".to_string(), "history".to_string()],
+                    vec![("PS1".to_string(), "\\[\\e[38;2;90;86;224m\\]> \\[\\e[0m\\]".to_string()), ("BASH_SILENCE_DEPRECATION_WARNING".to_string(), "1".to_string())]
+                ),
+                "zsh" => (
+                    vec!["zsh".to_string(), "--histnostore".to_string(), "--no-rcs".to_string()],
+                    vec![("PROMPT".to_string(), "%F{#5B56E0}> %F{reset_color}".to_string())]
+                ),
+                "fish" => (
+                    vec![
+                        "fish".to_string(),
+                        "--login".to_string(),
+                        "--no-config".to_string(),
+                        "--private".to_string(),
+                        "-C".to_string(), "function fish_greeting; end".to_string(),
+                        "-C".to_string(), "function fish_prompt; set_color 5B56E0; echo -n \"> \"; set_color normal; end".to_string()
+                    ],
+                    vec![]
+                ),
+                "powershell" => (
+                    vec![
+                        "powershell".to_string(),
+                        "-NoLogo".to_string(),
+                        "-NoExit".to_string(),
+                        "-NoProfile".to_string(),
+                        "-Command".to_string(),
+                        "Set-PSReadLineOption -HistorySaveStyle SaveNothing; function prompt { Write-Host '>' -NoNewLine -ForegroundColor Blue; return ' ' }".to_string()
+                    ],
+                    vec![]
+                ),
+                "pwsh" => (
+                    vec![
+                        "pwsh".to_string(),
+                        "-Login".to_string(),
+                        "-NoLogo".to_string(),
+                        "-NoExit".to_string(),
+                        "-NoProfile".to_string(),
+                        "-Command".to_string(),
+                        "Set-PSReadLineOption -HistorySaveStyle SaveNothing; Function prompt { Write-Host -ForegroundColor Blue -NoNewLine '>'; return ' ' }".to_string()
+                    ],
+                    vec![]
+                ),
+                "cmd" => (
+                    vec!["cmd.exe".to_string(), "/k".to_string(), "prompt=^> ".to_string()],
+                    vec![]
+                ),
+                "nu" => (
+                    vec!["nu".to_string(), "--execute".to_string(), "$env.PROMPT_COMMAND = {'\x1b[;38;2;91;86;224m>\x1b[m '}; $env.PROMPT_COMMAND_RIGHT = {''}".to_string()],
+                    vec![]
+                ),
+                "osh" => (
+                    vec!["osh".to_string(), "--norc".to_string()],
+                    vec![("PS1".to_string(), "\\[\\e[38;2;90;86;224m\\]> \\[\\e[0m\\]".to_string())]
+                ),
+                "xonsh" => (
+                    vec!["xonsh".to_string(), "--no-rc".to_string(), "-D".to_string(), "PROMPT=\x1b[;38;2;91;86;224m>\x1b[m ".to_string()],
+                    vec![]
+                ),
+                other => bail!("invalid shell: {other}"),
+            };
+            shell_cmd = cmd_args;
+            extra_envs = extra_env;
+        } else {
+            match shell {
+                Some(raw) if !raw.trim().is_empty() => {
+                    let parts = parse_shell_command(raw)?;
+                    if parts.is_empty() {
+                        let shell_path = default_shell_path();
+                        shell_cmd.push(shell_path.to_string_lossy().to_string());
+                    } else {
+                        shell_cmd = parts;
+                    }
+                }
+                _ => {
+                    let shell_path = default_shell_path();
+                    shell_cmd.push(shell_path.to_string_lossy().to_string());
+                }
+            }
+        }
+
         let ws = size.to_winsize();
         match unsafe { nix::pty::forkpty(&ws, None) }.context("forkpty failed")? {
             ForkptyResult::Child => {
-                let mut cmd = match shell {
-                    Some(raw) if !raw.trim().is_empty() => {
-                        let parts = parse_shell_command(raw)?;
-                        if parts.is_empty() {
-                            let shell_path = default_shell_path();
-                            let mut c = Command::new(&shell_path);
-                            c.arg0(command_arg0(shell_path.as_os_str()));
-                            c
-                        } else {
-                            let program = &parts[0];
-                            let mut c = Command::new(program);
-                            if parts.len() > 1 {
-                                c.args(&parts[1..]);
-                            }
-                            c.arg0(command_arg0(program));
-                            c
-                        }
-                    }
-                    _ => {
-                        let shell_path = default_shell_path();
-                        let mut c = Command::new(&shell_path);
-                        c.arg0(command_arg0(shell_path.as_os_str()));
-                        c
-                    }
-                };
+                let program = &shell_cmd[0];
+                let mut cmd = Command::new(program);
+                if shell_cmd.len() > 1 {
+                    cmd.args(&shell_cmd[1..]);
+                }
+                cmd.arg0(command_arg0(program));
+
                 cmd.env("TERM", "xterm-256color");
 
                 let is_utf8_locale = |val: &str| -> bool {
@@ -132,6 +213,12 @@ impl Pty {
                     cmd.env("LC_ALL", "C.UTF-8");
                 }
 
+                // Apply VHS-specific envs first
+                for (k, v) in &extra_envs {
+                    cmd.env(k, v);
+                }
+
+                // Apply user-specified envs next, which will override the VHS defaults if they match
                 for (k, v) in env {
                     cmd.env(k, v);
                 }
@@ -210,7 +297,7 @@ fn parse_shell_command(input: &str) -> Result<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_shell_command;
+    use super::*;
 
     #[test]
     fn parse_shell_command_handles_shell_forms() {
@@ -258,6 +345,7 @@ mod tests {
                 px_w: 640,
                 px_h: 380,
             },
+            false,
         )
         .unwrap();
 
@@ -285,6 +373,34 @@ mod tests {
         assert!(!output.is_empty());
         let val = output.trim();
         assert!(val.to_lowercase().contains("utf-8") || val.to_lowercase().contains("utf8"));
+    }
+
+    #[test]
+    fn test_mimic_vhs_validation() {
+        let size = PtySize {
+            cols: 80,
+            rows: 24,
+            px_w: 640,
+            px_h: 380,
+        };
+
+        // Multi-word shells are rejected
+        let res = Pty::spawn(Some("bash --norc"), &[], size, true);
+        match res {
+            Err(e) => assert!(e.to_string().contains("more than one word")),
+            _ => panic!("Expected error, got Ok"),
+        }
+
+        // Unsupported shells are rejected
+        let res = Pty::spawn(Some("unknown_shell_xyz"), &[], size, true);
+        match res {
+            Err(e) => assert!(e.to_string().contains("invalid shell")),
+            _ => panic!("Expected error, got Ok"),
+        }
+
+        // Supported shell (single-word) is accepted
+        let res = Pty::spawn(Some("bash"), &[], size, true);
+        assert!(res.is_ok());
     }
 }
 

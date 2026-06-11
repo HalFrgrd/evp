@@ -129,7 +129,7 @@ def run_evp(evp: Path, tape: Path, out_gif: Path, out_svg: Path | None = None) -
         tmp_path = Path(tmp.name)
 
     try:
-        cmd = [str(evp), str(tmp_path)]
+        cmd = [str(evp), "--mimic-vhs", str(tmp_path)]
         if out_svg:
             cmd.extend(["--output", str(out_gif), "--output", str(out_svg)])
         print(f"  evp: {shlex.join(cmd)}")

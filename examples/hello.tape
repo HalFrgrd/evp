@@ -5,7 +5,7 @@
 
 Output hello.gif
 
-Set Shell bash --norc
+Set Shell bash
 Set Width 800
 Set Height 300
 Set FontSize 20
@@ -16,8 +16,6 @@ Set Margin 0
 Set MarginFill "#6B50FF"
 Set LetterSpacing 0
 
-Env PS1 "> "
-Env PROMPT_COMMAND ""
 
 Sleep 500ms
 Type "echo Hello, evp!"

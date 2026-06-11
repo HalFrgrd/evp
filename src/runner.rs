@@ -190,8 +190,13 @@ pub fn run_with_raw_frame_consumers(
     };
 
     info!(cols = opts.cols, rows = opts.rows, "spawning pty");
-    let (pty, _child) = Pty::spawn(script.settings.shell.as_deref(), &script.env, pty_size)
-        .context("spawning pty")?;
+    let (pty, _child) = Pty::spawn(
+        script.settings.shell.as_deref(),
+        &script.env,
+        pty_size,
+        script.settings.mimic_vhs,
+    )
+    .context("spawning pty")?;
 
     let mut terminal = Terminal::new(TerminalOptions {
         cols: opts.cols,

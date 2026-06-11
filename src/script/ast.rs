@@ -58,6 +58,7 @@ pub struct Settings {
     pub wait_timeout: Duration,
     pub wait_pattern: String,
     pub loop_offset_pct: f32,
+    pub mimic_vhs: bool,
 }
 
 impl Default for Settings {
@@ -87,6 +88,7 @@ impl Default for Settings {
             wait_timeout: Duration::from_secs(15),
             wait_pattern: ">$".to_string(),
             loop_offset_pct: 0.0,
+            mimic_vhs: false,
         }
     }
 }
