@@ -1785,7 +1785,7 @@ impl SvgDoc {
         };
         if !letter_spacing_style.is_empty() || !fill_style.is_empty() {
             extra_css.push_str(&format!(
-                "text, tspan {{ {}{} }}\n",
+                "text {{ {}{} }}\n",
                 letter_spacing_style, fill_style
             ));
         }
@@ -1977,6 +1977,8 @@ pub fn optimize_tspans(elements: &mut [TextElement]) {
                     && last.end_ms == tspan.end_ms
                     && last.style_animations.is_empty()
                     && tspan.style_animations.is_empty()
+                    && last.style_history.is_empty()
+                    && tspan.style_history.is_empty()
                     && !last.text.chars().any(|c| c as u32 > 0xFFFF)
                     && !tspan.text.chars().any(|c| c as u32 > 0xFFFF)
                 {
@@ -2466,6 +2468,8 @@ fn render_from_frames(
         }
     }
 
+    cell_spans.retain(|s| s.start_ms != s.end_ms);
+
     // Split cell spans row-by-row to align typing transitions and avoid overlapping lifetimes.
     let mut split_cell_spans = Vec::new();
     for r in 0..rows {
@@ -2725,7 +2729,6 @@ fn render_from_frames(
         });
     }
 
-    // Run optimizations
     group_text_elements_by_row_and_time(&mut text_elements);
     optimize_tspans(&mut text_elements);
     optimize_bg_rects(&mut bg_rects);
@@ -3367,6 +3370,82 @@ mod tests {
             }
             _ => panic!("Expected Fg animation"),
         }
+    }
+
+    #[test]
+    fn test_optimize_tspans_dont_merge_style_history_horizontally() {
+        let mut te = TextElement {
+            y: 20,
+            y_animation: None,
+            start_ms: 20,
+            end_ms: 200,
+            tspans: vec![
+                TSpan {
+                    x_coords: vec![20.0],
+                    text: "-".to_string(),
+                    fg: [255, 255, 255],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 20,
+                    end_ms: 200,
+                    style_animations: Vec::new(),
+                    style_history: vec![
+                        StyleKeyframe {
+                            start_ms: 20,
+                            fg: [255, 255, 255],
+                            bold: false,
+                            italic: false,
+                            underline: false,
+                            strikethrough: false,
+                        },
+                        StyleKeyframe {
+                            start_ms: 100,
+                            fg: [255, 255, 255],
+                            bold: true,
+                            italic: false,
+                            underline: true,
+                            strikethrough: false,
+                        },
+                    ],
+                },
+                TSpan {
+                    x_coords: vec![30.0],
+                    text: "b".to_string(),
+                    fg: [255, 255, 255],
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    strikethrough: false,
+                    is_box: false,
+                    scale_y: 1.0,
+                    cell_center_y_offset: 0.0,
+                    char_center_y_offset: 0.0,
+                    cell_w: 10,
+                    cell_h: 20,
+                    baseline: 15,
+                    letter_spacing: 0.0,
+                    start_ms: 20,
+                    end_ms: 200,
+                    style_animations: Vec::new(),
+                    style_history: Vec::new(),
+                },
+            ],
+        };
+        optimize_tspans(std::slice::from_mut(&mut te));
+        // Under the corrected logic, they should not be horizontally merged.
+        assert_eq!(te.tspans.len(), 2);
+        assert_eq!(te.tspans[0].text, "-");
+        assert_eq!(te.tspans[1].text, "b");
     }
 
     #[test]
