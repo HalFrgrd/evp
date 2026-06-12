@@ -306,7 +306,10 @@ pub fn run_with_raw_frame_consumers(
 
         // 3 & 4. Process events and capture frames chronologically up to `now`.
         loop {
-            let next_event_at = if wait_state.is_none() && event_idx < timeline.len() && timeline[event_idx].at <= now {
+            let next_event_at = if wait_state.is_none()
+                && event_idx < timeline.len()
+                && timeline[event_idx].at <= now
+            {
                 Some(timeline[event_idx].at)
             } else {
                 None

@@ -1397,7 +1397,9 @@ pub fn optimize_tspans(elements: &mut [TextElement]) {
         for tspan in std::mem::take(&mut te.tspans) {
             if let Some(last) = merged.last_mut() {
                 // Scenario A: Horizontal merge (same timeframe, adjacent x, same styling)
-                if last.fg == tspan.fg
+                if !last.is_box
+                    && !tspan.is_box
+                    && last.fg == tspan.fg
                     && last.bold == tspan.bold
                     && last.italic == tspan.italic
                     && last.underline == tspan.underline
@@ -1420,7 +1422,9 @@ pub fn optimize_tspans(elements: &mut [TextElement]) {
                 }
 
                 // Scenario B: Temporal merge (same coordinates/text, consecutive times, differing in styles/color)
-                if last.x_coords == tspan.x_coords
+                if !last.is_box
+                    && !tspan.is_box
+                    && last.x_coords == tspan.x_coords
                     && last.text == tspan.text
                     && last.is_box == tspan.is_box
                     && last.scale_y == tspan.scale_y
@@ -2621,27 +2625,30 @@ mod tests {
             ],
         };
 
-        // First, verify that optimize_tspans correctly merges them
+        // First, verify that optimize_tspans does NOT merge box drawing characters
         optimize_tspans(std::slice::from_mut(&mut te));
-        assert_eq!(te.tspans.len(), 1);
-        assert_eq!(te.tspans[0].text, "╭─╮");
-        assert_eq!(te.tspans[0].x_coords, vec![100.0, 110.0, 120.0]);
+        assert_eq!(te.tspans.len(), 3);
+        assert_eq!(te.tspans[0].text, "╭");
+        assert_eq!(te.tspans[1].text, "─");
+        assert_eq!(te.tspans[2].text, "╮");
 
         // Next, render to SVG string and inspect it
         let svg = te.to_svg_string(&HashMap::new(), 1000, 0.0, None);
 
-        // 1. The <text> wrapper element must have textLength="30" (120 - 100 + 10 = 30)
+        // The SVG should contain three individual text tags, each with textLength="10"
         assert!(
-            svg.contains(r#"textLength="30""#),
-            "SVG does not contain correct textLength: {}",
+            svg.contains(r#"x="100" y="20""#) && svg.contains(r#"textLength="10""#),
+            "SVG does not contain correct text tag for col 0: {}",
             svg
         );
-
-        // 2. The inner <tspan> must NOT have optimized single x="100", but instead
-        // the full array of coordinates x="100 110 120"
         assert!(
-            svg.contains(r#"x="100 110 120""#),
-            "SVG does not contain explicit x coords: {}",
+            svg.contains(r#"x="110" y="20""#) && svg.contains(r#"textLength="10""#),
+            "SVG does not contain correct text tag for col 1: {}",
+            svg
+        );
+        assert!(
+            svg.contains(r#"x="120" y="20""#) && svg.contains(r#"textLength="10""#),
+            "SVG does not contain correct text tag for col 2: {}",
             svg
         );
     }
@@ -3228,4 +3235,3 @@ mod tests {
         assert_eq!(te.tspans[2].text, "world\n");
     }
 }
-
