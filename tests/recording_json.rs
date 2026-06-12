@@ -498,3 +498,44 @@ Sleep 200ms
     );
     let _ = haystack; // used above
 }
+
+/// Ensure that no frames captured before the Hide period is over (which ends
+/// with Show) contain any of the content typed/produced during the hidden period.
+#[test]
+fn hide_show_no_leak_before_show() {
+    let tape = r#"
+Output out.gif
+Set Width 800
+Set Height 300
+Set FontSize 20
+Set TypingSpeed 10ms
+Set Framerate 30
+Set Shell /bin/sh
+Sleep 200ms
+Hide
+Sleep 1s
+Type "echo should-be-hidden"
+Enter
+Sleep 500ms
+Show
+Sleep 200ms
+"#;
+
+    let rec = record(tape);
+    // The pre-hide sleep is 200ms, so Hide executes at 200ms.
+    // Any frame at t < 200ms must not contain the text "should-be-hidden".
+    for i in 0..rec.frames.len() {
+        let t = rec.frames[i].t_ms();
+        if t < 200 {
+            let lines = common::rows_as_strings(&rec, i);
+            let frame_text = lines.join("\n");
+            assert!(
+                !frame_text.contains("should-be-hidden"),
+                "frame at {}ms leaked hidden text: {:?}",
+                t,
+                frame_text
+            );
+        }
+    }
+}
+

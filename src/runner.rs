@@ -304,37 +304,104 @@ pub fn run_with_raw_frame_consumers(
             }
         }
 
-        // 3. Advance through events whose deadline has passed.
-        while wait_state.is_none() && event_idx < timeline.len() && timeline[event_idx].at <= now {
-            let scheduled = &timeline[event_idx];
-            event_idx += 1;
-            trace!(
-                event_idx,
-                at_ms = scheduled.at.as_millis(),
-                now_ms = now.as_millis(),
-                event = ?scheduled.event,
-                "dispatching scheduled event"
-            );
-            let was_hidden = hidden;
-            execute_event(
-                &scheduled.event,
-                &pty,
-                &mut translator,
-                &terminal,
-                &mut hidden,
-                &mut wait_state,
-                &mut clipboard,
-                &mut pending_screenshots,
-                start,
-            )?;
+        // 3 & 4. Process events and capture frames chronologically up to `now`.
+        loop {
+            let next_event_at = if wait_state.is_none() && event_idx < timeline.len() && timeline[event_idx].at <= now {
+                Some(timeline[event_idx].at)
+            } else {
+                None
+            };
 
-            if !was_hidden && hidden {
-                hidden_started_at = Some(now);
-            }
-            if was_hidden && !hidden {
-                if let Some(hidden_start) = hidden_started_at.take() {
-                    skipped_recording_time += now.saturating_sub(hidden_start);
+            let next_frame_due = next_frame_at <= now && next_frame_at <= total_duration;
+
+            let process_event = match (next_event_at, next_frame_due) {
+                (Some(event_at), true) => event_at <= next_frame_at,
+                (Some(_), false) => true,
+                (None, true) => false,
+                (None, false) => break,
+            };
+
+            if process_event {
+                // Execute event
+                let scheduled = &timeline[event_idx];
+                event_idx += 1;
+                trace!(
+                    event_idx,
+                    at_ms = scheduled.at.as_millis(),
+                    now_ms = now.as_millis(),
+                    event = ?scheduled.event,
+                    "dispatching scheduled event"
+                );
+                let was_hidden = hidden;
+                execute_event(
+                    &scheduled.event,
+                    &pty,
+                    &mut translator,
+                    &terminal,
+                    &mut hidden,
+                    &mut wait_state,
+                    &mut clipboard,
+                    &mut pending_screenshots,
+                    start,
+                )?;
+
+                if !was_hidden && hidden {
+                    hidden_started_at = Some(now);
                 }
+                if was_hidden && !hidden {
+                    if let Some(hidden_start) = hidden_started_at.take() {
+                        skipped_recording_time += now.saturating_sub(hidden_start);
+                    }
+                }
+            } else {
+                // Capture frame
+                if !hidden || !pending_screenshots.is_empty() {
+                    let recorded_at = next_frame_at.saturating_sub(skipped_recording_time);
+                    let (frame, raw_cursor_pos) = capture(
+                        &mut render_state,
+                        &mut row_it,
+                        &mut cell_it,
+                        &mut terminal,
+                        recorded_at,
+                        opts.cols,
+                        opts.rows,
+                        script.settings.cursor_blink,
+                        last_cursor_moved_at,
+                        script.settings.theme.cursor_accent_rgb().ok().flatten(),
+                    )?;
+                    if let Some(prev) = prev_cursor_capture {
+                        if raw_cursor_pos != prev {
+                            last_cursor_moved_at = Some(recorded_at);
+                        }
+                    }
+                    prev_cursor_capture = Some(raw_cursor_pos);
+                    if !pending_screenshots.is_empty() {
+                        let shots = std::mem::take(&mut pending_screenshots);
+                        for path in shots {
+                            write_screenshot(&frame, script, &path)?;
+                        }
+                    }
+                    if hidden {
+                        next_frame_at += frame_interval;
+                        continue;
+                    }
+                    expected_frames += 1;
+                    captured_frames += 1;
+                    for consumer in &raw_frame_consumers {
+                        let consumer_len = consumer.len();
+                        if consumer_len > max_raw_frame_consumer_queue_len {
+                            max_raw_frame_consumer_queue_len = consumer_len;
+                        }
+                        match consumer.try_send(frame.clone()) {
+                            Ok(()) => {}
+                            Err(TrySendError::Full(_)) => {
+                                raw_frame_consumer_dropped_frames += 1;
+                            }
+                            Err(TrySendError::Disconnected(_)) => {}
+                        }
+                    }
+                }
+                next_frame_at += frame_interval;
             }
         }
 
@@ -355,64 +422,6 @@ pub fn run_with_raw_frame_consumers(
                 );
                 next_decile += 10;
             }
-        }
-
-        // 4. Capture frames whose deadline has passed.
-        while next_frame_at <= now && next_frame_at <= total_duration {
-            if !hidden || !pending_screenshots.is_empty() {
-                let recorded_at = next_frame_at.saturating_sub(skipped_recording_time);
-                let (frame, raw_cursor_pos) = capture(
-                    &mut render_state,
-                    &mut row_it,
-                    &mut cell_it,
-                    &mut terminal,
-                    // Compress timeline by subtracting wall-clock time spent
-                    // hidden so rendered output doesn't stall across Hide/Show.
-                    recorded_at,
-                    opts.cols,
-                    opts.rows,
-                    script.settings.cursor_blink,
-                    last_cursor_moved_at,
-                    script.settings.theme.cursor_accent_rgb().ok().flatten(),
-                )?;
-                // Update cursor-movement tracking: any change in cursor
-                // state (moved, appeared, or disappeared) counts as
-                // "movement" and resets the blink-restart timer. The very
-                // first captured frame is excluded from this comparison
-                // because there is no prior frame to compare against.
-                if let Some(prev) = prev_cursor_capture {
-                    if raw_cursor_pos != prev {
-                        last_cursor_moved_at = Some(recorded_at);
-                    }
-                }
-                prev_cursor_capture = Some(raw_cursor_pos);
-                if !pending_screenshots.is_empty() {
-                    let shots = std::mem::take(&mut pending_screenshots);
-                    for path in shots {
-                        write_screenshot(&frame, script, &path)?;
-                    }
-                }
-                if hidden {
-                    next_frame_at += frame_interval;
-                    continue;
-                }
-                expected_frames += 1;
-                captured_frames += 1;
-                for consumer in &raw_frame_consumers {
-                    let consumer_len = consumer.len();
-                    if consumer_len > max_raw_frame_consumer_queue_len {
-                        max_raw_frame_consumer_queue_len = consumer_len;
-                    }
-                    match consumer.try_send(frame.clone()) {
-                        Ok(()) => {}
-                        Err(TrySendError::Full(_)) => {
-                            raw_frame_consumer_dropped_frames += 1;
-                        }
-                        Err(TrySendError::Disconnected(_)) => {}
-                    }
-                }
-            }
-            next_frame_at += frame_interval;
         }
 
         // 5. Exit when both the script and the recording window are done.
