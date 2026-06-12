@@ -584,6 +584,7 @@ impl TSpan {
         total_ms: u32,
         default_letter_spacing: f32,
         default_fg: Option<[u8; 3]>,
+        make_transparent: bool,
     ) -> String {
         let x_str = self
             .x_coords
@@ -598,13 +599,20 @@ impl TSpan {
             })
             .collect::<Vec<_>>()
             .join(" ");
-        let style = if (self.letter_spacing - default_letter_spacing).abs() < 1e-5 {
+        let mut styles = Vec::new();
+        if (self.letter_spacing - default_letter_spacing).abs() >= 1e-5 {
+            styles.push(format!(
+                "letter-spacing: {}px",
+                format_seconds(self.letter_spacing)
+            ));
+        }
+        if make_transparent {
+            styles.push("fill-opacity: 0".to_string());
+        }
+        let style = if styles.is_empty() {
             String::new()
         } else {
-            format!(
-                r#" style="letter-spacing: {}px;""#,
-                format_seconds(self.letter_spacing)
-            )
+            format!(r#" style="{}""#, styles.join("; "))
         };
 
         let is_tspan_static = is_static(self.start_ms, self.end_ms, total_ms);
@@ -695,6 +703,548 @@ impl YAnimation {
             begin = format_begin(self.begin_ms),
         )
     }
+
+    fn to_svg_transform_animation(&self, cell_x: f32, baseline: u32) -> String {
+        let values_str = self
+            .segments
+            .iter()
+            .map(|(y, _)| format!("{lx},{ly}", lx = cell_x, ly = *y as f32 - baseline as f32))
+            .collect::<Vec<_>>()
+            .join(";");
+        let key_times_str = self
+            .segments
+            .iter()
+            .map(|(_, start)| format_key_time((start - self.begin_ms) as f32 / self.dur_ms as f32))
+            .collect::<Vec<_>>()
+            .join(";");
+        format!(
+            r#"<animateTransform attributeName="transform" type="translate" calcMode="discrete" values="{values}" keyTimes="{key_times}" dur="{dur}" begin="{begin}" fill="freeze"/>"#,
+            values = values_str,
+            key_times = key_times_str,
+            dur = format_time(self.dur_ms),
+            begin = format_begin(self.begin_ms),
+        )
+    }
+}
+
+fn get_box_drawing_path(
+    ch: char,
+    cell_w: f32,
+    cell_h: f32,
+    lw: f32,
+    hw: f32,
+    d_off: f32,
+    r: f32,
+) -> Option<String> {
+    let cx = cell_w / 2.0;
+    let cy = cell_h / 2.0;
+    let rx = cell_w;
+    let by = cell_h;
+
+    match ch {
+        // --- Single lines ---
+        '─' => Some(format!(
+            r#"<path d="M 0 {cy} H {rx}" fill="none" stroke-width="{lw}" stroke-linecap="butt"/>"#
+        )),
+        '━' => Some(format!(
+            r#"<path d="M 0 {cy} H {rx}" fill="none" stroke-width="{hw}" stroke-linecap="butt"/>"#
+        )),
+        '│' => Some(format!(
+            r#"<path d="M {cx} 0 V {by}" fill="none" stroke-width="{lw}" stroke-linecap="butt"/>"#
+        )),
+        '┃' => Some(format!(
+            r#"<path d="M {cx} 0 V {by}" fill="none" stroke-width="{hw}" stroke-linecap="butt"/>"#
+        )),
+
+        // --- Dashed lines ---
+        '┄' => Some(format!(
+            r#"<path d="M 0 {cy} H {rx}" fill="none" stroke-width="{lw}" stroke-dasharray="3,3" stroke-linecap="butt"/>"#
+        )),
+        '┅' => Some(format!(
+            r#"<path d="M 0 {cy} H {rx}" fill="none" stroke-width="{hw}" stroke-dasharray="3,3" stroke-linecap="butt"/>"#
+        )),
+        '┆' => Some(format!(
+            r#"<path d="M {cx} 0 V {by}" fill="none" stroke-width="{lw}" stroke-dasharray="3,3" stroke-linecap="butt"/>"#
+        )),
+        '┇' => Some(format!(
+            r#"<path d="M {cx} 0 V {by}" fill="none" stroke-width="{hw}" stroke-dasharray="3,3" stroke-linecap="butt"/>"#
+        )),
+        '┈' => Some(format!(
+            r#"<path d="M 0 {cy} H {rx}" fill="none" stroke-width="{lw}" stroke-dasharray="2,2" stroke-linecap="butt"/>"#
+        )),
+        '┉' => Some(format!(
+            r#"<path d="M 0 {cy} H {rx}" fill="none" stroke-width="{hw}" stroke-dasharray="2,2" stroke-linecap="butt"/>"#
+        )),
+        '┊' => Some(format!(
+            r#"<path d="M {cx} 0 V {by}" fill="none" stroke-width="{lw}" stroke-dasharray="2,2" stroke-linecap="butt"/>"#
+        )),
+        '┋' => Some(format!(
+            r#"<path d="M {cx} 0 V {by}" fill="none" stroke-width="{hw}" stroke-dasharray="2,2" stroke-linecap="butt"/>"#
+        )),
+
+        // --- Corners (Light) ---
+        '┌' => Some(format!(
+            r#"<path d="M {rx} {cy} H {cx} V {by}" fill="none" stroke-width="{lw}" stroke-linejoin="miter"/>"#
+        )),
+        '┐' => Some(format!(
+            r#"<path d="M 0 {cy} H {cx} V {by}" fill="none" stroke-width="{lw}" stroke-linejoin="miter"/>"#
+        )),
+        '└' => Some(format!(
+            r#"<path d="M {rx} {cy} H {cx} V 0" fill="none" stroke-width="{lw}" stroke-linejoin="miter"/>"#
+        )),
+        '┘' => Some(format!(
+            r#"<path d="M 0 {cy} H {cx} V 0" fill="none" stroke-width="{lw}" stroke-linejoin="miter"/>"#
+        )),
+
+        // --- Corners (Heavy) ---
+        '┏' => Some(format!(
+            r#"<path d="M {rx} {cy} H {cx} V {by}" fill="none" stroke-width="{hw}" stroke-linejoin="miter"/>"#
+        )),
+        '┓' => Some(format!(
+            r#"<path d="M 0 {cy} H {cx} V {by}" fill="none" stroke-width="{hw}" stroke-linejoin="miter"/>"#
+        )),
+        '┗' => Some(format!(
+            r#"<path d="M {rx} {cy} H {cx} V 0" fill="none" stroke-width="{hw}" stroke-linejoin="miter"/>"#
+        )),
+        '┛' => Some(format!(
+            r#"<path d="M 0 {cy} H {cx} V 0" fill="none" stroke-width="{hw}" stroke-linejoin="miter"/>"#
+        )),
+
+        // --- Corners (Mixed Down/Right) ---
+        '┍' => Some(format!(
+            r#"<path d="M {rx} {cy} H {cx}" fill="none" stroke-width="{hw}"/>
+               <path d="M {cx} {cy} V {by}" fill="none" stroke-width="{lw}"/>"#
+        )),
+        '┎' => Some(format!(
+            r#"<path d="M {rx} {cy} H {cx}" fill="none" stroke-width="{lw}"/>
+               <path d="M {cx} {cy} V {by}" fill="none" stroke-width="{hw}"/>"#
+        )),
+        // --- Corners (Mixed Down/Left) ---
+        '┑' => Some(format!(
+            r#"<path d="M 0 {cy} H {cx}" fill="none" stroke-width="{hw}"/>
+               <path d="M {cx} {cy} V {by}" fill="none" stroke-width="{lw}"/>"#
+        )),
+        '┒' => Some(format!(
+            r#"<path d="M 0 {cy} H {cx}" fill="none" stroke-width="{lw}"/>
+               <path d="M {cx} {cy} V {by}" fill="none" stroke-width="{hw}"/>"#
+        )),
+        // --- Corners (Mixed Up/Right) ---
+        '┕' => Some(format!(
+            r#"<path d="M {rx} {cy} H {cx}" fill="none" stroke-width="{hw}"/>
+               <path d="M {cx} {cy} V 0" fill="none" stroke-width="{lw}"/>"#
+        )),
+        '┖' => Some(format!(
+            r#"<path d="M {rx} {cy} H {cx}" fill="none" stroke-width="{lw}"/>
+               <path d="M {cx} {cy} V 0" fill="none" stroke-width="{hw}"/>"#
+        )),
+        // --- Corners (Mixed Up/Left) ---
+        '┙' => Some(format!(
+            r#"<path d="M 0 {cy} H {cx}" fill="none" stroke-width="{hw}"/>
+               <path d="M {cx} {cy} V 0" fill="none" stroke-width="{lw}"/>"#
+        )),
+        '┚' => Some(format!(
+            r#"<path d="M 0 {cy} H {cx}" fill="none" stroke-width="{lw}"/>
+               <path d="M {cx} {cy} V 0" fill="none" stroke-width="{hw}"/>"#
+        )),
+
+        // --- Rounded Corners ---
+        '╭' => Some(format!(
+            r#"<path d="M {rx} {cy} H {cx_r} Q {cx} {cy} {cx} {cy_r} V {by}" fill="none" stroke-width="{lw}" stroke-linejoin="round"/>"#,
+            cx_r = cx + r,
+            cy_r = cy + r
+        )),
+        '╮' => Some(format!(
+            r#"<path d="M 0 {cy} H {cx_r} Q {cx} {cy} {cx} {cy_r} V {by}" fill="none" stroke-width="{lw}" stroke-linejoin="round"/>"#,
+            cx_r = cx - r,
+            cy_r = cy + r
+        )),
+        '╯' => Some(format!(
+            r#"<path d="M 0 {cy} H {cx_r} Q {cx} {cy} {cx} {cy_r} V 0" fill="none" stroke-width="{lw}" stroke-linejoin="round"/>"#,
+            cx_r = cx - r,
+            cy_r = cy - r
+        )),
+        '╰' => Some(format!(
+            r#"<path d="M {rx} {cy} H {cx_r} Q {cx} {cy} {cx} {cy_r} V 0" fill="none" stroke-width="{lw}" stroke-linejoin="round"/>"#,
+            cx_r = cx + r,
+            cy_r = cy - r
+        )),
+
+        // --- Tees (Light) ---
+        '├' => Some(format!(
+            r#"<path d="M {cx} 0 V {by} M {cx} {cy} H {rx}" fill="none" stroke-width="{lw}"/>"#
+        )),
+        '┤' => Some(format!(
+            r#"<path d="M {cx} 0 V {by} M {cx} {cy} H 0" fill="none" stroke-width="{lw}"/>"#
+        )),
+        '┬' => Some(format!(
+            r#"<path d="M 0 {cy} H {rx} M {cx} {cy} V {by}" fill="none" stroke-width="{lw}"/>"#
+        )),
+        '┴' => Some(format!(
+            r#"<path d="M 0 {cy} H {rx} M {cx} {cy} V 0" fill="none" stroke-width="{lw}"/>"#
+        )),
+        '┼' => Some(format!(
+            r#"<path d="M 0 {cy} H {rx} M {cx} 0 V {by}" fill="none" stroke-width="{lw}"/>"#
+        )),
+
+        // --- Tees (Heavy) ---
+        '┣' => Some(format!(
+            r#"<path d="M {cx} 0 V {by} M {cx} {cy} H {rx}" fill="none" stroke-width="{hw}"/>"#
+        )),
+        '┫' => Some(format!(
+            r#"<path d="M {cx} 0 V {by} M {cx} {cy} H 0" fill="none" stroke-width="{hw}"/>"#
+        )),
+        '┳' => Some(format!(
+            r#"<path d="M 0 {cy} H {rx} M {cx} {cy} V {by}" fill="none" stroke-width="{hw}"/>"#
+        )),
+        '┻' => Some(format!(
+            r#"<path d="M 0 {cy} H {rx} M {cx} {cy} V 0" fill="none" stroke-width="{hw}"/>"#
+        )),
+        '╋' => Some(format!(
+            r#"<path d="M 0 {cy} H {rx} M {cx} 0 V {by}" fill="none" stroke-width="{hw}"/>"#
+        )),
+
+        // --- Mixed Tees (Light/Heavy/Vertical/Horizontal) ---
+        '┠' => Some(format!(
+            r#"<path d="M {cx} 0 V {by}" fill="none" stroke-width="{hw}"/>
+               <path d="M {cx} {cy} H {rx}" fill="none" stroke-width="{lw}"/>"#
+        )),
+        '┨' => Some(format!(
+            r#"<path d="M {cx} 0 V {by}" fill="none" stroke-width="{hw}"/>
+               <path d="M {cx} {cy} H 0" fill="none" stroke-width="{lw}"/>"#
+        )),
+        '┰' => Some(format!(
+            r#"<path d="M 0 {cy} H {rx}" fill="none" stroke-width="{hw}"/>
+               <path d="M {cx} {cy} V {by}" fill="none" stroke-width="{lw}"/>"#
+        )),
+        '┸' => Some(format!(
+            r#"<path d="M 0 {cy} H {rx}" fill="none" stroke-width="{hw}"/>
+               <path d="M {cx} {cy} V 0" fill="none" stroke-width="{lw}"/>"#
+        )),
+
+        '┝' => Some(format!(
+            r#"<path d="M {cx} 0 V {by}" fill="none" stroke-width="{lw}"/>
+               <path d="M {cx} {cy} H {rx}" fill="none" stroke-width="{hw}"/>"#
+        )),
+        '┥' => Some(format!(
+            r#"<path d="M {cx} 0 V {by}" fill="none" stroke-width="{lw}"/>
+               <path d="M {cx} {cy} H 0" fill="none" stroke-width="{hw}"/>"#
+        )),
+        '┯' => Some(format!(
+            r#"<path d="M 0 {cy} H {rx}" fill="none" stroke-width="{lw}"/>
+               <path d="M {cx} {cy} V {by}" fill="none" stroke-width="{hw}"/>"#
+        )),
+        '┷' => Some(format!(
+            r#"<path d="M 0 {cy} H {rx}" fill="none" stroke-width="{lw}"/>
+               <path d="M {cx} {cy} V 0" fill="none" stroke-width="{hw}"/>"#
+        )),
+
+        // --- Double lines ---
+        '═' => Some(format!(
+            r#"<path d="M 0 {y1} H {rx} M 0 {y2} H {rx}" fill="none" stroke-width="{lw}"/>"#,
+            y1 = cy - d_off,
+            y2 = cy + d_off,
+        )),
+        '║' => Some(format!(
+            r#"<path d="M {x1} 0 V {by} M {x2} 0 V {by}" fill="none" stroke-width="{lw}"/>"#,
+            x1 = cx - d_off,
+            x2 = cx + d_off,
+        )),
+        '╔' => Some(format!(
+            r#"<path d="M {rx} {y1} H {x1} V {by}" fill="none" stroke-width="{lw}"/>
+               <path d="M {rx} {y2} H {x2} V {by}" fill="none" stroke-width="{lw}"/>"#,
+            y1 = cy - d_off,
+            y2 = cy + d_off,
+            x1 = cx - d_off,
+            x2 = cx + d_off,
+        )),
+        '╗' => Some(format!(
+            r#"<path d="M 0 {y1} H {x2} V {by}" fill="none" stroke-width="{lw}"/>
+               <path d="M 0 {y2} H {x1} V {by}" fill="none" stroke-width="{lw}"/>"#,
+            y1 = cy - d_off,
+            y2 = cy + d_off,
+            x1 = cx - d_off,
+            x2 = cx + d_off,
+        )),
+        '╚' => Some(format!(
+            r#"<path d="M {rx} {y2} H {x1} V 0" fill="none" stroke-width="{lw}"/>
+               <path d="M {rx} {y1} H {x2} V 0" fill="none" stroke-width="{lw}"/>"#,
+            y1 = cy - d_off,
+            y2 = cy + d_off,
+            x1 = cx - d_off,
+            x2 = cx + d_off,
+        )),
+        '╝' => Some(format!(
+            r#"<path d="M 0 {y2} H {x2} V 0" fill="none" stroke-width="{lw}"/>
+               <path d="M 0 {y1} H {x1} V 0" fill="none" stroke-width="{lw}"/>"#,
+            y1 = cy - d_off,
+            y2 = cy + d_off,
+            x1 = cx - d_off,
+            x2 = cx + d_off,
+        )),
+        '╠' => Some(format!(
+            r#"<path d="M {x1} 0 V {by}" fill="none" stroke-width="{lw}"/>
+               <path d="M {x2} 0 V {y1} H {rx}" fill="none" stroke-width="{lw}"/>
+               <path d="M {x2} {by} V {y2} H {rx}" fill="none" stroke-width="{lw}"/>"#,
+            y1 = cy - d_off,
+            y2 = cy + d_off,
+            x1 = cx - d_off,
+            x2 = cx + d_off,
+        )),
+        '╣' => Some(format!(
+            r#"<path d="M {x2} 0 V {by}" fill="none" stroke-width="{lw}"/>
+               <path d="M {x1} 0 V {y1} H 0" fill="none" stroke-width="{lw}"/>
+               <path d="M {x1} {by} V {y2} H 0" fill="none" stroke-width="{lw}"/>"#,
+            y1 = cy - d_off,
+            y2 = cy + d_off,
+            x1 = cx - d_off,
+            x2 = cx + d_off,
+        )),
+        '╦' => Some(format!(
+            r#"<path d="M 0 {y1} H {rx}" fill="none" stroke-width="{lw}"/>
+               <path d="M 0 {y2} H {x1} V {by}" fill="none" stroke-width="{lw}"/>
+               <path d="M {rx} {y2} H {x2} V {by}" fill="none" stroke-width="{lw}"/>"#,
+            y1 = cy - d_off,
+            y2 = cy + d_off,
+            x1 = cx - d_off,
+            x2 = cx + d_off,
+        )),
+        '╩' => Some(format!(
+            r#"<path d="M 0 {y2} H {rx}" fill="none" stroke-width="{lw}"/>
+               <path d="M 0 {y1} H {x1} V 0" fill="none" stroke-width="{lw}"/>
+               <path d="M {rx} {y1} H {x2} V 0" fill="none" stroke-width="{lw}"/>"#,
+            y1 = cy - d_off,
+            y2 = cy + d_off,
+            x1 = cx - d_off,
+            x2 = cx + d_off,
+        )),
+        '╬' => Some(format!(
+            r#"<path d="M 0 {y1} H {x1} V 0" fill="none" stroke-width="{lw}"/>
+               <path d="M {rx} {y1} H {x2} V 0" fill="none" stroke-width="{lw}"/>
+               <path d="M 0 {y2} H {x1} V {by}" fill="none" stroke-width="{lw}"/>
+               <path d="M {rx} {y2} H {x2} V {by}" fill="none" stroke-width="{lw}"/>"#,
+            y1 = cy - d_off,
+            y2 = cy + d_off,
+            x1 = cx - d_off,
+            x2 = cx + d_off,
+        )),
+
+        // --- Block Elements ---
+        '█' => Some(format!(
+            r#"<rect x="0" y="0" width="{cell_w}" height="{cell_h}" stroke="none"/>"#
+        )),
+        '▀' => Some(format!(
+            r#"<rect x="0" y="0" width="{cell_w}" height="{y_half}" stroke="none"/>"#,
+            y_half = cell_h / 2.0
+        )),
+        '▄' => Some(format!(
+            r#"<rect x="0" y="{y_half}" width="{cell_w}" height="{y_half}" stroke="none"/>"#,
+            y_half = cell_h / 2.0
+        )),
+        '▌' => Some(format!(
+            r#"<rect x="0" y="0" width="{x_half}" height="{cell_h}" stroke="none"/>"#,
+            x_half = cell_w / 2.0
+        )),
+        '▐' => Some(format!(
+            r#"<rect x="{x_half}" y="0" width="{x_half}" height="{cell_h}" stroke="none"/>"#,
+            x_half = cell_w / 2.0
+        )),
+
+        // Fractional blocks (Lower)
+        ' ' => Some(format!(
+            r#"<rect x="0" y="{y}" width="{cell_w}" height="{h}" stroke="none"/>"#,
+            y = cell_h - cell_h / 8.0,
+            h = cell_h / 8.0
+        )),
+        '▂' => Some(format!(
+            r#"<rect x="0" y="{y}" width="{cell_w}" height="{h}" stroke="none"/>"#,
+            y = cell_h - cell_h / 4.0,
+            h = cell_h / 4.0
+        )),
+        '▃' => Some(format!(
+            r#"<rect x="0" y="{y}" width="{cell_w}" height="{h}" stroke="none"/>"#,
+            y = cell_h - 3.0 * cell_h / 8.0,
+            h = 3.0 * cell_h / 8.0
+        )),
+        '▅' => Some(format!(
+            r#"<rect x="0" y="{y}" width="{cell_w}" height="{h}" stroke="none"/>"#,
+            y = cell_h - 5.0 * cell_h / 8.0,
+            h = 5.0 * cell_h / 8.0
+        )),
+        '▆' => Some(format!(
+            r#"<rect x="0" y="{y}" width="{cell_w}" height="{h}" stroke="none"/>"#,
+            y = cell_h - 3.0 * cell_h / 4.0,
+            h = 3.0 * cell_h / 4.0
+        )),
+        '▇' => Some(format!(
+            r#"<rect x="0" y="{y}" width="{cell_w}" height="{h}" stroke="none"/>"#,
+            y = cell_h - 7.0 * cell_h / 8.0,
+            h = 7.0 * cell_h / 8.0
+        )),
+
+        // Fractional blocks (Left)
+        '▏' => Some(format!(
+            r#"<rect x="0" y="0" width="{w}" height="{cell_h}" stroke="none"/>"#,
+            w = cell_w / 8.0
+        )),
+        '▎' => Some(format!(
+            r#"<rect x="0" y="0" width="{w}" height="{cell_h}" stroke="none"/>"#,
+            w = cell_w / 4.0
+        )),
+        '▍' => Some(format!(
+            r#"<rect x="0" y="0" width="{w}" height="{cell_h}" stroke="none"/>"#,
+            w = 3.0 * cell_w / 8.0
+        )),
+        '▋' => Some(format!(
+            r#"<rect x="0" y="0" width="{w}" height="{cell_h}" stroke="none"/>"#,
+            w = 5.0 * cell_w / 8.0
+        )),
+        '▊' => Some(format!(
+            r#"<rect x="0" y="0" width="{w}" height="{cell_h}" stroke="none"/>"#,
+            w = 3.0 * cell_w / 4.0
+        )),
+        '▉' => Some(format!(
+            r#"<rect x="0" y="0" width="{w}" height="{cell_h}" stroke="none"/>"#,
+            w = 7.0 * cell_w / 8.0
+        )),
+
+        // Upper fractional
+        '▔' => Some(format!(
+            r#"<rect x="0" y="0" width="{cell_w}" height="{h}" stroke="none"/>"#,
+            h = cell_h / 8.0
+        )),
+
+        // Right fractional
+        '▕' => Some(format!(
+            r#"<rect x="{x}" y="0" width="{w}" height="{cell_h}" stroke="none"/>"#,
+            x = cell_w - cell_w / 8.0,
+            w = cell_w / 8.0
+        )),
+
+        // Quadrants
+        '▖' => Some(format!(
+            r#"<rect x="0" y="{cy}" width="{cx}" height="{cy}" stroke="none"/>"#
+        )),
+        '▗' => Some(format!(
+            r#"<rect x="{cx}" y="{cy}" width="{cx}" height="{cy}" stroke="none"/>"#
+        )),
+        '▘' => Some(format!(
+            r#"<rect x="0" y="0" width="{cx}" height="{cy}" stroke="none"/>"#
+        )),
+        '▝' => Some(format!(
+            r#"<rect x="{cx}" y="0" width="{cx}" height="{cy}" stroke="none"/>"#
+        )),
+        '▙' => Some(format!(
+            r#"<rect x="0" y="0" width="{cx}" height="{cy}" stroke="none"/>
+               <rect x="0" y="{cy}" width="{cell_w}" height="{cy}" stroke="none"/>"#
+        )),
+        '▚' => Some(format!(
+            r#"<rect x="0" y="0" width="{cx}" height="{cy}" stroke="none"/>
+               <rect x="{cx}" y="{cy}" width="{cx}" height="{cy}" stroke="none"/>"#
+        )),
+        '▛' => Some(format!(
+            r#"<rect x="0" y="0" width="{cell_w}" height="{cy}" stroke="none"/>
+               <rect x="0" y="{cy}" width="{cx}" height="{cy}" stroke="none"/>"#
+        )),
+        '▜' => Some(format!(
+            r#"<rect x="0" y="0" width="{cell_w}" height="{cy}" stroke="none"/>
+               <rect x="{cx}" y="{cy}" width="{cx}" height="{cy}" stroke="none"/>"#
+        )),
+        '▞' => Some(format!(
+            r#"<rect x="{cx}" y="0" width="{cx}" height="{cy}" stroke="none"/>
+               <rect x="0" y="{cy}" width="{cx}" height="{cy}" stroke="none"/>"#
+        )),
+        '▟' => Some(format!(
+            r#"<rect x="{cx}" y="0" width="{cx}" height="{cy}" stroke="none"/>
+               <rect x="0" y="{cy}" width="{cell_w}" height="{cy}" stroke="none"/>"#
+        )),
+
+        // Shades
+        '░' => Some(format!(
+            r#"<rect x="0" y="0" width="{cell_w}" height="{cell_h}" fill-opacity="0.25" stroke="none"/>"#
+        )),
+        '▒' => Some(format!(
+            r#"<rect x="0" y="0" width="{cell_w}" height="{cell_h}" fill-opacity="0.5" stroke="none"/>"#
+        )),
+        '▓' => Some(format!(
+            r#"<rect x="0" y="0" width="{cell_w}" height="{cell_h}" fill-opacity="0.75" stroke="none"/>"#
+        )),
+
+        _ => None,
+    }
+}
+
+fn render_box_drawing_shape_group(
+    tspan: &TSpan,
+    baseline_y: u32,
+    y_animation: &Option<YAnimation>,
+    total_ms: u32,
+    parent_start: u32,
+    parent_end: u32,
+) -> Option<String> {
+    let cell_w = tspan.cell_w as f32;
+    let cell_h = tspan.cell_h as f32;
+
+    // thickness scale
+    let lw = (cell_w * 0.08).max(1.0);
+    let hw = lw * 2.5;
+    let d_off = (lw * 1.5).max(1.2);
+    let r = (cell_w * 0.45).min(cell_h * 0.45);
+
+    let mut shapes = Vec::new();
+    let mut coord_idx = 0;
+    for ch in tspan.text.chars() {
+        if ch == '\n' || ch == '\r' {
+            continue;
+        }
+        if let Some(shape_xml) = get_box_drawing_path(ch, cell_w, cell_h, lw, hw, d_off, r) {
+            shapes.push((coord_idx, shape_xml));
+            coord_idx += 1;
+        } else {
+            return None; // If any character is not supported, we fall back to text rendering
+        }
+    }
+
+    let is_tspan_static = is_static(tspan.start_ms, tspan.end_ms, total_ms);
+    let matches_parent = tspan.start_ms <= parent_start && tspan.end_ms >= parent_end;
+    let is_hidden = !is_tspan_static && !matches_parent;
+
+    let set_str = if is_hidden {
+        visibility_set(tspan.start_ms, tspan.end_ms, total_ms)
+    } else {
+        String::new()
+    };
+
+    let visibility_attr = if is_hidden {
+        r#" visibility="hidden""#
+    } else {
+        ""
+    };
+
+    let mut result = String::new();
+    for (i, shape_xml) in shapes {
+        let cell_x = tspan.x_coords[i];
+        let cell_y = baseline_y as f32 - tspan.baseline as f32;
+
+        let anim_str = if let Some(anim) = y_animation {
+            anim.to_svg_transform_animation(cell_x, tspan.baseline)
+        } else {
+            String::new()
+        };
+
+        let fg_hex = rgb_hex(tspan.fg);
+        result.push_str(&format!(
+            r#"<g transform="translate({cell_x}, {cell_y})"{visibility} fill="{fg}" stroke="{fg}">{set}{anim}{shape}</g>"#,
+            cell_x = cell_x,
+            cell_y = cell_y,
+            visibility = visibility_attr,
+            fg = fg_hex,
+            set = set_str,
+            anim = anim_str,
+            shape = shape_xml,
+        ));
+    }
+
+    Some(result)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -759,6 +1309,7 @@ impl TextElement {
                     total_ms,
                     default_letter_spacing,
                     default_fg,
+                    false,
                 ));
             }
             s.push_str("</text>");
@@ -769,6 +1320,18 @@ impl TextElement {
         for tspan in &self.tspans {
             if tspan.is_box {
                 flush_non_box(&mut current_non_box, &mut text_tags);
+
+                let shapes_opt = render_box_drawing_shape_group(
+                    tspan,
+                    self.y,
+                    &self.y_animation,
+                    total_ms,
+                    parent_start,
+                    parent_end,
+                );
+                if let Some(ref shapes_svg) = shapes_opt {
+                    text_tags.push(shapes_svg.clone());
+                }
 
                 let text_length = if let (Some(&first_x), Some(&last_x)) =
                     (tspan.x_coords.first(), tspan.x_coords.last())
@@ -816,6 +1379,7 @@ impl TextElement {
                     total_ms,
                     default_letter_spacing,
                     default_fg,
+                    shapes_opt.is_some(),
                 ));
                 s.push_str("</text>");
                 text_tags.push(s);
@@ -2635,20 +3199,46 @@ mod tests {
         // Next, render to SVG string and inspect it
         let svg = te.to_svg_string(&HashMap::new(), 1000, 0.0, None);
 
-        // The SVG should contain three individual text tags, each with textLength="10"
+        // The SVG should contain three individual text tags, each with textLength="10" and style="fill-opacity: 0"
         assert!(
-            svg.contains(r#"x="100" y="20""#) && svg.contains(r#"textLength="10""#),
-            "SVG does not contain correct text tag for col 0: {}",
+            svg.contains(r#"x="100" y="20""#)
+                && svg.contains(r#"textLength="10""#)
+                && svg.contains(r#"style="fill-opacity: 0""#),
+            "SVG does not contain correct transparent text tag for col 0: {}",
             svg
         );
         assert!(
-            svg.contains(r#"x="110" y="20""#) && svg.contains(r#"textLength="10""#),
-            "SVG does not contain correct text tag for col 1: {}",
+            svg.contains(r#"x="110" y="20""#)
+                && svg.contains(r#"textLength="10""#)
+                && svg.contains(r#"style="fill-opacity: 0""#),
+            "SVG does not contain correct transparent text tag for col 1: {}",
             svg
         );
         assert!(
-            svg.contains(r#"x="120" y="20""#) && svg.contains(r#"textLength="10""#),
-            "SVG does not contain correct text tag for col 2: {}",
+            svg.contains(r#"x="120" y="20""#)
+                && svg.contains(r#"textLength="10""#)
+                && svg.contains(r#"style="fill-opacity: 0""#),
+            "SVG does not contain correct transparent text tag for col 2: {}",
+            svg
+        );
+
+        // The SVG should also contain the vector shape groups translated to the cell coordinates
+        assert!(
+            svg.contains(r#"<g transform="translate(100, 5)""#)
+                && svg.contains("stroke-linejoin=\"round\""),
+            "SVG does not contain vector shapes for col 0: {}",
+            svg
+        );
+        assert!(
+            svg.contains(r#"<g transform="translate(110, 5)""#)
+                && svg.contains("stroke-linecap=\"butt\""),
+            "SVG does not contain vector shapes for col 1: {}",
+            svg
+        );
+        assert!(
+            svg.contains(r#"<g transform="translate(120, 5)""#)
+                && svg.contains("stroke-linejoin=\"round\""),
+            "SVG does not contain vector shapes for col 2: {}",
             svg
         );
     }
