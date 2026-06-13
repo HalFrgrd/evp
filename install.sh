@@ -122,6 +122,15 @@ tar -xzf "${TMPDIR}/${ARCHIVE}" -C "${TMPDIR}"
 mkdir -p "$INSTALL_DIR"
 install -m 755 "${TMPDIR}/${STAGE}/evp" "${INSTALL_DIR}/evp"
 
+ABS_INSTALL_DIR=$(cd "$INSTALL_DIR" && pwd)
+ABS_PWD=$(pwd)
+
+if [ "$ABS_INSTALL_DIR" = "$ABS_PWD" ]; then
+    RUN_CMD="./evp"
+else
+    RUN_CMD="${INSTALL_DIR}/evp"
+fi
+
 say "Installed: ${INSTALL_DIR}/evp"
 "${INSTALL_DIR}/evp" --version | head -n1
 
@@ -129,11 +138,11 @@ cat <<EOF
 
 Try it out:
 
-    ${INSTALL_DIR}/evp --run-test-script
+    ${RUN_CMD} --run-test-script
     # → writes ./evp-test.gif (a small built-in demo)
 
 Or render your own .tape script:
 
-    ${INSTALL_DIR}/evp my_script.tape --output demo.gif --output demo.svg
+    ${RUN_CMD} my_script.tape --output demo.gif --output demo.svg
 
 EOF
