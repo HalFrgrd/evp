@@ -38,8 +38,8 @@ pub struct Settings {
     pub shell: Option<String>,
     pub font_family: Option<String>,
     pub font_size: f32,
-    pub width: u32,        // pixels
-    pub height: u32,       // pixels
+    pub width: Option<u32>,        // pixels
+    pub height: Option<u32>,       // pixels
     pub cols: Option<u16>, // explicit override
     pub rows: Option<u16>, // explicit override
     pub padding: u32,
@@ -61,6 +61,34 @@ pub struct Settings {
     pub mimic_vhs: bool,
 }
 
+impl Settings {
+    pub fn resolved_canvas_width(&self) -> Option<u32> {
+        match self.width {
+            Some(w) => Some(w),
+            None => {
+                if self.cols.is_some() {
+                    None
+                } else {
+                    Some(1200)
+                }
+            }
+        }
+    }
+
+    pub fn resolved_canvas_height(&self) -> Option<u32> {
+        match self.height {
+            Some(h) => Some(h),
+            None => {
+                if self.rows.is_some() {
+                    None
+                } else {
+                    Some(600)
+                }
+            }
+        }
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         // Defaults mirror vhs's defaults from `vhs.go` / `style.go`.
@@ -68,8 +96,8 @@ impl Default for Settings {
             shell: None,
             font_family: None,
             font_size: 22.0,
-            width: 1200,
-            height: 600,
+            width: None,
+            height: None,
             cols: None,
             rows: None,
             padding: 60,

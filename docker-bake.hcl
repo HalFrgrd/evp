@@ -65,6 +65,7 @@ target "stress-test" {
 group "examples" {
   targets = [
     "example-char_spacing",
+    "example-cols_rows",
     "example-colors",
     "example-embedded-font-demo",
     "example-evp_demo",
@@ -175,6 +176,12 @@ target "example-margin" {
 target "example-mouse_small" {
   inherits = ["example-base"]
   args     = { EXAMPLE_NAME = "mouse_small" }
+  output   = ["type=local,dest=${EXTRACT_EXAMPLES_DEST}"]
+}
+
+target "example-cols_rows" {
+  inherits = ["example-base"]
+  args     = { EXAMPLE_NAME = "cols_rows" }
   output   = ["type=local,dest=${EXTRACT_EXAMPLES_DEST}"]
 }
 

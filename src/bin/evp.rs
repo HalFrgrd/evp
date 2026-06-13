@@ -238,8 +238,8 @@ fn run_script(cli: &Cli, script: &evp::Script, evp_start: Instant) -> Result<()>
         line_height: script.settings.line_height,
         letter_spacing: script.settings.letter_spacing,
         frame_style: evp::FrameStyle {
-            canvas_width_px: Some(script.settings.width),
-            canvas_height_px: Some(script.settings.height),
+            canvas_width_px: script.settings.resolved_canvas_width(),
+            canvas_height_px: script.settings.resolved_canvas_height(),
             padding_px: script.settings.padding,
             margin_px: script.settings.margin,
             margin_fill: script.settings.margin_fill,

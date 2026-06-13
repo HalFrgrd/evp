@@ -115,9 +115,11 @@ pub fn derive_options(s: &Settings) -> ViewportConfig {
         s.line_height,
         s.letter_spacing,
     );
+    let canvas_width_px = s.resolved_canvas_width();
+    let canvas_height_px = s.resolved_canvas_height();
     let frame_style = FrameStyle {
-        canvas_width_px: Some(s.width),
-        canvas_height_px: Some(s.height),
+        canvas_width_px,
+        canvas_height_px,
         padding_px: s.padding,
         margin_px: s.margin,
         margin_fill: s.margin_fill,
@@ -125,11 +127,11 @@ pub fn derive_options(s: &Settings) -> ViewportConfig {
         window_bar_size_px: s.window_bar_size,
         border_radius_px: s.border_radius,
     };
-    let inner_w = s
-        .width
+    let inner_w = canvas_width_px
+        .unwrap_or(1200)
         .saturating_sub((frame_style.padding_px + frame_style.margin_px) * 2);
-    let inner_h = s
-        .height
+    let inner_h = canvas_height_px
+        .unwrap_or(600)
         .saturating_sub((frame_style.padding_px + frame_style.margin_px) * 2)
         .saturating_sub(if frame_style.window_bar.enabled() {
             frame_style.window_bar_size_px
@@ -1084,8 +1086,8 @@ fn write_screenshot(frame: &RawFrame, script: &Script, path: &std::path::Path) -
             line_height: script.settings.line_height,
             letter_spacing: script.settings.letter_spacing,
             frame_style: FrameStyle {
-                canvas_width_px: Some(script.settings.width),
-                canvas_height_px: Some(script.settings.height),
+                canvas_width_px: script.settings.resolved_canvas_width(),
+                canvas_height_px: script.settings.resolved_canvas_height(),
                 padding_px: script.settings.padding,
                 margin_px: script.settings.margin,
                 margin_fill: script.settings.margin_fill,
@@ -1462,8 +1464,8 @@ mod tests {
         let settings = Settings::default();
 
         assert_eq!(settings.font_size, 22.0);
-        assert_eq!(settings.width, 1200);
-        assert_eq!(settings.height, 600);
+        assert_eq!(settings.width, None);
+        assert_eq!(settings.height, None);
         assert_eq!(settings.padding, 60);
         assert_eq!(settings.framerate, 50);
     }

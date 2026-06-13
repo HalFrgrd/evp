@@ -25,8 +25,9 @@ fn main() -> std::io::Result<()> {
         "key" => run_key_mode(),
         "mouse" => run_mouse_mode(),
         "stress-test-program" | "stress_test_program" => run_stress_test_program(),
+        "grid" => run_grid_mode(),
         _ => {
-            eprintln!("Usage: {} [key|mouse|stress-test-program]", args[0]);
+            eprintln!("Usage: {} [key|mouse|stress-test-program|grid]", args[0]);
             std::process::exit(1);
         }
     }
@@ -329,5 +330,43 @@ fn run_stress_test_program() -> std::io::Result<()> {
         let _ = out.flush();
     }
 
+    Ok(())
+}
+
+fn run_grid_mode() -> std::io::Result<()> {
+    let mut out = stdout();
+    terminal::enable_raw_mode()?;
+    execute!(
+        out,
+        terminal::Clear(terminal::ClearType::All),
+        cursor::MoveTo(0, 0),
+        cursor::Hide
+    )?;
+
+    let (cols, rows) = terminal::size()?;
+    for r in 0..rows {
+        execute!(out, cursor::MoveTo(0, r))?;
+        for c in 0..cols {
+            let ch = if c == 0 {
+                char::from_digit((r % 10) as u32, 10).unwrap_or(' ')
+            } else {
+                char::from_digit((c % 10) as u32, 10).unwrap_or(' ')
+            };
+            out.write_all(&[ch as u8])?;
+        }
+    }
+    out.flush()?;
+
+    // Wait for any keypress to exit
+    loop {
+        if event::poll(Duration::from_millis(500))? {
+            if let event::Event::Key(_) = event::read()? {
+                break;
+            }
+        }
+    }
+
+    execute!(out, cursor::Show)?;
+    terminal::disable_raw_mode()?;
     Ok(())
 }

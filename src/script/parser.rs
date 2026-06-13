@@ -428,8 +428,8 @@ fn apply_set(rest: &[String], s: &mut Settings) -> Result<()> {
         "Shell" => s.shell = Some(set_value(rest, key)?),
         "FontFamily" => s.font_family = Some(set_value(rest, key)?),
         "FontSize" => s.font_size = set_scalar_strict(rest, key)?.parse()?,
-        "Width" => s.width = set_scalar_strict(rest, key)?.parse()?,
-        "Height" => s.height = set_scalar_strict(rest, key)?.parse()?,
+        "Width" => s.width = Some(set_scalar_strict(rest, key)?.parse()?),
+        "Height" => s.height = Some(set_scalar_strict(rest, key)?.parse()?),
         // vhs has no native cell-grid setting; we expose them for convenience.
         "Cols" | "Columns" => s.cols = Some(set_scalar_strict(rest, key)?.parse()?),
         "Rows" => s.rows = Some(set_scalar_strict(rest, key)?.parse()?),
