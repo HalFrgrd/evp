@@ -75,6 +75,7 @@ EVP supports a superset of VHS `.tape` script language.
 
 Below is a complete template of all supported commands, settings, and events in the EVP `.tape` script language:
 
+<!-- START_REF_SCRIPT -->
 ```elixir
 # --- Output & Dependencies ---
 Output demo.gif                     # Target output file (supports .gif, .svg, .svgz, .json, .stats)
@@ -140,6 +141,7 @@ MouseScroll 10 20 Up                # Scroll mouse wheel Up or Down at column 10
 Wait "Ready"                        # Wait for output matching text pattern
 Wait /regex/                        # Wait for output matching regular expression
 ```
+<!-- END_REF_SCRIPT -->
 
 ## Acknowledgments
 

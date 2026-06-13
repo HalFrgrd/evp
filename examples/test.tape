@@ -1,4 +1,4 @@
-# Built-in smoke test — runs via `evp --run-test-script`.
+# Built-in smoke test — runs via `evp run-test-script`.
 #
 # Designed to work on any POSIX system: only `/bin/sh` builtins and
 # `printf` are used. Output goes to ./evp-test.gif in the cwd so the

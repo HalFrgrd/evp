@@ -9,6 +9,7 @@ use vergen_gitcl::{Build, Cargo, Emitter, Gitcl, Rustc};
 fn main() -> Result<(), Box<dyn Error>> {
     verify_prebuilt_libghostty()?;
     compress_embedded_fonts()?;
+    extract_ref_script()?;
 
     // Emit build/cargo/git/rustc metadata as VERGEN_* env vars for runtime
     // logging and rich --version output.
@@ -96,6 +97,43 @@ fn compress_embedded_fonts() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+fn extract_ref_script() -> Result<(), Box<dyn Error>> {
+    let readme_path = Path::new("README.md");
+    println!("cargo:rerun-if-changed={}", readme_path.display());
+    if !readme_path.exists() {
+        return Ok(());
+    }
+    let readme = fs::read_to_string(readme_path)?;
+    let start_marker = "<!-- START_REF_SCRIPT -->";
+    let end_marker = "<!-- END_REF_SCRIPT -->";
+
+    if let Some(start_idx) = readme.find(start_marker) {
+        if let Some(end_idx) = readme[start_idx..].find(end_marker) {
+            let actual_end_idx = start_idx + end_idx;
+            let block = &readme[start_idx + start_marker.len()..actual_end_idx];
+            let mut inside = false;
+            let mut extracted_lines = Vec::new();
+            for line in block.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("```") {
+                    inside = !inside;
+                    continue;
+                }
+                if inside {
+                    extracted_lines.push(line);
+                }
+            }
+            let extracted = extracted_lines.join("\n");
+            let out_dir = env::var("OUT_DIR")?;
+            let out_path = Path::new(&out_dir).join("ref_script.tape");
+            fs::write(out_path, extracted)?;
+            return Ok(());
+        }
+    }
+
+    Err("Could not find START_REF_SCRIPT or END_REF_SCRIPT markers in README.md".into())
 }
 
 fn in_git_worktree() -> bool {

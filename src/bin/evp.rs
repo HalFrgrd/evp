@@ -14,9 +14,11 @@ use clap_complete::{Shell as CompletionShell, generate};
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
-/// Embedded demo tape used by `--run-test-script`. Source lives in
+/// Embedded demo tape used by `run-test-script`. Source lives in
 /// `examples/test.tape` so it stays in sync with the rest of the demos.
 const EMBEDDED_TEST_TAPE: &str = include_str!("../../examples/test.tape");
+
+const REF_SCRIPT: &str = include_str!(concat!(env!("OUT_DIR"), "/ref_script.tape"));
 
 const VERSION_LONG: &str = concat!(
     "version: ",
@@ -88,37 +90,28 @@ fn cli_styles() -> clap::builder::Styles {
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
-    /// Path to the `.tape` script. Optional when `--run-test-script` is set.
-    #[arg(required_unless_present = "run_test_script")]
+    /// Path to the `.tape` script.
+    #[arg(required = true)]
     script: Option<PathBuf>,
-    /// Run the built-in demo tape embedded in the binary. Writes to
-    /// `./evp-test.gif` in the current directory unless `--output` is
-    /// also given. Useful for verifying an install works end-to-end
-    /// without needing any external files.
-    #[arg(long)]
-    run_test_script: bool,
     /// Override the script's `Output` directives. Repeat to write multiple
     /// outputs in one run (for example `--output out.gif --output out.svg`).
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     output: Vec<PathBuf>,
-    /// Also render the intermediate Recording as JSON to this path.
-    #[arg(long = "dump-json")]
-    dump_json: Option<PathBuf>,
     /// Do not embed base64 font data inside the generated SVG output.
-    #[arg(long = "no-embed-fonts")]
+    #[arg(long = "no-embed-fonts", global = true)]
     no_embed_fonts: bool,
     /// Do not use system fallback fonts. Fail if any rendered glyph is missing from the loaded/embedded fonts.
-    #[arg(long = "no-system-fonts")]
+    #[arg(long = "no-system-fonts", global = true)]
     no_system_fonts: bool,
     /// Mimic VHS behavior (only allow a single word for the shell, use VHS default shell options and prompt colors).
-    #[arg(long = "mimic-vhs")]
+    #[arg(long = "mimic-vhs", global = true)]
     mimic_vhs: bool,
     /// Explicit log level override.
-    #[arg(long, value_enum)]
+    #[arg(long, value_enum, global = true)]
     log_level: Option<LogLevel>,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 enum Commands {
     /// Print the bundled VHS theme preset names.
     Themes,
@@ -126,6 +119,12 @@ enum Commands {
     Validate { script: PathBuf },
     /// Print a shell completion script to stdout.
     Completion { shell: CompletionShell },
+    /// Run the built-in demo tape embedded in the binary.
+    #[command(name = "run-test-script")]
+    RunTestScript,
+    /// Print the reference script from README.md commented out, followed by the test script.
+    #[command(name = "print-ref-script")]
+    PrintRefScript,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -166,68 +165,62 @@ fn real_main() -> Result<()> {
 fn run_cli(cli: Cli) -> Result<()> {
     let evp_start = Instant::now();
 
-    if let Some(command) = cli.command {
-        return run_subcommand(command);
+    if let Some(command) = cli.command.clone() {
+        return run_subcommand(command, &cli, evp_start);
     }
 
     init_tracing(&cli, evp_start);
     log_build_info_debug();
 
-    if cli.run_test_script {
-        info!("running embedded test tape (--run-test-script)");
-        let script = evp::parse_script(EMBEDDED_TEST_TAPE).context("parsing embedded test tape")?;
-        run_script(&cli, &script, evp_start)?;
-    } else {
-        let path = cli.script.as_ref().expect("clap guarantees this is set");
-        let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
-        match evp::recording_from_json(&bytes) {
-            Ok(rec) => {
-                info!(
-                    frames = rec.frames.len(),
-                    cols = rec.cols,
-                    rows = rec.rows,
-                    "loaded JSON recording"
-                );
+    let path = cli.script.as_ref().expect("clap guarantees this is set");
+    let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    match evp::recording_from_json(&bytes) {
+        Ok(rec) => {
+            info!(
+                frames = rec.frames.len(),
+                cols = rec.cols,
+                rows = rec.rows,
+                "loaded JSON recording"
+            );
 
-                let output_paths = if cli.output.is_empty() {
-                    bail!("--output is required when rendering from a JSON recording");
-                } else {
-                    cli.output.clone()
-                };
+            let output_paths = if cli.output.is_empty() {
+                bail!("--output is required when rendering from a JSON recording");
+            } else {
+                cli.output.clone()
+            };
 
-                let font_size = if rec.font_size_px > 0.0 {
-                    rec.font_size_px
-                } else {
-                    16.0
-                };
-                let render_opts = evp::RenderOptions {
-                    font_path: None,
-                    font_size,
-                    line_height: 1.0,
-                    letter_spacing: rec.letter_spacing,
-                    frame_style: rec.frame_style.clone(),
-                    no_system_fonts: cli.no_system_fonts,
-                };
+            let font_size = if rec.font_size_px > 0.0 {
+                rec.font_size_px
+            } else {
+                16.0
+            };
+            let render_opts = evp::RenderOptions {
+                font_path: None,
+                font_size,
+                line_height: 1.0,
+                letter_spacing: rec.letter_spacing,
+                frame_style: rec.frame_style.clone(),
+                no_system_fonts: cli.no_system_fonts,
+            };
 
-                for path in &output_paths {
-                    let backend = backend_for_output(
-                        path,
-                        &render_opts,
-                        !cli.no_embed_fonts,
-                        cli.no_system_fonts,
-                    )?;
-                    info!(path = %path.display(), "rendering from JSON recording");
-                    evp::renderer::render_recording(&rec, backend, path.clone())
-                        .with_context(|| format!("failed to render {}", path.display()))?;
-                }
-                info!(elapsed_ms = evp_start.elapsed().as_millis(), "evp finished");
+            for path in &output_paths {
+                let backend = backend_for_output(
+                    path,
+                    &render_opts,
+                    !cli.no_embed_fonts,
+                    cli.no_system_fonts,
+                )?;
+                info!(path = %path.display(), "rendering from JSON recording");
+                evp::renderer::render_recording(&rec, backend, path.clone())
+                    .with_context(|| format!("failed to render {}", path.display()))?;
             }
-            Err(_) => {
-                // Fall back to treating it as a script file.
-                let script = evp::parse_script_file(path)
-                    .with_context(|| format!("parsing {}", path.display()))?;
-                run_script(&cli, &script, evp_start)?;
-            }
+            info!(elapsed_ms = evp_start.elapsed().as_millis(), "evp finished");
+        }
+        Err(_) => {
+            // Fall back to treating it as a script file.
+            let script = evp::parse_script_file(path)
+                .with_context(|| format!("parsing {}", path.display()))?;
+            run_script(&cli, &script, evp_start)?;
         }
     }
 
@@ -259,16 +252,13 @@ fn run_script(cli: &Cli, script: &evp::Script, evp_start: Instant) -> Result<()>
 
     info!(events = script.events.len(), "script loaded");
 
-    let mut output_paths: Vec<PathBuf> = if cli.output.is_empty() {
+    let output_paths: Vec<PathBuf> = if cli.output.is_empty() {
         script.outputs.iter().map(PathBuf::from).collect()
     } else {
         cli.output.clone()
     };
     if output_paths.is_empty() {
         bail!("no Output directive and --output not given");
-    }
-    if let Some(path) = cli.dump_json.clone() {
-        output_paths.push(path);
     }
 
     let mut stats_paths = Vec::new();
@@ -356,7 +346,7 @@ fn backend_for_output(
     }
 }
 
-fn run_subcommand(command: Commands) -> Result<()> {
+fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()> {
     match command {
         Commands::Themes => {
             for name in evp::Theme::preset_names()? {
@@ -373,6 +363,24 @@ fn run_subcommand(command: Commands) -> Result<()> {
         Commands::Completion { shell } => {
             let mut cmd = Cli::command();
             generate(shell, &mut cmd, "evp", &mut io::stdout());
+            Ok(())
+        }
+        Commands::RunTestScript => {
+            init_tracing(cli, evp_start);
+            log_build_info_debug();
+            info!("running embedded test tape (run-test-script)");
+            let script = evp::parse_script(EMBEDDED_TEST_TAPE).context("parsing embedded test tape")?;
+            run_script(cli, &script, evp_start)?;
+            Ok(())
+        }
+        Commands::PrintRefScript => {
+            println!("# This is a reference script to help you write your tape scripts.");
+            println!("# We recommend viewing this script with Elixir syntax highlighting.");
+            println!("#");
+            for line in REF_SCRIPT.lines() {
+                println!("# {}", line);
+            }
+            println!("\n{}", EMBEDDED_TEST_TAPE);
             Ok(())
         }
     }
@@ -480,6 +488,24 @@ mod tests {
             Some(Commands::Completion {
                 shell: CompletionShell::Bash
             })
+        ));
+    }
+
+    #[test]
+    fn parses_run_test_script_subcommand() {
+        let cli = Cli::try_parse_from(["evp", "run-test-script"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::RunTestScript)
+        ));
+    }
+
+    #[test]
+    fn parses_print_ref_script_subcommand() {
+        let cli = Cli::try_parse_from(["evp", "print-ref-script"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::PrintRefScript)
         ));
     }
 

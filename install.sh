@@ -138,7 +138,7 @@ cat <<EOF
 
 Try it out:
 
-    ${RUN_CMD} --run-test-script
+    ${RUN_CMD} run-test-script
     # → writes ./evp-test.gif (a small built-in demo)
 
 Or render your own .tape script:

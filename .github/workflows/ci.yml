@@ -52,6 +52,12 @@ jobs:
           path: ${{ runner.temp }}/docker/build/evp
           if-no-files-found: error
 
+      - name: Test subcommands on runner
+        run: |
+          chmod +x ${{ runner.temp }}/docker/build/evp
+          ${{ runner.temp }}/docker/build/evp print-ref-script > /dev/null
+          ${{ runner.temp }}/docker/build/evp run-test-script --output ${{ runner.temp }}/test-ci.gif
+
   render-examples:
     name: Render Examples and Release
     needs: build-and-test

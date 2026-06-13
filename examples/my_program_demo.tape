@@ -1,5 +1,5 @@
 # The evp built-in demo script — identical to the tape embedded in the
-# binary via `--run-test-script`.  Run it with:
+# binary via `run-test-script`.  Run it with:
 #
 #   evp examples/my_program_demo.tape
 

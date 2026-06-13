@@ -61,3 +61,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     set -eux; \
     cargo test --workspace --release --target x86_64-unknown-linux-musl --lib --bins -- --test-threads=1 && \
     cargo test --workspace --release --target x86_64-unknown-linux-musl --tests -- --test-threads=1
+
+# Verify print-ref-script subcommand
+RUN set -eux; /out/evp print-ref-script > /dev/null
+
+# Verify run-test-script subcommand
+RUN set -eux; /out/evp run-test-script --output /tmp/test-ci.gif

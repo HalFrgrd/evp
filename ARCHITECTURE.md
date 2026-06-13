@@ -237,8 +237,7 @@ is that recording.
 
 ### JSON path ([src/render_json.rs](src/render_json.rs))
 
-The JSON backend is a first-class renderer selected by `.json` outputs or
-`--dump-json`. It consumes dense `RawFrame`s on its own thread, folds them
+The JSON backend is a first-class renderer selected by `.json` outputs (e.g. via `--output demo.json`). It consumes dense `RawFrame`s on its own thread, folds them
 with the shared `RecordingBuilder`, then writes the pretty-printed
 intermediate `Recording` JSON when the runner closes the channel.
 
