@@ -127,6 +127,42 @@ pub enum Event {
     Hide,
     /// Resume recording after a [`Event::Hide`].
     Show,
+    /// Click at coordinates.
+    Click { col: u16, row: u16, delay: Duration },
+    /// Right click at coordinates.
+    RightClick { col: u16, row: u16, delay: Duration },
+    /// Double click at coordinates.
+    DoubleClick { col: u16, row: u16, delay: Duration },
+    /// Click and drag mouse.
+    MouseDrag {
+        start_col: u16,
+        start_row: u16,
+        end_col: u16,
+        end_row: u16,
+        delay: Duration,
+    },
+    /// Move mouse without pressing any buttons.
+    MouseMove {
+        start_col: u16,
+        start_row: u16,
+        end_col: u16,
+        end_row: u16,
+        delay: Duration,
+    },
+    /// Scroll mouse wheel.
+    MouseScroll {
+        col: u16,
+        row: u16,
+        direction: ScrollDirection,
+        delay: Duration,
+    },
+    /// Low-level encoded mouse input sequence.
+    MouseInput {
+        action: MouseAction,
+        button: Option<MouseButton>,
+        col: u16,
+        row: u16,
+    },
 }
 
 /// Scope for `Wait`.
@@ -204,4 +240,29 @@ impl ModSet {
 pub enum KeyAction {
     Press,
     Release,
+}
+
+/// Direction for scroll wheel event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ScrollDirection {
+    Up,
+    Down,
+}
+
+/// Action for a mouse event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MouseAction {
+    Press,
+    Release,
+    Motion,
+}
+
+/// Identity of mouse buttons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+    WheelUp,
+    WheelDown,
 }

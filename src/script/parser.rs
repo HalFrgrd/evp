@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 
-use super::ast::{Event, KeyAction, KeySpec, ModSet, NamedKey, Script, Settings, WaitScope};
+use super::ast::{Event, KeyAction, KeySpec, ModSet, NamedKey, ScrollDirection, Script, Settings, WaitScope};
 use crate::style::{Theme, WindowBarStyle, parse_hex_color};
 
 /// Parse a complete script source.
@@ -273,11 +273,93 @@ fn parse_line(
                 .join(" ");
             script.events.push(Event::Type { text, delay });
         }
+        h if h == "Click" || h.starts_with("Click@") => {
+            let delay = parse_at_duration(h, "Click", script.settings.typing_speed)?;
+            let (col, row) = parse_coords(rest)?;
+            script.events.push(Event::Click { col, row, delay });
+        }
+        h if h == "RightClick" || h.starts_with("RightClick@") => {
+            let delay = parse_at_duration(h, "RightClick", script.settings.typing_speed)?;
+            let (col, row) = parse_coords(rest)?;
+            script.events.push(Event::RightClick { col, row, delay });
+        }
+        h if h == "DoubleClick" || h.starts_with("DoubleClick@") => {
+            let delay = parse_at_duration(h, "DoubleClick", script.settings.typing_speed)?;
+            let (col, row) = parse_coords(rest)?;
+            script.events.push(Event::DoubleClick { col, row, delay });
+        }
+        h if h == "MouseDrag" || h.starts_with("MouseDrag@") => {
+            let delay = parse_at_duration(h, "MouseDrag", script.settings.typing_speed)?;
+            let (start_col, start_row, end_col, end_row) = parse_drag_coords(rest)?;
+            script.events.push(Event::MouseDrag {
+                start_col,
+                start_row,
+                end_col,
+                end_row,
+                delay,
+            });
+        }
+        h if h == "MouseMove" || h.starts_with("MouseMove@") => {
+            let delay = parse_at_duration(h, "MouseMove", script.settings.typing_speed)?;
+            let (start_col, start_row, end_col, end_row) = parse_drag_coords(rest)?;
+            script.events.push(Event::MouseMove {
+                start_col,
+                start_row,
+                end_col,
+                end_row,
+                delay,
+            });
+        }
+        h if h == "MouseScroll" || h.starts_with("MouseScroll@") => {
+            let delay = parse_at_duration(h, "MouseScroll", script.settings.typing_speed)?;
+            let (col, row, direction) = parse_scroll(rest)?;
+            script.events.push(Event::MouseScroll {
+                col,
+                row,
+                direction,
+                delay,
+            });
+        }
         // Anything else is treated as a key press, possibly with `@delay`
         // and a trailing repeat count.
         _ => script.events.push(parse_key_event(head, rest)?),
     }
     Ok(())
+}
+
+fn parse_coords(rest: &[String]) -> Result<(u16, u16)> {
+    if rest.len() < 2 {
+        bail!("Mouse coordinates expect <col> <row>");
+    }
+    let col = rest[0].parse::<u16>().map_err(|_| anyhow!("Invalid column coordinate `{}`", rest[0]))?;
+    let row = rest[1].parse::<u16>().map_err(|_| anyhow!("Invalid row coordinate `{}`", rest[1]))?;
+    Ok((col, row))
+}
+
+fn parse_drag_coords(rest: &[String]) -> Result<(u16, u16, u16, u16)> {
+    if rest.len() < 4 {
+        bail!("Mouse drag/move expects <start_col> <start_row> <end_col> <end_row>");
+    }
+    let start_col = rest[0].parse::<u16>().map_err(|_| anyhow!("Invalid start column `{}`", rest[0]))?;
+    let start_row = rest[1].parse::<u16>().map_err(|_| anyhow!("Invalid start row `{}`", rest[1]))?;
+    let end_col = rest[2].parse::<u16>().map_err(|_| anyhow!("Invalid end column `{}`", rest[2]))?;
+    let end_row = rest[3].parse::<u16>().map_err(|_| anyhow!("Invalid end row `{}`", rest[3]))?;
+    Ok((start_col, start_row, end_col, end_row))
+}
+
+fn parse_scroll(rest: &[String]) -> Result<(u16, u16, ScrollDirection)> {
+    if rest.len() < 3 {
+        bail!("MouseScroll expects <col> <row> <Up|Down>");
+    }
+    let col = rest[0].parse::<u16>().map_err(|_| anyhow!("Invalid column `{}`", rest[0]))?;
+    let row = rest[1].parse::<u16>().map_err(|_| anyhow!("Invalid row `{}`", rest[1]))?;
+    let dir_str = rest[2].as_str();
+    let direction = match dir_str.to_ascii_lowercase().as_str() {
+        "up" => ScrollDirection::Up,
+        "down" => ScrollDirection::Down,
+        _ => bail!("Scroll direction must be Up or Down, got `{}`", dir_str),
+    };
+    Ok((col, row, direction))
 }
 
 // ---------------------------------------------------------------------------
@@ -948,5 +1030,55 @@ mod tests {
         }
 
         panic!("failed to create unique temp dir after 1000 attempts")
+    }
+
+    #[test]
+    fn test_mouse_input_script_parsing() {
+        let src = r#"
+            Output out.gif
+            Click 10 20
+            Click@100ms 30 40
+            RightClick 15 25
+            DoubleClick 5 5
+            MouseDrag 10 10 20 20
+            MouseMove 30 30 40 40
+            MouseScroll 50 60 Up
+            MouseScroll@50ms 70 80 Down
+        "#;
+        let s = parse(src).unwrap();
+        assert_eq!(s.events.len(), 8);
+
+        assert!(matches!(
+            &s.events[0],
+            Event::Click { col: 10, row: 20, delay } if *delay == Duration::from_millis(50)
+        ));
+        assert!(matches!(
+            &s.events[1],
+            Event::Click { col: 30, row: 40, delay } if *delay == Duration::from_millis(100)
+        ));
+        assert!(matches!(
+            &s.events[2],
+            Event::RightClick { col: 15, row: 25, delay } if *delay == Duration::from_millis(50)
+        ));
+        assert!(matches!(
+            &s.events[3],
+            Event::DoubleClick { col: 5, row: 5, delay } if *delay == Duration::from_millis(50)
+        ));
+        assert!(matches!(
+            &s.events[4],
+            Event::MouseDrag { start_col: 10, start_row: 10, end_col: 20, end_row: 20, delay } if *delay == Duration::from_millis(50)
+        ));
+        assert!(matches!(
+            &s.events[5],
+            Event::MouseMove { start_col: 30, start_row: 30, end_col: 40, end_row: 40, delay } if *delay == Duration::from_millis(50)
+        ));
+        assert!(matches!(
+            &s.events[6],
+            Event::MouseScroll { col: 50, row: 60, direction: ScrollDirection::Up, delay } if *delay == Duration::from_millis(50)
+        ));
+        assert!(matches!(
+            &s.events[7],
+            Event::MouseScroll { col: 70, row: 80, direction: ScrollDirection::Down, delay } if *delay == Duration::from_millis(50)
+        ));
     }
 }

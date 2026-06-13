@@ -341,6 +341,7 @@ pub fn run_with_raw_frame_consumers(
                     &pty,
                     &mut translator,
                     &terminal,
+                    &opts,
                     &mut hidden,
                     &mut wait_state,
                     &mut clipboard,
@@ -634,7 +635,170 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Dur
                     });
                 }
             }
-            Event::Wait { .. }
+            Event::Click { col, row, delay } => {
+                let per = scale(*delay);
+                out.push(Scheduled {
+                    at: cursor,
+                    event: Event::MouseInput {
+                        action: crate::script::MouseAction::Press,
+                        button: Some(crate::script::MouseButton::Left),
+                        col: *col,
+                        row: *row,
+                    },
+                });
+                cursor += per;
+                out.push(Scheduled {
+                    at: cursor,
+                    event: Event::MouseInput {
+                        action: crate::script::MouseAction::Release,
+                        button: Some(crate::script::MouseButton::Left),
+                        col: *col,
+                        row: *row,
+                    },
+                });
+            }
+            Event::RightClick { col, row, delay } => {
+                let per = scale(*delay);
+                out.push(Scheduled {
+                    at: cursor,
+                    event: Event::MouseInput {
+                        action: crate::script::MouseAction::Press,
+                        button: Some(crate::script::MouseButton::Right),
+                        col: *col,
+                        row: *row,
+                    },
+                });
+                cursor += per;
+                out.push(Scheduled {
+                    at: cursor,
+                    event: Event::MouseInput {
+                        action: crate::script::MouseAction::Release,
+                        button: Some(crate::script::MouseButton::Right),
+                        col: *col,
+                        row: *row,
+                    },
+                });
+            }
+            Event::DoubleClick { col, row, delay } => {
+                let per = scale(*delay);
+                for _ in 0..2 {
+                    out.push(Scheduled {
+                        at: cursor,
+                        event: Event::MouseInput {
+                            action: crate::script::MouseAction::Press,
+                            button: Some(crate::script::MouseButton::Left),
+                            col: *col,
+                            row: *row,
+                        },
+                    });
+                    cursor += per;
+                    out.push(Scheduled {
+                        at: cursor,
+                        event: Event::MouseInput {
+                            action: crate::script::MouseAction::Release,
+                            button: Some(crate::script::MouseButton::Left),
+                            col: *col,
+                            row: *row,
+                        },
+                    });
+                    cursor += per;
+                }
+            }
+            Event::MouseScroll { col, row, direction, delay } => {
+                let per = scale(*delay);
+                let btn = match direction {
+                    crate::script::ScrollDirection::Up => crate::script::MouseButton::WheelUp,
+                    crate::script::ScrollDirection::Down => crate::script::MouseButton::WheelDown,
+                };
+                out.push(Scheduled {
+                    at: cursor,
+                    event: Event::MouseInput {
+                        action: crate::script::MouseAction::Press,
+                        button: Some(btn),
+                        col: *col,
+                        row: *row,
+                    },
+                });
+                cursor += per;
+                out.push(Scheduled {
+                    at: cursor,
+                    event: Event::MouseInput {
+                        action: crate::script::MouseAction::Release,
+                        button: Some(btn),
+                        col: *col,
+                        row: *row,
+                    },
+                });
+            }
+            Event::MouseDrag { start_col, start_row, end_col, end_row, delay } => {
+                let per = scale(*delay);
+                let points = generate_line_points(*start_col as i16, *start_row as i16, *end_col as i16, *end_row as i16);
+                if !points.is_empty() {
+                    let (x0, y0) = points[0];
+                    out.push(Scheduled {
+                        at: cursor,
+                        event: Event::MouseInput {
+                            action: crate::script::MouseAction::Press,
+                            button: Some(crate::script::MouseButton::Left),
+                            col: x0,
+                            row: y0,
+                        },
+                    });
+                    for &(x, y) in points.iter().skip(1) {
+                        cursor += per;
+                        out.push(Scheduled {
+                            at: cursor,
+                            event: Event::MouseInput {
+                                action: crate::script::MouseAction::Motion,
+                                button: Some(crate::script::MouseButton::Left),
+                                col: x,
+                                row: y,
+                            },
+                        });
+                    }
+                    let (x1, y1) = *points.last().unwrap();
+                    cursor += per;
+                    out.push(Scheduled {
+                        at: cursor,
+                        event: Event::MouseInput {
+                            action: crate::script::MouseAction::Release,
+                            button: Some(crate::script::MouseButton::Left),
+                            col: x1,
+                            row: y1,
+                        },
+                    });
+                }
+            }
+            Event::MouseMove { start_col, start_row, end_col, end_row, delay } => {
+                let per = scale(*delay);
+                let points = generate_line_points(*start_col as i16, *start_row as i16, *end_col as i16, *end_row as i16);
+                if !points.is_empty() {
+                    let (x0, y0) = points[0];
+                    out.push(Scheduled {
+                        at: cursor,
+                        event: Event::MouseInput {
+                            action: crate::script::MouseAction::Motion,
+                            button: None,
+                            col: x0,
+                            row: y0,
+                        },
+                    });
+                    for &(x, y) in points.iter().skip(1) {
+                        cursor += per;
+                        out.push(Scheduled {
+                            at: cursor,
+                            event: Event::MouseInput {
+                                action: crate::script::MouseAction::Motion,
+                                button: None,
+                                col: x,
+                                row: y,
+                            },
+                        });
+                    }
+                }
+            }
+            Event::MouseInput { .. }
+            | Event::Wait { .. }
             | Event::Screenshot(_)
             | Event::Copy(_)
             | Event::Paste
@@ -646,6 +810,37 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Dur
         }
     }
     (out, cursor)
+}
+
+fn generate_line_points(x0: i16, y0: i16, x1: i16, y1: i16) -> Vec<(u16, u16)> {
+    let mut points = Vec::new();
+    let dx = (x1 - x0).abs();
+    let dy = -(y1 - y0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut err = dx + dy;
+
+    let mut x = x0;
+    let mut y = y0;
+
+    loop {
+        points.push((x as u16, y as u16));
+        if x == x1 && y == y1 {
+            break;
+        }
+        let e2 = 2 * err;
+        if e2 >= dy {
+            if x == x1 { break; }
+            err += dy;
+            x += sx;
+        }
+        if e2 <= dx {
+            if y == y1 { break; }
+            err += dx;
+            y += sy;
+        }
+    }
+    points
 }
 
 // ---------------------------------------------------------------------------
@@ -669,6 +864,7 @@ fn execute_event(
     pty: &Pty,
     translator: &mut KeyTranslator,
     terminal: &Terminal<'_, '_>,
+    opts: &ViewportConfig,
     hidden: &mut bool,
     wait_state: &mut Option<WaitState>,
     clipboard: &mut String,
@@ -719,6 +915,62 @@ fn execute_event(
         Event::Paste => pty.write(clipboard.as_bytes()),
         Event::Hide => *hidden = true,
         Event::Show => *hidden = false,
+        Event::MouseInput { action, button, col, row } => {
+            let x = (*col as f32 * opts.cell_width_px as f32) + (opts.cell_width_px as f32 / 2.0);
+            let y = (*row as f32 * opts.cell_height_px as f32) + (opts.cell_height_px as f32 / 2.0);
+            let pos = libghostty_vt::mouse::Position { x, y };
+
+            let mut encoder = libghostty_vt::mouse::Encoder::new()?;
+            encoder.set_options_from_terminal(terminal);
+
+            let size = libghostty_vt::mouse::EncoderSize {
+                screen_width: opts.cols as u32 * opts.cell_width_px,
+                screen_height: opts.rows as u32 * opts.cell_height_px,
+                cell_width: opts.cell_width_px,
+                cell_height: opts.cell_height_px,
+                padding_top: 0,
+                padding_bottom: 0,
+                padding_right: 0,
+                padding_left: 0,
+            };
+            encoder.set_size(size);
+
+            let any_pressed = match action {
+                crate::script::MouseAction::Press => true,
+                crate::script::MouseAction::Release => false,
+                crate::script::MouseAction::Motion => button.is_some(),
+            };
+            encoder.set_any_button_pressed(any_pressed);
+
+            let mut mouse_event = libghostty_vt::mouse::Event::new()?;
+            mouse_event.set_action(match action {
+                crate::script::MouseAction::Press => libghostty_vt::mouse::Action::Press,
+                crate::script::MouseAction::Release => libghostty_vt::mouse::Action::Release,
+                crate::script::MouseAction::Motion => libghostty_vt::mouse::Action::Motion,
+            });
+            mouse_event.set_button(button.map(|b| match b {
+                crate::script::MouseButton::Left => libghostty_vt::mouse::Button::Left,
+                crate::script::MouseButton::Right => libghostty_vt::mouse::Button::Right,
+                crate::script::MouseButton::Middle => libghostty_vt::mouse::Button::Middle,
+                crate::script::MouseButton::WheelUp => libghostty_vt::mouse::Button::Four,
+                crate::script::MouseButton::WheelDown => libghostty_vt::mouse::Button::Five,
+            }));
+            mouse_event.set_position(pos);
+
+            let mut buf = vec![0u8; 64];
+            let len = encoder.encode(&mouse_event, &mut buf)?;
+            if len > 0 {
+                pty.write(&buf[..len]);
+            }
+        }
+        Event::Click { .. }
+        | Event::RightClick { .. }
+        | Event::DoubleClick { .. }
+        | Event::MouseDrag { .. }
+        | Event::MouseMove { .. }
+        | Event::MouseScroll { .. } => {
+            // Expanded in timeline construction.
+        }
     }
     Ok(())
 }

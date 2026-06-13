@@ -93,6 +93,20 @@ fn run_mouse_mode() -> std::io::Result<()> {
     let (mut cols, mut rows) = terminal::size()?;
     let mut grid = vec![Color::Reset; (cols as usize) * (rows as usize)];
 
+    // Helper to get character at (col, row)
+    let get_char = |c: u16, r: u16, c_cols: u16, c_rows: u16| -> char {
+        let legend = "L: Red | R: Green | Drag: Purple | Move: L.Blue | q: Exit";
+        let legend_chars: Vec<char> = legend.chars().collect();
+        let legend_len = legend_chars.len() as u16;
+        if r == c_rows / 2 && c_cols >= legend_len {
+            let start = (c_cols - legend_len) / 2;
+            if c >= start && c < start + legend_len {
+                return legend_chars[(c - start) as usize];
+            }
+        }
+        ' '
+    };
+
     // Helper to draw the entire grid
     let draw_all = |out: &mut std::io::Stdout, grid: &[Color], c_cols: u16, c_rows: u16| -> std::io::Result<()> {
         for r in 0..c_rows {
@@ -100,7 +114,8 @@ fn run_mouse_mode() -> std::io::Result<()> {
             for c in 0..c_cols {
                 let color = grid[(r * c_cols + c) as usize];
                 out.queue(style::SetBackgroundColor(color))?;
-                out.queue(style::Print(" "))?;
+                let ch = get_char(c, r, c_cols, c_rows);
+                out.queue(style::Print(ch))?;
             }
         }
         out.queue(style::ResetColor)?;
@@ -139,7 +154,7 @@ fn run_mouse_mode() -> std::io::Result<()> {
                     let new_color = match mouse_event.kind {
                         MouseEventKind::Down(MouseButton::Left) => Some(Color::Red),
                         MouseEventKind::Down(MouseButton::Right) => Some(Color::Green),
-                        MouseEventKind::Drag(_) => Some(Color::Blue),
+                        MouseEventKind::Drag(_) => Some(Color::Magenta),
                         MouseEventKind::Moved => Some(Color::Rgb { r: 173, g: 216, b: 230 }),
                         _ => None,
                     };
@@ -149,7 +164,8 @@ fn run_mouse_mode() -> std::io::Result<()> {
                             grid[idx] = color;
                             out.queue(cursor::MoveTo(col, row))?;
                             out.queue(style::SetBackgroundColor(color))?;
-                            out.queue(style::Print(" "))?;
+                            let ch = get_char(col, row, cols, rows);
+                            out.queue(style::Print(ch))?;
                             out.queue(style::ResetColor)?;
                             out.flush()?;
                         }
