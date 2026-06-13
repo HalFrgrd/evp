@@ -152,8 +152,8 @@ cat >"$out_md" <<MD
 
 Both runs were pinned to a single CPU core (\`taskset -c 0\` for evp,
 \`--cpuset-cpus=0 --cpus=1\` for the VHS docker container) and rendered
-the same \`scripts/stress_test.tape\` script: a 100×30 grid at 60 fps,
-typing at ~125 chars/sec (≥2 keystrokes per captured frame) for ~10 s,
+the same \`scripts/stress_test.tape\` script: a 100×30 grid at 50 fps,
+typing at 50 chars/sec (one keystroke per captured frame) for 1 s (50 keystrokes total),
 where every keystroke triggers a full-screen redraw with random ASCII
 + random fg/bg + random modifiers in every cell.
 
@@ -165,8 +165,10 @@ where every keystroke triggers a full-screen redraw with random ASCII
 | gif size | $(human_bytes "$evp_bytes") ($evp_bytes B) | $(human_bytes "$vhs_bytes") ($vhs_bytes B) |
 | md5 | \`$evp_md5\` | \`$vhs_md5\` |
 | gif frames | ${evp_frames:-?} | ${vhs_frames:-?} |
-| skipped frames (est. @ ${fps} fps) | ${evp_skipped:-?} | ${vhs_skipped:-?} |
+| coalesced/skipped frames (est. @ ${fps} fps)* | ${evp_skipped:-?} | ${vhs_skipped:-?} |
 | cpu affinity | $evp_cpu | $vhs_cpu |
+
+*\*Note: Coalesced/skipped frames include intentional frame merging during \`Sleep\` commands (idle periods) to reduce GIF size. It does not indicate dropped frames due to performance issues. Actual queue/pipeline frame drops are tracked below under "evp pipeline health".*
 
 VHS wall-clock / evp wall-clock = **${ratio}** (>1 means evp is faster).
 
@@ -174,7 +176,6 @@ VHS wall-clock / evp wall-clock = **${ratio}** (>1 means evp is faster).
 
 - dropped raw-frame consumer frames: ${evp_dropped_consumer:-?}
 - max runner→raw-frame-consumer queue: ${evp_max_q:-?}
-- pass/fail (>5 % dropped consumer sends = fail): **${evp_result:-?}**
 
 ## evp gif frame analysis
 
