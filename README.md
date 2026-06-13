@@ -23,6 +23,8 @@ renderer threads.
 - TODO: process metrics
 - TODO: show the key inputs on screen overlay
 - render from a json recording
+- svg box drawing
+- svg copiable text
 
 ## Output Formats
 

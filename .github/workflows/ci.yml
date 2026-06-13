@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -18,83 +18,65 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  build-and-test:
+    name: Build and Test in Docker
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.95"
-          targets: x86_64-unknown-linux-musl
-
-      - name: Install musl tools
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-dev musl-tools
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Prebuild libghostty pkg-config artifacts
-        # mode=min caches only the final export stage (~14 MB of .a + headers),
-        # not the intermediate build layers (apt, zig, git clone, zig build).
+      - name: Run Build and Test
         uses: docker/bake-action@v7
         with:
           files: docker-bake.hcl
-          targets: extract-libghostty
+          targets: |
+            test
+            evp
           set: |
-            extract-libghostty.output=type=local,dest=${{ runner.temp }}/docker/libghostty
+            evp.output=type=local,dest=${{ runner.temp }}/docker/build
             *.cache-from=type=gha
-            *.cache-to=type=gha,mode=min
-
-      - name: Copy prebuilt libghostty to assets
-        run: |
-          rm -rf assets/libghostty
-          mkdir -p assets
-          cp -r ${{ runner.temp }}/docker/libghostty assets/libghostty
-
-      - name: Build and test (release)
-        run: |
-          cargo build --workspace --release
-          cargo test --workspace --release --lib --bins -- --test-threads=1
-          cargo test --workspace --release --tests -- --test-threads=1
+            *.cache-to=type=gha,mode=max
+        env:
+          VERGEN_GIT_SHA: ${{ github.sha }}
+          VERGEN_GIT_BRANCH: ${{ github.ref_name }}
+          VERGEN_GIT_COMMIT_DATE: ${{ github.event.head_commit.timestamp }}
+          VERGEN_GIT_DIRTY: "false"
 
       - name: Upload evp binary artifact
         uses: actions/upload-artifact@v7
         with:
           name: evp-release-bin
-          path: target/x86_64-unknown-linux-musl/release/evp
+          path: ${{ runner.temp }}/docker/build/evp
           if-no-files-found: error
 
   render-examples:
-    needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    name: Render Examples and Release
+    needs: build-and-test
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    strategy:
-      matrix:
-        name: ["hello", "colors", "keys", "my_program_demo", "progress", "shell-tour", "test", "embedded-font-demo", "evp_demo"]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-      - name: Download evp binary artifact
-        uses: actions/download-artifact@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build all examples in Docker
+        uses: docker/bake-action@v7
         with:
-          name: evp-release-bin
-          path: ./evp-bin
-      - name: Render ${{ matrix.name }} (gif + svg)
-        run: |
-          set -euo pipefail
-          mkdir -p out
-          chmod +x ./evp-bin/evp
-          ./evp-bin/evp "examples/${{ matrix.name }}.tape" \
-            --output "out/${{ matrix.name }}.gif" \
-            --output "out/${{ matrix.name }}.svg"
-          ls -lh out/
+          files: docker-bake.hcl
+          targets: examples
+          set: |
+            *.output=type=local,dest=${{ runner.temp }}/docker/examples
+            *.cache-from=type=gha
+            *.cache-to=type=gha,mode=max
+        env:
+          VERGEN_GIT_SHA: ${{ github.sha }}
+          VERGEN_GIT_BRANCH: ${{ github.ref_name }}
+          VERGEN_GIT_COMMIT_DATE: ${{ github.event.head_commit.timestamp }}
+          VERGEN_GIT_DIRTY: "false"
 
       - name: Upload to the `assets` release
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
@@ -103,7 +85,7 @@ jobs:
           tag_name: assets
           name: Example assets
           body: |
-            Pre-rendered GIFs of every script in `examples/`.
+            Pre-rendered GIFs and SVGs of every script in `examples/`.
 
             These assets are rebuilt automatically by the
             `ci` workflow on every push to `master`. The README links
@@ -111,10 +93,8 @@ jobs:
 
             Last build: ${{ github.sha }}
           files: |
-            out/*.gif
-            out/*.svg
+            ${{ runner.temp }}/docker/examples/*.gif
+            ${{ runner.temp }}/docker/examples/*.svg
           fail_on_unmatched_files: true
           make_latest: "false"
           token: ${{ secrets.GITHUB_TOKEN }}
-
-  
