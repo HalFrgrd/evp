@@ -47,7 +47,9 @@ fn run_key_mode() -> std::io::Result<()> {
         )
     )?;
 
-    writeln!(out, "ready\r")?;
+    const BASE_TEXT: &str = "Press any key sequence (q to quit)...";
+
+    writeln!(out, "{}\r", BASE_TEXT)?;
     out.flush()?;
 
     let mut seen = 0usize;
@@ -65,7 +67,7 @@ fn run_key_mode() -> std::io::Result<()> {
 
         seen += 1;
         execute!(out, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0))?;
-        writeln!(out, "ready\r")?;
+        writeln!(out, "{}\r", BASE_TEXT)?;
         writeln!(out, "counter={seen} key={key:?}\r")?;
         out.flush()?;
     }

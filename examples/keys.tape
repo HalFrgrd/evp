@@ -1,12 +1,9 @@
-# Demonstrates key combinations and the `Hide` / `Show` directives.
-#
-# `Hide` suppresses event execution from being shown in the output (it is
-# *not* a capture toggle – frames are always captured); typing then
-# pasting via Ctrl+U / Ctrl+Y simulates a quick edit.
+# Demonstrates key combinations using the evp helper tool.
 
 Output keys.gif
+Output keys.svg
 
-Set Shell bash --norc
+Set Shell ./target/x86_64-unknown-linux-musl/release/evp_helper_tool key
 Set Width 900
 Set Height 400
 Set FontSize 18
@@ -15,13 +12,8 @@ Set Framerate 30
 
 Sleep 500ms
 
-# Type something then nuke it with Ctrl+U (kill-line in many shells).
-Type "echo this will be deleted"
-Sleep 400ms
-Ctrl+U
-Sleep 300ms
-
-# Now type the real command.
-Type "printf 'Modifiers work: %s\n' OK"
-Enter
+# Run the modifier key combinations
+Ctrl+Shift+Alt+Left
 Sleep 1s
+Command+Alt+PageUp
+Sleep 1.5s

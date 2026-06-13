@@ -5,14 +5,12 @@ You write a `.tape` file and run `evp my_sript.tape` to produce smooth, high qua
 
 EVP is a rewrite of [VHS](https://github.com/charmbracelet/vhs) with some key improvements.
 
-EVP runs a real shell inside an embedded [libghostty](https://ghostty.org) terminal.
-
 ## VHS comparison
 EVP is extends [VHS](https://github.com/charmbracelet/vhs) in these ways:
 - Significantly faster. No more skipped frames when creating demos in GHA!
 - Supports [kitty extended keycodes](https://sw.kovidgoyal.net/kitty/keyboard-protocol/). e.g:
     - Ctrl+Shift+Alt+Left
-    - Ctrl+Alt+Shift+P
+    - Command+Alt+PageUp
 - Supports animated SVGs:
     - Super crisp demos
     - You can select and copy text from the SVG as it is playing!
@@ -25,22 +23,27 @@ EVP is extends [VHS](https://github.com/charmbracelet/vhs) in these ways:
 - EVP has no runtime dependencies
     - It is a statically linked [musl binary](https://www.musl-libc.org/)
     - A collection of useful fonts are embedded into EVP
-- Mouse support
-    - 
+- Mouse support: you can script mouse input (clicking, dragging, mouse moving)
 - Coming soon: resize support
 - Coming soon: snapshot process metrics to help debug interactive use
 - Coming soon: key event overlay
 
-## Output Formats
+## Technology
+EVP runs a real shell inside an embedded [libghostty](https://ghostty.org) terminal.
+This allows us to use ...
 
-EVP infers the output renderer from the file extension of your `Output` directives or `--output` CLI argument. 
-You can specify multiple outputs.
-The following formats are supported:
-- **`.gif`**: Animated GIF.
-- **`.svg`**: Animated SVG with embedded, character-subsetted fonts.
-- **`.svgz`**: Compressed SVG. If the output path ends in `.svgz`, EVP automatically Gzip-compresses the generated SVG.
-- **`.json`**: The raw terminal frame recording in JSON format.
-- **`.stats`**: JSON stats about the recording and rendering process.
+The SVG animations are done using [SMIL](https://developer.mozilla.org/en-US/docs/Web/SVG/Guides/SVG_animation_with_SMIL).
+Fonts are embedded into the SVG using [this method](https://stackoverflow.com/questions/79680618/how-to-embed-a-font-inside-a-svg-file).
+A custom optimizer to reduce the file size and complexity.
+
+GIF rendering is powered by [gifski](https://crates.io/crates/gifski).
+
+## Install
+
+
+
+## Usage
+
 
 ## Script Reference
 
@@ -51,10 +54,12 @@ Below is a complete template of all supported commands, settings, and events in 
 ```elixir
 # --- Output & Dependencies ---
 Output demo.gif                     # Target output file (supports .gif, .svg, .svgz, .json, .stats)
-Output demo.json
-Output demo.svg
+Output demo.json                    # Multiple outputs are supported. You can use the `--ouput demo.svg` flag also.
+Output demo.svg                     # Recommended
+Output demo.svgz                    # gzip-compressed svg, less widely supported
+Output demo.stats                   # Reports some stats about the rendering process
 Require curl                        # Assert that curl is available on system PATH
-Source common.tape                  # Inline another tape file's commands and settings
+Source common.tape                  # Inline another tape file
 
 # --- Window & Font Settings ---
 Set Shell bash                      # Configure shell execution path (e.g. bash, zsh, fish)
