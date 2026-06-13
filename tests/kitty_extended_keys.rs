@@ -4,7 +4,7 @@ use common::{full_haystack, record};
 
 #[test]
 fn kitty_extended_keys_are_recorded_from_shell_program() {
-    let key_debug_bin = env!("CARGO_BIN_EXE_kitty_key_debug");
+    let key_debug_bin = env!("CARGO_BIN_EXE_evp_helper_tool");
     let tape = format!(
         r#"
 Output out.gif
