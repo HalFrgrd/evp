@@ -47,13 +47,43 @@ const VERSION_LONG: &str = concat!(
     env!("VERGEN_CARGO_OPT_LEVEL")
 );
 
+fn cli_styles() -> clap::builder::Styles {
+    clap::builder::Styles::styled()
+        .header(
+            clap::builder::styling::AnsiColor::Yellow.on_default()
+                | clap::builder::styling::Effects::BOLD,
+        )
+        .usage(
+            clap::builder::styling::AnsiColor::Yellow.on_default()
+                | clap::builder::styling::Effects::BOLD,
+        )
+        .literal(
+            clap::builder::styling::AnsiColor::Green.on_default()
+                | clap::builder::styling::Effects::BOLD,
+        )
+        .placeholder(clap::builder::styling::AnsiColor::White.on_default())
+        .error(
+            clap::builder::styling::AnsiColor::Red.on_default()
+                | clap::builder::styling::Effects::BOLD,
+        )
+        .valid(
+            clap::builder::styling::AnsiColor::Green.on_default()
+                | clap::builder::styling::Effects::BOLD,
+        )
+        .invalid(
+            clap::builder::styling::AnsiColor::Red.on_default()
+                | clap::builder::styling::Effects::BOLD,
+        )
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "evp",
     about = "Run a VHS-format script and produce a GIF",
     version = env!("CARGO_PKG_VERSION"),
     long_version = VERSION_LONG,
-    subcommand_negates_reqs = true
+    subcommand_negates_reqs = true,
+    styles = cli_styles()
 )]
 struct Cli {
     #[command(subcommand)]
