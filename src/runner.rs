@@ -275,7 +275,7 @@ pub fn run_with_raw_frame_consumers(
     let total_actions = timeline.len();
     let mut next_decile: u32 = 10;
     info!(
-        "timeline built: {total_actions} expanded actions, ~{expected:.1}s expected wall-clock (waits assumed instant)",
+        "timeline built: {total_actions} expanded actions, ~{expected:.1}s expected wall-clock (assuming `Wait` statements are instant)",
         expected = expected_total.as_secs_f64(),
     );
 

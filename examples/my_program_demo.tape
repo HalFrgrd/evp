@@ -1,9 +1,4 @@
-# The evp built-in demo script — identical to the tape embedded in the
-# binary via `run-sample-script`.  Run it with:
-#
-#   evp examples/my_program_demo.tape
-
-Output my_program_demo.gif
+Output my_program_demo.svg
 
 Set Shell bash --norc
 Set Width 900

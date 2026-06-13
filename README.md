@@ -1,11 +1,22 @@
 # EVP
 
-EVP is a Rust CLI tool to make beautiful terminal recordings.
-You write a `.tape` file and run `evp my_sript.tape` to produce smooth, high quality `gif` or `svg` demos.
+<div align="center">
 
+[![CI](https://github.com/HalFrgrd/evp/actions/workflows/ci.yml/badge.svg)](https://github.com/HalFrgrd/evp/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/HalFrgrd/evp)](https://github.com/HalFrgrd/evp/blob/master/LICENSE)
+[![Latest Release](https://img.shields.io/github/v/release/HalFrgrd/evp)](https://github.com/HalFrgrd/evp/releases)
+
+**EVP is a Rust CLI tool to make beautiful terminal recordings.**
+
+</div>
+
+You write a `.tape` file and run `evp my_sript.tape` to produce smooth, high quality `gif` or `svg` demos.
 EVP is a rewrite of [VHS](https://github.com/charmbracelet/vhs) with some key improvements.
 
 See it in action at [flyline](https://github.com/HalFrgrd/flyline) or below:
+
+![Demo](https://github.com/HalFrgrd/evp/releases/download/assets/evp_demo.gif)
+
 
 ## VHS comparison
 EVP is extends [VHS](https://github.com/charmbracelet/vhs) in these ways:

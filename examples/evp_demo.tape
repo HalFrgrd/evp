@@ -6,8 +6,8 @@
 Output evp_demo.gif
 
 Set Shell bash --norc
-Set Width 1100
-Set Height 500
+Set Width 1400
+Set Height 600
 Set FontSize 18
 Set TypingSpeed 40ms
 Set Framerate 30

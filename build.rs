@@ -102,7 +102,10 @@ fn compress_embedded_fonts() -> Result<(), Box<dyn Error>> {
 fn extract_ref_script() -> Result<(), Box<dyn Error>> {
     let readme_path = Path::new("README.md");
     println!("cargo:rerun-if-changed={}", readme_path.display());
+    let out_dir = env::var("OUT_DIR")?;
+    let out_path = Path::new(&out_dir).join("ref_script.tape");
     if !readme_path.exists() {
+        fs::write(out_path, "# (Reference tape not available during build)")?;
         return Ok(());
     }
     let readme = fs::read_to_string(readme_path)?;
@@ -126,9 +129,7 @@ fn extract_ref_script() -> Result<(), Box<dyn Error>> {
                 }
             }
             let extracted = extracted_lines.join("\n");
-            let out_dir = env::var("OUT_DIR")?;
-            let out_path = Path::new(&out_dir).join("ref_script.tape");
-            fs::write(out_path, extracted)?;
+            fs::write(&out_path, extracted)?;
             return Ok(());
         }
     }
