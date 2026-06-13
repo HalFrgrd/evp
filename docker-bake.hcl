@@ -28,6 +28,9 @@ variable "VERGEN_GIT_DIRTY" { default = "" }
 target "evp" {
   context    = "."
   dockerfile = "ci/evp.Dockerfile"
+  contexts = {
+    libghostty = "target:extract-libghostty"
+  }
   args = {
     VERGEN_GIT_SHA         = VERGEN_GIT_SHA
     VERGEN_GIT_BRANCH      = VERGEN_GIT_BRANCH

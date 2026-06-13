@@ -29,6 +29,7 @@ WORKDIR /app
 # Copy configuration, assets, and source files
 COPY .cargo/ /app/.cargo/
 COPY assets/ /app/assets/
+COPY --from=libghostty / /app/assets/libghostty/
 COPY examples/ /app/examples/
 COPY src/ /app/src/
 COPY Cargo.toml Cargo.lock build.rs /app/
