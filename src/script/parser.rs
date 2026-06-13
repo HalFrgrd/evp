@@ -154,7 +154,16 @@ fn parse_line(
     let head = tokens[0].as_str();
     let rest = &tokens[1..];
 
-    match head {
+    let (cmd_part, timeout_override) = if head.starts_with("Wait") {
+        match head.split_once('@') {
+            Some((cmd, dur)) => (cmd, Some(parse_duration(dur)?)),
+            None => (head, None),
+        }
+    } else {
+        (head, None)
+    };
+
+    match cmd_part {
         "Output" => {
             let path = rest
                 .first()
@@ -220,7 +229,27 @@ fn parse_line(
             }
             script.events.push(Event::Screenshot(path));
         }
-        "Wait" => script.events.push(parse_wait(rest, &script.settings)?),
+        "Wait" | "Wait+Line" | "Wait+Screen" => {
+            let mut event = parse_wait(rest, &script.settings)?;
+            if cmd_part == "Wait+Screen" {
+                if let Event::Wait { scope: s, .. } = &mut event {
+                    *s = WaitScope::Screen;
+                }
+            } else if cmd_part == "Wait+Line" {
+                if let Event::Wait { scope: s, .. } = &mut event {
+                    *s = WaitScope::Line;
+                }
+            }
+            if let Some(to) = timeout_override {
+                if let Event::Wait { timeout: t, .. } = &mut event {
+                    *t = to;
+                }
+            }
+            script.events.push(event);
+        }
+        h if h.starts_with("Wait") => {
+            bail!("unknown command `{}`", head);
+        }
         "Source" => {
             // `Source path/to/other.tape` — inline the contents at this
             // point. Equivalent to a textual #include: events, settings,
@@ -1018,6 +1047,69 @@ mod tests {
         let s = parse("Output out.gif\nScreenshot shot.json\n").unwrap();
         assert!(matches!(&s.events[0], Event::Screenshot(p) if p == "shot.json"));
     }
+
+    #[test]
+    fn wait_suffixes_and_timeouts_parse() {
+        // Wait+Screen /regex/
+        let s = parse("Output out.gif\nWait+Screen /regex/\n").unwrap();
+        assert!(matches!(
+            &s.events[0],
+            Event::Wait {
+                scope: WaitScope::Screen,
+                timeout,
+                pattern
+            } if pattern == "regex" && *timeout == Duration::from_secs(15)
+        ));
+
+        // Wait+Line /regex/
+        let s = parse("Output out.gif\nWait+Line /regex/\n").unwrap();
+        assert!(matches!(
+            &s.events[0],
+            Event::Wait {
+                scope: WaitScope::Line,
+                timeout,
+                pattern
+            } if pattern == "regex" && *timeout == Duration::from_secs(15)
+        ));
+
+        // Wait@10ms /regex/
+        let s = parse("Output out.gif\nWait@10ms /regex/\n").unwrap();
+        assert!(matches!(
+            &s.events[0],
+            Event::Wait {
+                scope: WaitScope::Line,
+                timeout,
+                pattern
+            } if pattern == "regex" && *timeout == Duration::from_millis(10)
+        ));
+
+        // Wait+Line@10ms /regex/
+        let s = parse("Output out.gif\nWait+Line@10ms /regex/\n").unwrap();
+        assert!(matches!(
+            &s.events[0],
+            Event::Wait {
+                scope: WaitScope::Line,
+                timeout,
+                pattern
+            } if pattern == "regex" && *timeout == Duration::from_millis(10)
+        ));
+
+        // Wait+Screen@10ms /regex/
+        let s = parse("Output out.gif\nWait+Screen@10ms /regex/\n").unwrap();
+        assert!(matches!(
+            &s.events[0],
+            Event::Wait {
+                scope: WaitScope::Screen,
+                timeout,
+                pattern
+            } if pattern == "regex" && *timeout == Duration::from_millis(10)
+        ));
+
+        // Wait+Invalid should fail
+        let err = parse("Output out.gif\nWait+Invalid /regex/\n").unwrap_err();
+        assert!(format!("{err:#}").contains("unknown command `Wait+Invalid`"));
+    }
+
 
     #[test]
     fn theme_json_parses() {

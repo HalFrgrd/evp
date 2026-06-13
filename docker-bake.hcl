@@ -72,6 +72,7 @@ group "examples" {
     "example-keys",
     "example-margin",
     "example-mouse",
+    "example-mouse_small",
     "example-my_program_demo",
     "example-padding",
     "example-progress",
@@ -168,6 +169,12 @@ target "example-padding" {
 target "example-margin" {
   inherits = ["example-base"]
   args     = { EXAMPLE_NAME = "margin" }
+  output   = ["type=local,dest=${EXTRACT_EXAMPLES_DEST}"]
+}
+
+target "example-mouse_small" {
+  inherits = ["example-base"]
+  args     = { EXAMPLE_NAME = "mouse_small" }
   output   = ["type=local,dest=${EXTRACT_EXAMPLES_DEST}"]
 }
 

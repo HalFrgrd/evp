@@ -375,7 +375,7 @@ fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()
         }
         Commands::PrintRefScript => {
             println!("# This is a reference tape to help you write your tape files.");
-            println!("# We recommend viewing this tape with Elixir syntax highlighting.");
+            println!("# We recommend viewing this tape using the Elixir language type for syntax highlighting.");
             println!("#");
             for line in REF_SCRIPT.lines() {
                 println!("# {}", line);

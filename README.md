@@ -6,11 +6,11 @@
 [![License](https://img.shields.io/github/license/HalFrgrd/evp)](https://github.com/HalFrgrd/evp/blob/master/LICENSE)
 [![Latest Release](https://img.shields.io/github/v/release/HalFrgrd/evp)](https://github.com/HalFrgrd/evp/releases)
 
-**EVP is a Rust CLI tool to make beautiful terminal recordings.**
+**EVP is a Rust CLI tool to make beautiful terminal recordings from a list of input events.**
 
 </div>
 
-You write a `.tape` file and run `evp my_sript.tape` to produce smooth, high quality `gif` or `svg` demos.
+You write a `.tape` file and run `evp my_sript.tape` to produce smooth, high quality, portable GIF or SVG demos.
 EVP is a rewrite of [VHS](https://github.com/charmbracelet/vhs) with some key improvements.
 
 See it in action at [flyline](https://github.com/HalFrgrd/flyline) or below:
@@ -21,15 +21,15 @@ See it in action at [flyline](https://github.com/HalFrgrd/flyline) or below:
 ## VHS comparison
 EVP is extends [VHS](https://github.com/charmbracelet/vhs) in these ways:
 - Significantly faster. No more skipped frames when creating demos in GHA!
-- Supports [Kitty extended keycodes](https://sw.kovidgoyal.net/kitty/keyboard-protocol/). e.g:
-    - Ctrl+Shift+Alt+Left
-    - Command+Alt+PageUp
-- Supports animated SVGs:
+- Animated SVGs:
     - Super crisp demos
     - You can select and copy text from the SVG as it is playing!
     - Fonts are embedded into the SVG so the demos are portable (fonts are subsetted before embedding)
     - SVG screenshots
-    - [Box-drawing chars](https://en.wikipedia.org/wiki/Box-drawing_characters) are rendered as SVG shapes. Don't worry, an invisible character is still written to the SVG so selecting and copying text works as expected.
+    - [Box-drawing chars](https://en.wikipedia.org/wiki/Box-drawing_characters) are rendered as SVG shapes. Don't worry, an invisible character is written to the SVG so selecting and copying text works as expected.
+- Supports [Kitty extended keycodes](https://sw.kovidgoyal.net/kitty/keyboard-protocol/). e.g:
+    - `Ctrl+Shift+Alt+Left`
+    - `Command+Alt+PageUp`
 - Specify full shell path with arguments. e.g.:
     - `Set Shell bash --init-file test.rc`
     - `Set Shell yazi` you can specify and program, not just a shell!
@@ -39,11 +39,11 @@ EVP is extends [VHS](https://github.com/charmbracelet/vhs) in these ways:
 - Mouse support: you can script mouse input (clicking, dragging, mouse moving)
 - Coming soon: resize support
 - Coming soon: snapshot process metrics to help debug interactive use
-- Coming soon: key event overlay
+- Coming soon: key event name overlay
 
 ## Technology
-EVP runs a real shell inside an embedded [libghostty](https://ghostty.org) terminal.
-This allows us to support advanced terminal features in a headless environment such as: complex key combinations; mouse input support; legacy escape codes.
+EVP runs a shell inside an embedded [libghostty](https://ghostty.org) terminal.
+This allows us to support advanced terminal features in a headless environment such as: complex key combinations; key press and key release events; mouse input support; legacy escape codes.
 
 The SVG animations are done using [SMIL](https://developer.mozilla.org/en-US/docs/Web/SVG/Guides/SVG_animation_with_SMIL).
 Fonts are embedded into the SVG using [this method](https://stackoverflow.com/questions/79680618/how-to-embed-a-font-inside-a-svg-file).
@@ -54,46 +54,46 @@ GIF rendering is powered by [gifski](https://crates.io/crates/gifski).
 
 ## Install
 
-### Quick install: `install.sh`
+#### Quick install: `install.sh`
 
 > [!TIP]
-> No `sudo` required
+> No `sudo` required!
 ```bash
 curl -sSfL https://raw.githubusercontent.com/HalFrgrd/evp/master/install.sh | sh
 ```
 
-### Build locally
+#### Build locally
 ```bash
-docker bake extract-libghostty
-cargo build 
+> docker bake extract-libghostty
+> cargo build 
 ```
 
 ## Usage
 
-### CLI
+#### CLI
 ```bash
 # Start from a base script:
-evp print-ref-script > demo.tape
+> evp print-ref-script > demo.tape
 # Modify the script then run it!
-evp demo.tape
+> evp demo.tape
 ```
 Or if you already have a VHS script:
 ```bash
-evp --mimic-vhs demo.tape
+> evp --mimic-vhs demo.tape
 ```
 
 
-### GHA
+#### GHA
 
+TODO
 
+#### Docker
 
-
+TODO
 
 ## Script Reference
 
-EVP supports a superset of VHS `.tape` script language.
-
-Below is a complete template of all supported commands, settings, and events in the EVP `.tape` script language:
+EVP supports a superset of VHS `.tape` script language. Below is a complete template of all supported commands, settings, and events in the EVP `.tape` script language:
 
 <!-- START_REF_SCRIPT -->
 ```elixir
@@ -160,6 +160,11 @@ MouseScroll 10 20 Up                # Scroll mouse wheel Up or Down at column 10
 # --- Wait / Synchronization ---
 Wait "Ready"                        # Wait for output matching text pattern
 Wait /regex/                        # Wait for output matching regular expression
+Wait+Screen /regex/                 # Wait scanning full screen instead of only the last line
+Wait+Line /regex/                   # Explicitly wait scanning last line only (default)
+Wait@10ms /regex/                   # Wait with an overridden timeout of 10ms (default is 15s)
+Wait+Line@10ms /regex/              # Wait scanning last line with 10ms timeout override
+Wait+Screen@10ms /regex/            # Wait scanning full screen with 10ms timeout override
 ```
 <!-- END_REF_SCRIPT -->
 
