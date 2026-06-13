@@ -37,6 +37,7 @@ EVP is extends [VHS](https://github.com/charmbracelet/vhs) in these ways:
     - It is a statically linked [musl binary](https://www.musl-libc.org/)
     - A collection of useful fonts are embedded into EVP
 - Mouse support: you can script mouse input (clicking, dragging, mouse moving) ![mouse_small](https://github.com/HalFrgrd/evp/releases/download/assets/mouse_small.svg)
+- Set the terminal size by number of rows / cols or by number of pixels.
 - Coming soon: resize support
 - Coming soon: snapshot process metrics to help debug interactive use
 - Coming soon: key event name overlay
@@ -118,6 +119,8 @@ Set LineHeight 1.2                  # Line spacing multiplier
 Set LetterSpacing 0                 # Letter spacing adjustment
 Set Width 800                       # Terminal window width in pixels
 Set Height 400                      # Terminal window height in pixels
+Set Cols 100                        # Set terminal width in rows (Set Width has precedence)
+Set Rows 30                         # Set terminal height in rows (Set Height has precedence)
 Set Padding 10                      # Inner padding between terminal grid and window frame
 Set Margin 20                       # Outer margin around window frame
 Set MarginFill "#6B50FF"            # Background colour of outer margin area

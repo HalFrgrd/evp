@@ -158,6 +158,54 @@ pub fn derive_options(s: &Settings) -> ViewportConfig {
     )
 }
 
+#[derive(Clone, Copy, Debug)]
+struct MouseKeyframe {
+    at: Duration,
+    col: f32,
+    row: f32,
+    state: crate::recording::MouseState,
+}
+
+fn resolve_mouse_position(
+    recorded_at: Duration,
+    keyframes: &[MouseKeyframe],
+) -> Option<(f32, f32, crate::recording::MouseState)> {
+    if keyframes.is_empty() {
+        return None;
+    }
+
+    let prev_idx = keyframes.iter().rposition(|k| k.at <= recorded_at);
+    let prev = match prev_idx {
+        Some(idx) => &keyframes[idx],
+        None => return None,
+    };
+
+    let next = keyframes.get(prev_idx.unwrap() + 1);
+    match next {
+        Some(n) => {
+            let gap = n.at.saturating_sub(prev.at);
+            if gap > Duration::ZERO && gap <= Duration::from_millis(500) {
+                let elapsed = recorded_at.saturating_sub(prev.at);
+                let f = elapsed.as_secs_f32() / gap.as_secs_f32();
+                let f = f.clamp(0.0, 1.0);
+                let col = prev.col + f * (n.col - prev.col);
+                let row = prev.row + f * (n.row - prev.row);
+                let state = if prev.state == crate::recording::MouseState::Clicking
+                    || n.state == crate::recording::MouseState::Clicking
+                {
+                    crate::recording::MouseState::Clicking
+                } else {
+                    prev.state
+                };
+                Some((col, row, state))
+            } else {
+                Some((prev.col, prev.row, prev.state))
+            }
+        }
+        None => Some((prev.col, prev.row, prev.state)),
+    }
+}
+
 /// Run the script end-to-end. Returns only pipeline stats.
 pub fn run(script: &Script) -> Result<RunStats> {
     run_with_raw_frame_consumers(script, Vec::new())
@@ -220,8 +268,39 @@ pub fn run_with_raw_frame_consumers(
 
     let mut translator = KeyTranslator::new()?;
 
-    // Build absolute timeline.
     let (timeline, timeline_end) = build_timeline(&script.events, &script.settings);
+
+    // Pre-scan timeline to extract mouse keyframes
+    let mut mouse_keyframes = Vec::new();
+    let mut mouse_pressed = false;
+    for scheduled in &timeline {
+        if let Event::MouseInput { action, col, row, .. } = &scheduled.event {
+            let state = match action {
+                crate::script::MouseAction::Press => {
+                    mouse_pressed = true;
+                    crate::recording::MouseState::Clicking
+                }
+                crate::script::MouseAction::Release => {
+                    mouse_pressed = false;
+                    crate::recording::MouseState::Moving
+                }
+                crate::script::MouseAction::Motion => {
+                    if mouse_pressed {
+                        crate::recording::MouseState::Dragging
+                    } else {
+                        crate::recording::MouseState::Moving
+                    }
+                }
+            };
+            mouse_keyframes.push(MouseKeyframe {
+                at: scheduled.at,
+                col: *col as f32,
+                row: *row as f32,
+                state,
+            });
+        }
+    }
+
     // The recording continues for one full frame interval after the last
     // event so the final state is always captured.
     let frame_interval = Duration::from_secs_f64(1.0 / script.settings.framerate as f64);
@@ -260,9 +339,7 @@ pub fn run_with_raw_frame_consumers(
     let mut last_cursor_moved_at: Option<Duration> = None;
     let mut prev_cursor_capture: Option<Option<(u16, u16)>> = None;
 
-    // Mouse tracking state
-    let mut current_mouse: Option<(u16, u16, crate::recording::MouseState)> = None;
-    let mut mouse_pressed = false;
+
 
     // Wait‑for state. When we're inside a `Wait`, all later events stall
     // until the regex matches or the timeout elapses.
@@ -341,32 +418,8 @@ pub fn run_with_raw_frame_consumers(
                     event = ?scheduled.event,
                     "dispatching scheduled event"
                 );
+
                 let was_hidden = hidden;
-                if let Event::MouseInput {
-                    action, col, row, ..
-                } = &scheduled.event
-                {
-                    match action {
-                        crate::script::MouseAction::Press => {
-                            mouse_pressed = true;
-                            current_mouse =
-                                Some((*col, *row, crate::recording::MouseState::Clicking));
-                        }
-                        crate::script::MouseAction::Release => {
-                            mouse_pressed = false;
-                            current_mouse =
-                                Some((*col, *row, crate::recording::MouseState::Moving));
-                        }
-                        crate::script::MouseAction::Motion => {
-                            let state = if mouse_pressed {
-                                crate::recording::MouseState::Dragging
-                            } else {
-                                crate::recording::MouseState::Moving
-                            };
-                            current_mouse = Some((*col, *row, state));
-                        }
-                    }
-                }
                 execute_event(
                     &scheduled.event,
                     &pty,
@@ -404,7 +457,7 @@ pub fn run_with_raw_frame_consumers(
                         last_cursor_moved_at,
                         script.settings.theme.cursor_accent_rgb().ok().flatten(),
                     )?;
-                    frame.mouse_cursor = current_mouse;
+                    frame.mouse_cursor = resolve_mouse_position(recorded_at, &mouse_keyframes);
                     if let Some(prev) = prev_cursor_capture {
                         if raw_cursor_pos != prev {
                             last_cursor_moved_at = Some(recorded_at);

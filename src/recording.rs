@@ -76,7 +76,7 @@ pub struct RawFrame {
     #[serde(default)]
     pub cursor_accent: Option<[u8; 3]>,
     #[serde(default)]
-    pub mouse_cursor: Option<(u16, u16, MouseState)>,
+    pub mouse_cursor: Option<(f32, f32, MouseState)>,
 }
 
 /// A single cell diff entry.
@@ -102,7 +102,7 @@ pub enum Frame {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         cursor_accent: Option<[u8; 3]>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
-        mouse_cursor: Option<(u16, u16, MouseState)>,
+        mouse_cursor: Option<(f32, f32, MouseState)>,
         cells: Vec<CellSnap>,
     },
     Diff {
@@ -115,7 +115,7 @@ pub enum Frame {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         cursor_accent: Option<[u8; 3]>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
-        mouse_cursor: Option<(u16, u16, MouseState)>,
+        mouse_cursor: Option<(f32, f32, MouseState)>,
         changes: Vec<CellChange>,
     },
 }
@@ -146,7 +146,7 @@ impl Frame {
         }
     }
 
-    pub fn mouse_cursor(&self) -> Option<(u16, u16, MouseState)> {
+    pub fn mouse_cursor(&self) -> Option<(f32, f32, MouseState)> {
         match self {
             Frame::Key { mouse_cursor, .. } | Frame::Diff { mouse_cursor, .. } => *mouse_cursor,
         }

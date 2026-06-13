@@ -21,7 +21,7 @@ Type@5ms "EVP will render a mouse cursor!"
 Sleep 100ms
 Show
 
-MouseMove@150ms 10 1 25 1
+MouseMove@100ms 10 1 25 1
 Sleep 200ms
 Click 25 1
 Sleep 1s

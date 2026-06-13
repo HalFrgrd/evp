@@ -440,8 +440,8 @@ struct CursorSpan {
 
 #[derive(Clone)]
 pub struct MouseSpan {
-    pub cx: u32,
-    pub cy: u32,
+    pub cx: f32,
+    pub cy: f32,
     pub state: crate::recording::MouseState,
     pub start_ms: u32,
     pub end_ms: u32,
@@ -1764,8 +1764,8 @@ fn serialize_mouse_elements(mouse_spans: &[MouseSpan], total_ms: u32) -> String 
     let mut click_vis_vals = Vec::new();
     let mut drag_vis_vals = Vec::new();
 
-    let mut last_cx = 0;
-    let mut last_cy = 0;
+    let mut last_cx = 0.0;
+    let mut last_cy = 0.0;
 
     for i in 0..(boundaries.len() - 1) {
         let start = boundaries[i];
@@ -2810,7 +2810,7 @@ fn render_from_frames(
     let cell_h = cfg.cell_height_px.max(1);
 
     let mut mouse_spans: Vec<MouseSpan> = Vec::new();
-    let mut cur_mouse: Option<(u16, u16, crate::recording::MouseState, u32)> = None;
+    let mut cur_mouse: Option<(f32, f32, crate::recording::MouseState, u32)> = None;
 
     for frame in frames.iter() {
         match (cur_mouse, frame.mouse_cursor) {
@@ -2819,8 +2819,8 @@ fn render_from_frames(
             }
             (Some((ocol, orow, ostate, start)), Some((col, row, state))) => {
                 if ocol != col || orow != row || ostate != state {
-                    let cx = cfg.content_x + ocol as u32 * cell_w + cell_w / 2;
-                    let cy = cfg.content_y + orow as u32 * cell_h + cell_h / 2;
+                    let cx = cfg.content_x as f32 + ocol * cell_w as f32 + cell_w as f32 / 2.0;
+                    let cy = cfg.content_y as f32 + orow * cell_h as f32 + cell_h as f32 / 2.0;
                     mouse_spans.push(MouseSpan {
                         cx,
                         cy,
@@ -2832,8 +2832,8 @@ fn render_from_frames(
                 }
             }
             (Some((ocol, orow, ostate, start)), None) => {
-                let cx = cfg.content_x + ocol as u32 * cell_w + cell_w / 2;
-                let cy = cfg.content_y + orow as u32 * cell_h + cell_h / 2;
+                let cx = cfg.content_x as f32 + ocol * cell_w as f32 + cell_w as f32 / 2.0;
+                let cy = cfg.content_y as f32 + orow * cell_h as f32 + cell_h as f32 / 2.0;
                 mouse_spans.push(MouseSpan {
                     cx,
                     cy,
@@ -2847,8 +2847,8 @@ fn render_from_frames(
         }
     }
     if let Some((col, row, state, start)) = cur_mouse {
-        let cx = cfg.content_x + col as u32 * cell_w + cell_w / 2;
-        let cy = cfg.content_y + row as u32 * cell_h + cell_h / 2;
+        let cx = cfg.content_x as f32 + col * cell_w as f32 + cell_w as f32 / 2.0;
+        let cy = cfg.content_y as f32 + row * cell_h as f32 + cell_h as f32 / 2.0;
         mouse_spans.push(MouseSpan {
             cx,
             cy,

@@ -568,8 +568,8 @@ fn rasterize_raw_frame(
     // Render mouse cursor if visible in the frame
     if let Some((m_col, m_row, m_state)) = frame.mouse_cursor {
         use crate::recording::MouseState;
-        let cx = (cfg.content_x + m_col as u32 * cell_w + cell_w / 2) as i32;
-        let cy = (cfg.content_y + m_row as u32 * cell_h + cell_h / 2) as i32;
+        let cx = (cfg.content_x as f32 + m_col * cell_w as f32 + cell_w as f32 / 2.0) as i32;
+        let cy = (cfg.content_y as f32 + m_row * cell_h as f32 + cell_h as f32 / 2.0) as i32;
 
         // Draw click/drag visual ripple circle under the pointer
         match m_state {
