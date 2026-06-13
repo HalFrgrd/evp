@@ -83,6 +83,9 @@ Or if you already have a VHS script:
 > evp --mimic-vhs demo.tape
 ```
 
+TODO: make it possible to record user input and generate a tape from that.
+`evp record --output demo.gif`, type away, use the mouse, then exit. Maybe we should automatically cut put the "exit + enter" part after a Hide.
+The script should have a the refernece at the top.
 
 #### GHA
 
@@ -91,6 +94,8 @@ TODO
 #### Docker
 
 TODO
+
+
 
 ## Script Reference
 
