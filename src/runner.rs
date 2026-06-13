@@ -319,7 +319,7 @@ pub fn run_with_raw_frame_consumers(
                 None
             };
 
-            let next_frame_due = next_frame_at <= now && next_frame_at <= total_duration;
+            let next_frame_due = next_frame_at <= now && (next_frame_at <= total_duration || wait_state.is_some());
 
             let process_event = match (next_event_at, next_frame_due) {
                 (Some(event_at), true) => event_at <= next_frame_at,
@@ -1370,7 +1370,10 @@ fn compute_next_deadline(
     next_frame: Duration,
     total: Duration,
 ) -> Duration {
-    let mut next = next_frame.min(total + Duration::from_millis(1));
+    let mut next = next_frame;
+    if wait.is_none() {
+        next = next.min(total + Duration::from_millis(1));
+    }
     if let Some(w) = wait {
         next = next.min(w.deadline);
     } else if let Some(ev) = next_event {

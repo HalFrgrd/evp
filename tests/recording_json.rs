@@ -609,3 +609,46 @@ Screenshot {json}
     let _ = std::fs::remove_file(svgz_path);
     let _ = std::fs::remove_file(json_path);
 }
+
+#[test]
+fn wait_records_frames_continually() {
+    let tape = r#"
+Output out.gif
+Set Width 800
+Set Height 300
+Set FontSize 20
+Set TypingSpeed 10ms
+Set Framerate 30
+Set Shell /bin/sh
+Sleep 50ms
+Hide
+Type "sleep 0.1; printf X; sleep 0.15; printf Y; sleep 0.15; printf Z; echo"
+Enter
+Show
+Wait /XYZ/
+Sleep 200ms
+"#;
+
+    let rec = record(tape);
+
+    let mut saw_x_only = false;
+    let mut saw_xy_only = false;
+    let mut saw_xyz = false;
+
+    for i in 0..rec.frames.len() {
+        let lines = common::rows_as_strings(&rec, i);
+        let frame_text = lines.join("\n");
+        if frame_text.contains("XYZ") {
+            saw_xyz = true;
+        } else if frame_text.contains("XY") {
+            saw_xy_only = true;
+        } else if frame_text.contains("X") {
+            saw_x_only = true;
+        }
+    }
+
+    assert!(saw_x_only, "should have captured intermediate frame with only 'X' during the wait");
+    assert!(saw_xy_only, "should have captured intermediate frame with 'XY' during the wait");
+    assert!(saw_xyz, "should have captured final frame with 'XYZ' after wait resolved");
+}
+
