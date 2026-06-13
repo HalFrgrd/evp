@@ -35,7 +35,7 @@ Sleep 300ms
     let haystack = full_haystack(&rec);
 
     assert!(
-        haystack.contains("ready"),
+        haystack.contains("Press any key sequence"),
         "expected key debug app readiness"
     );
     assert!(

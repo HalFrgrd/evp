@@ -134,6 +134,6 @@ Try it out:
 
 Or render your own .tape script:
 
-    ${INSTALL_DIR}/evp path/to/script.tape -o out.gif
+    ${INSTALL_DIR}/evp my_script.tape --output demo.gif --output demo.svg
 
 EOF

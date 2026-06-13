@@ -1773,7 +1773,9 @@ fn serialize_mouse_elements(mouse_spans: &[MouseSpan], total_ms: u32) -> String 
         let k = start as f32 / total_ms as f32;
         key_times_f32.push(k);
 
-        let active = mouse_spans.iter().find(|s| s.start_ms <= start && s.end_ms >= end);
+        let active = mouse_spans
+            .iter()
+            .find(|s| s.start_ms <= start && s.end_ms >= end);
         if let Some(s) = active {
             translate_vals.push(format!("{},{}", s.cx, s.cy));
             pointer_vis_vals.push("visible".to_string());
@@ -1799,7 +1801,8 @@ fn serialize_mouse_elements(mouse_spans: &[MouseSpan], total_ms: u32) -> String 
 
     let (kt_trans, vals_trans) = simplify_discrete_animation(&key_times_f32, &translate_vals);
     let (kt_ptr_vis, vals_ptr_vis) = simplify_discrete_animation(&key_times_f32, &pointer_vis_vals);
-    let (kt_click_vis, vals_click_vis) = simplify_discrete_animation(&key_times_f32, &click_vis_vals);
+    let (kt_click_vis, vals_click_vis) =
+        simplify_discrete_animation(&key_times_f32, &click_vis_vals);
     let (kt_drag_vis, vals_drag_vis) = simplify_discrete_animation(&key_times_f32, &drag_vis_vals);
 
     let mut g_attrs = Vec::new();
@@ -1853,10 +1856,21 @@ fn serialize_mouse_elements(mouse_spans: &[MouseSpan], total_ms: u32) -> String 
     }
 
     let click_inner = if click_anims.is_empty() {
-        let class_str = if click_attrs.is_empty() { "".to_string() } else { format!(" {}", click_attrs.join(" ")) };
-        format!(r##"<circle cx="0" cy="0" r="16" fill="#ff0000" fill-opacity="0.5"{}/>"##, class_str)
+        let class_str = if click_attrs.is_empty() {
+            "".to_string()
+        } else {
+            format!(" {}", click_attrs.join(" "))
+        };
+        format!(
+            r##"<circle cx="0" cy="0" r="16" fill="#ff0000" fill-opacity="0.5"{}/>"##,
+            class_str
+        )
     } else {
-        let class_str = if click_attrs.is_empty() { "".to_string() } else { format!(" {}", click_attrs.join(" ")) };
+        let class_str = if click_attrs.is_empty() {
+            "".to_string()
+        } else {
+            format!(" {}", click_attrs.join(" "))
+        };
         format!(
             r##"<circle cx="0" cy="0" r="16" fill="#ff0000" fill-opacity="0.5"{}>
 {}
@@ -1884,10 +1898,21 @@ fn serialize_mouse_elements(mouse_spans: &[MouseSpan], total_ms: u32) -> String 
     }
 
     let drag_inner = if drag_anims.is_empty() {
-        let class_str = if drag_attrs.is_empty() { "".to_string() } else { format!(" {}", drag_attrs.join(" ")) };
-        format!(r##"<circle cx="0" cy="0" r="16" fill="#ed61d7" fill-opacity="0.5"{}/>"##, class_str)
+        let class_str = if drag_attrs.is_empty() {
+            "".to_string()
+        } else {
+            format!(" {}", drag_attrs.join(" "))
+        };
+        format!(
+            r##"<circle cx="0" cy="0" r="16" fill="#ed61d7" fill-opacity="0.5"{}/>"##,
+            class_str
+        )
     } else {
-        let class_str = if drag_attrs.is_empty() { "".to_string() } else { format!(" {}", drag_attrs.join(" ")) };
+        let class_str = if drag_attrs.is_empty() {
+            "".to_string()
+        } else {
+            format!(" {}", drag_attrs.join(" "))
+        };
         format!(
             r##"<circle cx="0" cy="0" r="16" fill="#ed61d7" fill-opacity="0.5"{}>
 {}

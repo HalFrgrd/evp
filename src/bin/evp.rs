@@ -307,8 +307,8 @@ fn run_script(cli: &Cli, script: &evp::Script, evp_start: Instant) -> Result<()>
             total_events: script.events.len(),
             cpu_affinity: cpu_set,
         };
-        let json_str = serde_json::to_string_pretty(&stats_out)
-            .context("serializing run stats to JSON")?;
+        let json_str =
+            serde_json::to_string_pretty(&stats_out).context("serializing run stats to JSON")?;
         for path in &stats_paths {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent).ok();
@@ -345,7 +345,9 @@ fn backend_for_output(
     } else if ext.eq_ignore_ascii_case("json") {
         Ok(evp::renderer::RendererBackend::Json)
     } else if ext.eq_ignore_ascii_case("stats") {
-        bail!("rendering `.stats` files from intermediate JSON recordings is not supported; `.stats` can only be generated when running a `.tape` script.");
+        bail!(
+            "rendering `.stats` files from intermediate JSON recordings is not supported; `.stats` can only be generated when running a `.tape` script."
+        );
     } else {
         bail!(
             "only .gif, .svg, .json, and .stats outputs are supported (got `{}`)",

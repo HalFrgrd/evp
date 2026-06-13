@@ -11,7 +11,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 
-use super::ast::{Event, KeyAction, KeySpec, ModSet, NamedKey, ScrollDirection, Script, Settings, WaitScope};
+use super::ast::{
+    Event, KeyAction, KeySpec, ModSet, NamedKey, Script, ScrollDirection, Settings, WaitScope,
+};
 use crate::style::{Theme, WindowBarStyle, parse_hex_color};
 
 /// Parse a complete script source.
@@ -336,8 +338,12 @@ fn parse_coords(rest: &[String]) -> Result<(u16, u16)> {
     if rest.len() < 2 {
         bail!("Mouse coordinates expect <col> <row>");
     }
-    let col = rest[0].parse::<u16>().map_err(|_| anyhow!("Invalid column coordinate `{}`", rest[0]))?;
-    let row = rest[1].parse::<u16>().map_err(|_| anyhow!("Invalid row coordinate `{}`", rest[1]))?;
+    let col = rest[0]
+        .parse::<u16>()
+        .map_err(|_| anyhow!("Invalid column coordinate `{}`", rest[0]))?;
+    let row = rest[1]
+        .parse::<u16>()
+        .map_err(|_| anyhow!("Invalid row coordinate `{}`", rest[1]))?;
     Ok((col, row))
 }
 
@@ -345,10 +351,18 @@ fn parse_drag_coords(rest: &[String]) -> Result<(u16, u16, u16, u16)> {
     if rest.len() < 4 {
         bail!("Mouse drag/move expects <start_col> <start_row> <end_col> <end_row>");
     }
-    let start_col = rest[0].parse::<u16>().map_err(|_| anyhow!("Invalid start column `{}`", rest[0]))?;
-    let start_row = rest[1].parse::<u16>().map_err(|_| anyhow!("Invalid start row `{}`", rest[1]))?;
-    let end_col = rest[2].parse::<u16>().map_err(|_| anyhow!("Invalid end column `{}`", rest[2]))?;
-    let end_row = rest[3].parse::<u16>().map_err(|_| anyhow!("Invalid end row `{}`", rest[3]))?;
+    let start_col = rest[0]
+        .parse::<u16>()
+        .map_err(|_| anyhow!("Invalid start column `{}`", rest[0]))?;
+    let start_row = rest[1]
+        .parse::<u16>()
+        .map_err(|_| anyhow!("Invalid start row `{}`", rest[1]))?;
+    let end_col = rest[2]
+        .parse::<u16>()
+        .map_err(|_| anyhow!("Invalid end column `{}`", rest[2]))?;
+    let end_row = rest[3]
+        .parse::<u16>()
+        .map_err(|_| anyhow!("Invalid end row `{}`", rest[3]))?;
     Ok((start_col, start_row, end_col, end_row))
 }
 
@@ -356,8 +370,12 @@ fn parse_scroll(rest: &[String]) -> Result<(u16, u16, ScrollDirection)> {
     if rest.len() < 3 {
         bail!("MouseScroll expects <col> <row> <Up|Down>");
     }
-    let col = rest[0].parse::<u16>().map_err(|_| anyhow!("Invalid column `{}`", rest[0]))?;
-    let row = rest[1].parse::<u16>().map_err(|_| anyhow!("Invalid row `{}`", rest[1]))?;
+    let col = rest[0]
+        .parse::<u16>()
+        .map_err(|_| anyhow!("Invalid column `{}`", rest[0]))?;
+    let row = rest[1]
+        .parse::<u16>()
+        .map_err(|_| anyhow!("Invalid row `{}`", rest[1]))?;
     let dir_str = rest[2].as_str();
     let direction = match dir_str.to_ascii_lowercase().as_str() {
         "up" => ScrollDirection::Up,

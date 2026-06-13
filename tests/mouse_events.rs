@@ -31,13 +31,13 @@ Sleep 200ms
 
     // Get the final frame index
     let final_frame_idx = rec.frames.len() - 1;
-    let final_frame = rec.reconstruct(final_frame_idx).expect("reconstruct final frame");
+    let final_frame = rec
+        .reconstruct(final_frame_idx)
+        .expect("reconstruct final frame");
     let cols = final_frame.cols as usize;
 
     // Helper to get cell at (col, row)
-    let get_cell = |c: usize, r: usize| -> &evp::CellSnap {
-        &final_frame.cells[r * cols + c]
-    };
+    let get_cell = |c: usize, r: usize| -> &evp::CellSnap { &final_frame.cells[r * cols + c] };
 
     // Expected Colors from Theme Constants (support both normal and bright variants):
     // Red (Left Click): normal [215, 78, 111], bright [254, 95, 134]
@@ -53,14 +53,16 @@ Sleep 200ms
     let cell_click = get_cell(5, 5);
     assert!(
         is_red(cell_click.bg),
-        "expected cell (5,5) to be Red/Bright Red: {:?}", cell_click
+        "expected cell (5,5) to be Red/Bright Red: {:?}",
+        cell_click
     );
 
     // Assert RightClick at (10, 10) turns Green
     let cell_rclick = get_cell(10, 10);
     assert!(
         is_green(cell_rclick.bg),
-        "expected cell (10,10) to be Green/Bright Green: {:?}", cell_rclick
+        "expected cell (10,10) to be Green/Bright Green: {:?}",
+        cell_rclick
     );
 
     // Assert MouseMove path (1, 1) to (3, 1) turns Light Blue
@@ -68,7 +70,8 @@ Sleep 200ms
         let cell_move = get_cell(c, 1);
         assert_eq!(
             cell_move.bg, expected_light_blue,
-            "expected cell ({},1) to be Light Blue: {:?}", c, cell_move
+            "expected cell ({},1) to be Light Blue: {:?}",
+            c, cell_move
         );
     }
 
@@ -76,27 +79,33 @@ Sleep 200ms
     let cell_drag_start = get_cell(15, 15);
     assert!(
         is_red(cell_drag_start.bg),
-        "expected cell (15,15) to be Red/Bright Red: {:?}", cell_drag_start
+        "expected cell (15,15) to be Red/Bright Red: {:?}",
+        cell_drag_start
     );
 
     let cell_drag_mid = get_cell(16, 15);
     assert!(
         is_purple(cell_drag_mid.bg),
-        "expected cell (16,15) to be Purple/Bright Purple: {:?}", cell_drag_mid
+        "expected cell (16,15) to be Purple/Bright Purple: {:?}",
+        cell_drag_mid
     );
 
     let cell_drag_end = get_cell(17, 15);
     assert!(
         is_purple(cell_drag_end.bg),
-        "expected cell (17,15) to be Purple/Bright Purple: {:?}", cell_drag_end
+        "expected cell (17,15) to be Purple/Bright Purple: {:?}",
+        cell_drag_end
     );
 
     // Render to SVG string and assert mouse rendering exists in SVG
     let svg_opts = evp::render_svg::SvgOptions::default();
-    let svg_str = evp::render_svg::render_svg_to_string(&rec, &svg_opts).expect("render svg to string");
-    
+    let svg_str =
+        evp::render_svg::render_svg_to_string(&rec, &svg_opts).expect("render svg to string");
+
     assert!(
-        svg_str.contains("<animateTransform attributeName=\"transform\" type=\"translate\" calcMode=\"discrete\""),
+        svg_str.contains(
+            "<animateTransform attributeName=\"transform\" type=\"translate\" calcMode=\"discrete\""
+        ),
         "expected SVG to contain discrete translate animation for mouse pointer"
     );
     assert!(

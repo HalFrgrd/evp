@@ -78,10 +78,10 @@ fn run_key_mode() -> std::io::Result<()> {
 
 fn run_mouse_mode() -> std::io::Result<()> {
     use crossterm::{
-        event::{MouseEventKind, MouseButton},
-        terminal::{EnterAlternateScreen, LeaveAlternateScreen},
-        style::{self, Color},
         QueueableCommand,
+        event::{MouseButton, MouseEventKind},
+        style::{self, Color},
+        terminal::{EnterAlternateScreen, LeaveAlternateScreen},
     };
 
     let mut out = stdout();
@@ -111,7 +111,11 @@ fn run_mouse_mode() -> std::io::Result<()> {
     };
 
     // Helper to draw the entire grid
-    let draw_all = |out: &mut std::io::Stdout, grid: &[Color], c_cols: u16, c_rows: u16| -> std::io::Result<()> {
+    let draw_all = |out: &mut std::io::Stdout,
+                    grid: &[Color],
+                    c_cols: u16,
+                    c_rows: u16|
+     -> std::io::Result<()> {
         for r in 0..c_rows {
             out.queue(cursor::MoveTo(0, r))?;
             for c in 0..c_cols {
@@ -138,7 +142,8 @@ fn run_mouse_mode() -> std::io::Result<()> {
             }
             Event::Resize(new_cols, new_rows) => {
                 if new_cols != cols || new_rows != rows {
-                    let mut new_grid = vec![Color::Reset; (new_cols as usize) * (new_rows as usize)];
+                    let mut new_grid =
+                        vec![Color::Reset; (new_cols as usize) * (new_rows as usize)];
                     for r in 0..(rows.min(new_rows)) {
                         for c in 0..(cols.min(new_cols)) {
                             new_grid[(r * new_cols + c) as usize] = grid[(r * cols + c) as usize];
@@ -158,7 +163,11 @@ fn run_mouse_mode() -> std::io::Result<()> {
                         MouseEventKind::Down(MouseButton::Left) => Some(Color::Red),
                         MouseEventKind::Down(MouseButton::Right) => Some(Color::Green),
                         MouseEventKind::Drag(_) => Some(Color::Magenta),
-                        MouseEventKind::Moved => Some(Color::Rgb { r: 173, g: 216, b: 230 }),
+                        MouseEventKind::Moved => Some(Color::Rgb {
+                            r: 173,
+                            g: 216,
+                            b: 230,
+                        }),
                         _ => None,
                     };
                     if let Some(color) = new_color {
@@ -237,14 +246,24 @@ fn run_stress_test_program() -> std::io::Result<()> {
                 let bg_r = rng.gen_range(0, 255);
                 let bg_g = rng.gen_range(0, 255);
                 let bg_b = rng.gen_range(0, 255);
-                
+
                 let mut sgr = String::from("\x1b[0");
-                if rng.gen_range(0, 1) == 1 { sgr.push_str(";1"); }
-                if rng.gen_range(0, 1) == 1 { sgr.push_str(";3"); }
-                if rng.gen_range(0, 1) == 1 { sgr.push_str(";4"); }
-                if rng.gen_range(0, 1) == 1 { sgr.push_str(";7"); }
-                sgr.push_str(&format!(";38;2;{fg_r};{fg_g};{fg_b};48;2;{bg_r};{bg_g};{bg_b}m"));
-                
+                if rng.gen_range(0, 1) == 1 {
+                    sgr.push_str(";1");
+                }
+                if rng.gen_range(0, 1) == 1 {
+                    sgr.push_str(";3");
+                }
+                if rng.gen_range(0, 1) == 1 {
+                    sgr.push_str(";4");
+                }
+                if rng.gen_range(0, 1) == 1 {
+                    sgr.push_str(";7");
+                }
+                sgr.push_str(&format!(
+                    ";38;2;{fg_r};{fg_g};{fg_b};48;2;{bg_r};{bg_g};{bg_b}m"
+                ));
+
                 buffer.push_str(&sgr);
                 buffer.push(ch);
             }
@@ -300,7 +319,7 @@ fn run_stress_test_program() -> std::io::Result<()> {
     if is_tty {
         terminal::disable_raw_mode()?;
     }
-    
+
     // Restore cursor and clear SGR on exit so host shell isn't left in a weird state
     if let Err(e) = out.write_all(b"\x1b[0m\x1b[?25h\n") {
         if e.kind() != std::io::ErrorKind::BrokenPipe {
@@ -309,6 +328,6 @@ fn run_stress_test_program() -> std::io::Result<()> {
     } else {
         let _ = out.flush();
     }
-    
+
     Ok(())
 }

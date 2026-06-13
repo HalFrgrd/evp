@@ -340,15 +340,20 @@ pub fn run_with_raw_frame_consumers(
                     "dispatching scheduled event"
                 );
                 let was_hidden = hidden;
-                if let Event::MouseInput { action, col, row, .. } = &scheduled.event {
+                if let Event::MouseInput {
+                    action, col, row, ..
+                } = &scheduled.event
+                {
                     match action {
                         crate::script::MouseAction::Press => {
                             mouse_pressed = true;
-                            current_mouse = Some((*col, *row, crate::recording::MouseState::Clicking));
+                            current_mouse =
+                                Some((*col, *row, crate::recording::MouseState::Clicking));
                         }
                         crate::script::MouseAction::Release => {
                             mouse_pressed = false;
-                            current_mouse = Some((*col, *row, crate::recording::MouseState::Moving));
+                            current_mouse =
+                                Some((*col, *row, crate::recording::MouseState::Moving));
                         }
                         crate::script::MouseAction::Motion => {
                             let state = if mouse_pressed {
@@ -729,7 +734,12 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Dur
                     cursor += per;
                 }
             }
-            Event::MouseScroll { col, row, direction, delay } => {
+            Event::MouseScroll {
+                col,
+                row,
+                direction,
+                delay,
+            } => {
                 let per = scale(*delay);
                 let btn = match direction {
                     crate::script::ScrollDirection::Up => crate::script::MouseButton::WheelUp,
@@ -755,9 +765,20 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Dur
                     },
                 });
             }
-            Event::MouseDrag { start_col, start_row, end_col, end_row, delay } => {
+            Event::MouseDrag {
+                start_col,
+                start_row,
+                end_col,
+                end_row,
+                delay,
+            } => {
                 let per = scale(*delay);
-                let points = generate_line_points(*start_col as i16, *start_row as i16, *end_col as i16, *end_row as i16);
+                let points = generate_line_points(
+                    *start_col as i16,
+                    *start_row as i16,
+                    *end_col as i16,
+                    *end_row as i16,
+                );
                 if !points.is_empty() {
                     let (x0, y0) = points[0];
                     out.push(Scheduled {
@@ -794,9 +815,20 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Dur
                     });
                 }
             }
-            Event::MouseMove { start_col, start_row, end_col, end_row, delay } => {
+            Event::MouseMove {
+                start_col,
+                start_row,
+                end_col,
+                end_row,
+                delay,
+            } => {
                 let per = scale(*delay);
-                let points = generate_line_points(*start_col as i16, *start_row as i16, *end_col as i16, *end_row as i16);
+                let points = generate_line_points(
+                    *start_col as i16,
+                    *start_row as i16,
+                    *end_col as i16,
+                    *end_row as i16,
+                );
                 if !points.is_empty() {
                     let (x0, y0) = points[0];
                     out.push(Scheduled {
@@ -855,12 +887,16 @@ fn generate_line_points(x0: i16, y0: i16, x1: i16, y1: i16) -> Vec<(u16, u16)> {
         }
         let e2 = 2 * err;
         if e2 >= dy {
-            if x == x1 { break; }
+            if x == x1 {
+                break;
+            }
             err += dy;
             x += sx;
         }
         if e2 <= dx {
-            if y == y1 { break; }
+            if y == y1 {
+                break;
+            }
             err += dx;
             y += sy;
         }
@@ -940,7 +976,12 @@ fn execute_event(
         Event::Paste => pty.write(clipboard.as_bytes()),
         Event::Hide => *hidden = true,
         Event::Show => *hidden = false,
-        Event::MouseInput { action, button, col, row } => {
+        Event::MouseInput {
+            action,
+            button,
+            col,
+            row,
+        } => {
             let x = (*col as f32 * opts.cell_width_px as f32) + (opts.cell_width_px as f32 / 2.0);
             let y = (*row as f32 * opts.cell_height_px as f32) + (opts.cell_height_px as f32 / 2.0);
             let pos = libghostty_vt::mouse::Position { x, y };
@@ -1066,7 +1107,8 @@ fn write_screenshot(frame: &RawFrame, script: &Script, path: &std::path::Path) -
         };
         let s = crate::render_svg::render_svg_frame_to_string(frame, cfg, &svg_opts)?;
         let is_svgz = ext.eq_ignore_ascii_case("svgz");
-        let file = std::fs::File::create(path).with_context(|| format!("create {}", path.display()))?;
+        let file =
+            std::fs::File::create(path).with_context(|| format!("create {}", path.display()))?;
         if is_svgz {
             use flate2::Compression;
             use flate2::write::GzEncoder;

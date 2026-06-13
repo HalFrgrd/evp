@@ -574,10 +574,28 @@ fn rasterize_raw_frame(
         // Draw click/drag visual ripple circle under the pointer
         match m_state {
             MouseState::Clicking => {
-                draw_circle(&mut buf, cfg.canvas_w, cfg.canvas_h, cx, cy, 16, [255, 0, 0], 0.5);
+                draw_circle(
+                    &mut buf,
+                    cfg.canvas_w,
+                    cfg.canvas_h,
+                    cx,
+                    cy,
+                    16,
+                    [255, 0, 0],
+                    0.5,
+                );
             }
             MouseState::Dragging => {
-                draw_circle(&mut buf, cfg.canvas_w, cfg.canvas_h, cx, cy, 16, [237, 97, 215], 0.5);
+                draw_circle(
+                    &mut buf,
+                    cfg.canvas_w,
+                    cfg.canvas_h,
+                    cx,
+                    cy,
+                    16,
+                    [237, 97, 215],
+                    0.5,
+                );
             }
             MouseState::Moving => {}
         }
@@ -594,7 +612,11 @@ fn rasterize_raw_frame(
                     for sx in 0..2 {
                         let px = cx + (dx as i32 * 2) + sx;
                         let py = cy + (dy as i32 * 2) + sy;
-                        if px >= 0 && px < cfg.canvas_w as i32 && py >= 0 && py < cfg.canvas_h as i32 {
+                        if px >= 0
+                            && px < cfg.canvas_w as i32
+                            && py >= 0
+                            && py < cfg.canvas_h as i32
+                        {
                             blend_pixel(&mut buf, cfg.canvas_w, px as u32, py as u32, color, 1.0);
                         }
                     }
@@ -777,28 +799,26 @@ const CURSOR_HEIGHT: u32 = 19;
 
 // 1 represents cursor fill (white), 2 represents cursor border (black), 0 is transparent
 const CURSOR_BITMAP: [u8; 12 * 19] = [
-    2,0,0,0,0,0,0,0,0,0,0,0,
-    2,2,0,0,0,0,0,0,0,0,0,0,
-    2,1,2,0,0,0,0,0,0,0,0,0,
-    2,1,1,2,0,0,0,0,0,0,0,0,
-    2,1,1,1,2,0,0,0,0,0,0,0,
-    2,1,1,1,1,2,0,0,0,0,0,0,
-    2,1,1,1,1,1,2,0,0,0,0,0,
-    2,1,1,1,1,1,1,2,0,0,0,0,
-    2,1,1,1,1,1,1,1,2,0,0,0,
-    2,1,1,1,1,1,1,1,1,2,0,0,
-    2,1,1,1,1,1,2,2,2,2,2,0,
-    2,1,1,2,1,1,2,0,0,0,0,0,
-    2,1,2,0,2,1,1,2,0,0,0,0,
-    2,2,0,0,2,1,1,2,0,0,0,0,
-    0,0,0,0,0,2,1,1,2,0,0,0,
-    0,0,0,0,0,2,1,1,2,0,0,0,
-    0,0,0,0,0,0,2,2,2,0,0,0,
-    0,0,0,0,0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0,0,0,0,0,
+    2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 2, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 2, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 2, 1, 1, 1,
+    1, 2, 0, 0, 0, 0, 0, 0, 2, 1, 1, 1, 1, 1, 2, 0, 0, 0, 0, 0, 2, 1, 1, 1, 1, 1, 1, 2, 0, 0, 0, 0,
+    2, 1, 1, 1, 1, 1, 1, 1, 2, 0, 0, 0, 2, 1, 1, 1, 1, 1, 1, 1, 1, 2, 0, 0, 2, 1, 1, 1, 1, 1, 2, 2,
+    2, 2, 2, 0, 2, 1, 1, 2, 1, 1, 2, 0, 0, 0, 0, 0, 2, 1, 2, 0, 2, 1, 1, 2, 0, 0, 0, 0, 2, 2, 0, 0,
+    2, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 1, 2, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0,
 ];
 
-fn draw_circle(buf: &mut [u8], w: u32, canvas_h: u32, cx: i32, cy: i32, radius: i32, color: [u8; 3], opacity: f32) {
+fn draw_circle(
+    buf: &mut [u8],
+    w: u32,
+    canvas_h: u32,
+    cx: i32,
+    cy: i32,
+    radius: i32,
+    color: [u8; 3],
+    opacity: f32,
+) {
     for dy in -radius..=radius {
         for dx in -radius..=radius {
             if dx * dx + dy * dy <= radius * radius {

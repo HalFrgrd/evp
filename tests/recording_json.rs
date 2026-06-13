@@ -575,10 +575,22 @@ Screenshot {json}
 
     // Verify SVG content
     let svg_content = std::fs::read_to_string(&svg_path).unwrap();
-    assert!(svg_content.contains("<svg"), "SVG file doesn't contain <svg tag");
-    assert!(svg_content.contains("</svg>"), "SVG file doesn't contain </svg> tag");
-    assert!(!svg_content.contains("<animate"), "SVG screenshot contains <animate element");
-    assert!(!svg_content.contains("<set"), "SVG screenshot contains <set element");
+    assert!(
+        svg_content.contains("<svg"),
+        "SVG file doesn't contain <svg tag"
+    );
+    assert!(
+        svg_content.contains("</svg>"),
+        "SVG file doesn't contain </svg> tag"
+    );
+    assert!(
+        !svg_content.contains("<animate"),
+        "SVG screenshot contains <animate element"
+    );
+    assert!(
+        !svg_content.contains("<set"),
+        "SVG screenshot contains <set element"
+    );
 
     // Verify SVGZ content (gzip magic bytes)
     let svgz_bytes = std::fs::read(&svgz_path).unwrap();

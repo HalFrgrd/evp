@@ -5,10 +5,12 @@ You write a `.tape` file and run `evp my_sript.tape` to produce smooth, high qua
 
 EVP is a rewrite of [VHS](https://github.com/charmbracelet/vhs) with some key improvements.
 
+See it in action at [flyline](https://github.com/HalFrgrd/flyline) or below:
+
 ## VHS comparison
 EVP is extends [VHS](https://github.com/charmbracelet/vhs) in these ways:
 - Significantly faster. No more skipped frames when creating demos in GHA!
-- Supports [kitty extended keycodes](https://sw.kovidgoyal.net/kitty/keyboard-protocol/). e.g:
+- Supports [Kitty extended keycodes](https://sw.kovidgoyal.net/kitty/keyboard-protocol/). e.g:
     - Ctrl+Shift+Alt+Left
     - Command+Alt+PageUp
 - Supports animated SVGs:
@@ -30,19 +32,41 @@ EVP is extends [VHS](https://github.com/charmbracelet/vhs) in these ways:
 
 ## Technology
 EVP runs a real shell inside an embedded [libghostty](https://ghostty.org) terminal.
-This allows us to use ...
+This allows us to support advanced terminal features in a headless environment such as: complex key combinations; mouse input support; legacy escape codes.
 
 The SVG animations are done using [SMIL](https://developer.mozilla.org/en-US/docs/Web/SVG/Guides/SVG_animation_with_SMIL).
 Fonts are embedded into the SVG using [this method](https://stackoverflow.com/questions/79680618/how-to-embed-a-font-inside-a-svg-file).
-A custom optimizer to reduce the file size and complexity.
+A custom optimizer reduces the file size and complexity.
+All the text on one terminal row is rendered inside of a `<text>` span which helps the browser copy the right text when you select and copy from the SVG.
 
 GIF rendering is powered by [gifski](https://crates.io/crates/gifski).
 
 ## Install
 
+### Quick install: `install.sh`
 
+> [!TIP]
+> No `sudo` required
+```bash
+curl -sSfL https://raw.githubusercontent.com/HalFrgrd/evp/master/install.sh | sh
+```
+
+### Build locally
+```bash
+docker bake extract-libghostty
+cargo build 
+```
 
 ## Usage
+```bash
+# Write your script 
+
+```
+
+### GHA
+
+
+
 
 
 ## Script Reference
