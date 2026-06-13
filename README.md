@@ -36,7 +36,7 @@ EVP is extends [VHS](https://github.com/charmbracelet/vhs) in these ways:
 - EVP has no runtime dependencies
     - It is a statically linked [musl binary](https://www.musl-libc.org/)
     - A collection of useful fonts are embedded into EVP
-- Mouse support: you can script mouse input (clicking, dragging, mouse moving) ![mouse_small](https://github.com/HalFrgrd/evp/releases/download/assets/mouse_small.svg)
+- Mouse support: you can script mouse input (clicking, dragging, mouse moving) <img src="https://github.com/HalFrgrd/evp/releases/download/assets/mouse_small.gif" alt="mouse_small" width="200" />
 - Set the terminal size by number of rows / cols or by number of pixels.
 - Coming soon: resize support
 - Coming soon: snapshot process metrics to help debug interactive use
