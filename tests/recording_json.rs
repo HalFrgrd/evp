@@ -538,3 +538,49 @@ Sleep 200ms
         }
     }
 }
+
+#[test]
+fn svg_and_svgz_screenshots_render_successfully() {
+    let temp_dir = std::env::temp_dir();
+    let unique_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let svg_path = temp_dir.join(format!("test-shot-{unique_id}.svg"));
+    let svgz_path = temp_dir.join(format!("test-shot-{unique_id}.svgz"));
+
+    let tape = format!(
+        r#"
+Output out.gif
+Set Width 800
+Set Height 300
+Set FontSize 20
+Set Shell /bin/sh
+Sleep 200ms
+Screenshot {svg}
+Screenshot {svgz}
+"#,
+        svg = svg_path.to_str().unwrap(),
+        svgz = svgz_path.to_str().unwrap(),
+    );
+
+    let _rec = record(&tape);
+
+    assert!(svg_path.exists(), "SVG screenshot file does not exist");
+    assert!(svgz_path.exists(), "SVGZ screenshot file does not exist");
+
+    // Verify SVG content
+    let svg_content = std::fs::read_to_string(&svg_path).unwrap();
+    assert!(svg_content.contains("<svg"), "SVG file doesn't contain <svg tag");
+    assert!(svg_content.contains("</svg>"), "SVG file doesn't contain </svg> tag");
+
+    // Verify SVGZ content (gzip magic bytes)
+    let svgz_bytes = std::fs::read(&svgz_path).unwrap();
+    assert!(svgz_bytes.len() >= 2);
+    assert_eq!(svgz_bytes[0], 0x1f);
+    assert_eq!(svgz_bytes[1], 0x8b);
+
+    // Clean up
+    let _ = std::fs::remove_file(svg_path);
+    let _ = std::fs::remove_file(svgz_path);
+}

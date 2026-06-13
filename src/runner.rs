@@ -1028,31 +1028,64 @@ fn resolve_output_path(path: &str) -> PathBuf {
 }
 
 fn write_screenshot(frame: &RawFrame, script: &Script, path: &std::path::Path) -> Result<()> {
-    let render_opts = crate::RenderOptions {
-        font_path: script.settings.font_family.clone(),
-        font_size: script.settings.font_size,
-        line_height: script.settings.line_height,
-        letter_spacing: script.settings.letter_spacing,
-        frame_style: FrameStyle {
-            canvas_width_px: Some(script.settings.width),
-            canvas_height_px: Some(script.settings.height),
-            padding_px: script.settings.padding,
-            margin_px: script.settings.margin,
-            margin_fill: script.settings.margin_fill,
-            window_bar: script.settings.window_bar,
-            window_bar_size_px: script.settings.window_bar_size,
-            border_radius_px: script.settings.border_radius,
-        },
-        no_system_fonts: false,
-    };
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating screenshot directory {}", parent.display()))?;
     }
-    crate::render_gif::render_png_frame(frame, &render_opts, path)
-        .with_context(|| format!("writing screenshot {}", path.display()))
+
+    let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
+    if ext.eq_ignore_ascii_case("png") {
+        let render_opts = crate::RenderOptions {
+            font_path: script.settings.font_family.clone(),
+            font_size: script.settings.font_size,
+            line_height: script.settings.line_height,
+            letter_spacing: script.settings.letter_spacing,
+            frame_style: FrameStyle {
+                canvas_width_px: Some(script.settings.width),
+                canvas_height_px: Some(script.settings.height),
+                padding_px: script.settings.padding,
+                margin_px: script.settings.margin,
+                margin_fill: script.settings.margin_fill,
+                window_bar: script.settings.window_bar,
+                window_bar_size_px: script.settings.window_bar_size,
+                border_radius_px: script.settings.border_radius,
+            },
+            no_system_fonts: false,
+        };
+        crate::render_gif::render_png_frame(frame, &render_opts, path)
+            .with_context(|| format!("writing screenshot {}", path.display()))
+    } else if ext.eq_ignore_ascii_case("svg") || ext.eq_ignore_ascii_case("svgz") {
+        let cfg = derive_options(&script.settings);
+        let svg_opts = crate::render_svg::SvgOptions {
+            font_path: script.settings.font_family.clone(),
+            font_size: script.settings.font_size,
+            ..Default::default()
+        };
+        let s = crate::render_svg::render_svg_frame_to_string(frame, cfg, &svg_opts)?;
+        let is_svgz = ext.eq_ignore_ascii_case("svgz");
+        let file = std::fs::File::create(path).with_context(|| format!("create {}", path.display()))?;
+        if is_svgz {
+            use flate2::Compression;
+            use flate2::write::GzEncoder;
+            use std::io::Write;
+            let mut encoder = GzEncoder::new(file, Compression::best());
+            encoder
+                .write_all(s.as_bytes())
+                .with_context(|| format!("writing gzipped {}", path.display()))?;
+            encoder.finish().context("finalising gzip compression")?;
+        } else {
+            use std::io::Write;
+            let mut writer = std::io::BufWriter::new(file);
+            writer
+                .write_all(s.as_bytes())
+                .with_context(|| format!("writing {}", path.display()))?;
+        }
+        Ok(())
+    } else {
+        anyhow::bail!("Unsupported screenshot extension: {}", ext);
+    }
 }
 
 fn matches_wait(term: &Terminal<'_, '_>, w: &WaitState) -> Result<bool> {

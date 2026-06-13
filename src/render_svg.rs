@@ -325,6 +325,15 @@ pub fn render_svg_to_string(rec: &Recording, opts: &SvgOptions) -> Result<String
     render_from_frames(&frames, cfg, opts)
 }
 
+/// Render a single [`RawFrame`] as a static SVG document returned as a `String`.
+pub fn render_svg_frame_to_string(
+    frame: &RawFrame,
+    cfg: ViewportConfig,
+    opts: &SvgOptions,
+) -> Result<String> {
+    render_from_frames(std::slice::from_ref(frame), cfg, opts)
+}
+
 // ---------------------------------------------------------------------------
 // Core rendering logic shared by both paths
 // ---------------------------------------------------------------------------

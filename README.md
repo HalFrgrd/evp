@@ -7,10 +7,12 @@ EVP is a rewrite of [VHS](https://github.com/charmbracelet/vhs) with some key im
 
 EVP runs a real shell inside an embedded [libghostty](https://ghostty.org) terminal.
 
-
-EVP is very similar to [VHS](https://github.com/charmbracelet/vhs) except:
-- significantly faster. The gif is ready as soon as the recording finishes.
-- all key codes possible
+## VHS comparison
+EVP is extends [VHS](https://github.com/charmbracelet/vhs) in these ways:
+- Significantly faster. No more skipped frames when creating demos in GHA!
+- Supports kitty extended keycodes. e.g:
+    - Ctrl+Shift+Alt+Left
+    - Ctrl+Alt+Shift+P
 - specify full shell path with arguments
 - SVG output (as well as gif)
 - no runtime dependencies (everything is statically linked)

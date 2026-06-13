@@ -208,8 +208,12 @@ fn parse_line(
                 .first()
                 .map(|t| unquote(t).to_string())
                 .ok_or_else(|| anyhow!("Screenshot needs a path"))?;
-            if !path.to_ascii_lowercase().ends_with(".png") {
-                bail!("Screenshot path must end with .png (got `{path}`)");
+            let path_lower = path.to_ascii_lowercase();
+            if !path_lower.ends_with(".png")
+                && !path_lower.ends_with(".svg")
+                && !path_lower.ends_with(".svgz")
+            {
+                bail!("Screenshot path must end with .png, .svg, or .svgz (got `{path}`)");
             }
             script.events.push(Event::Screenshot(path));
         }
@@ -988,6 +992,10 @@ mod tests {
     fn screenshot_parses() {
         let s = parse("Output out.gif\nScreenshot shot.png\n").unwrap();
         assert!(matches!(&s.events[0], Event::Screenshot(p) if p == "shot.png"));
+        let s = parse("Output out.gif\nScreenshot shot.svg\n").unwrap();
+        assert!(matches!(&s.events[0], Event::Screenshot(p) if p == "shot.svg"));
+        let s = parse("Output out.gif\nScreenshot shot.svgz\n").unwrap();
+        assert!(matches!(&s.events[0], Event::Screenshot(p) if p == "shot.svgz"));
     }
 
     #[test]
