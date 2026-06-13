@@ -148,7 +148,7 @@ Type@10ms "fast typing"             # Type text at an overridden speed of 10ms
 Enter                               # Press key alias (equivalent to Key "Enter" / Key "Return")
 Backspace 5                         # Repeat a key alias N times (press Backspace 5 times)
 Ctrl+C                              # Press key combination modifier
-Ctrl+Shift+Alt+Left                 # 
+Ctrl+Shift+Alt+Left                 # Even complex key codes are possible.
 Press Down                          # Explicitly hold a key down
 Release Down                        # Explicitly release a held key
 
@@ -156,8 +156,9 @@ Release Down                        # Explicitly release a held key
 Click 10 20                         # Left click at column 10, row 20
 RightClick 10 20                    # Right click at column 10, row 20
 DoubleClick 10 20                   # Double click at column 10, row 20
-MouseMove 0 0 10 10                 # Move cursor from (0,0) to (10,10)
-MouseDrag 0 0 10 10                 # Left click and drag from (0,0) to (10,10)
+MouseMove@100ms 0 0 10 10           # Move cursor from (0,0) to (10,10) using default sigmoid (EaseInOutCubic) easing
+MouseMove@100ms@EaseInOutElastic 0 0 10 10 # Move cursor with EaseInOutElastic easing curve override
+MouseDrag@EaseInOutQuad 0 0 10 10   # Left click and drag with EaseInOutQuad easing curve
 MouseScroll 10 20 Up                # Scroll mouse wheel Up or Down at column 10, row 20
 
 # --- Wait / Synchronization ---

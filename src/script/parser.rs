@@ -8,6 +8,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use easing_function::easings::StandardEasing;
 
 use anyhow::{Context, Result, anyhow, bail};
 
@@ -325,7 +326,7 @@ fn parse_line(
             script.events.push(Event::DoubleClick { col, row, delay });
         }
         h if h == "MouseDrag" || h.starts_with("MouseDrag@") => {
-            let delay = parse_at_duration(h, "MouseDrag", script.settings.typing_speed)?;
+            let (delay, easing) = parse_mouse_config(h, "MouseDrag", script.settings.typing_speed)?;
             let (start_col, start_row, end_col, end_row) = parse_drag_coords(rest)?;
             script.events.push(Event::MouseDrag {
                 start_col,
@@ -333,10 +334,11 @@ fn parse_line(
                 end_col,
                 end_row,
                 delay,
+                easing,
             });
         }
         h if h == "MouseMove" || h.starts_with("MouseMove@") => {
-            let delay = parse_at_duration(h, "MouseMove", script.settings.typing_speed)?;
+            let (delay, easing) = parse_mouse_config(h, "MouseMove", script.settings.typing_speed)?;
             let (start_col, start_row, end_col, end_row) = parse_drag_coords(rest)?;
             script.events.push(Event::MouseMove {
                 start_col,
@@ -344,6 +346,7 @@ fn parse_line(
                 end_col,
                 end_row,
                 delay,
+                easing,
             });
         }
         h if h == "MouseScroll" || h.starts_with("MouseScroll@") => {
@@ -701,6 +704,76 @@ fn parse_explicit_key_action(tokens: &[String], action: KeyAction) -> Result<Eve
         count,
         delay,
     })
+}
+
+fn parse_easing(name: &str) -> Result<StandardEasing> {
+    match name.to_ascii_lowercase().replace("-", "").replace("_", "").as_str() {
+        "linear" => Ok(StandardEasing::Linear),
+        "easeinsine" => Ok(StandardEasing::InSine),
+        "easeoutsine" => Ok(StandardEasing::OutSine),
+        "easeinoutsine" => Ok(StandardEasing::InOutSine),
+        "easeinquad" | "easeinquadradic" => Ok(StandardEasing::InQuadradic),
+        "easeoutquad" | "easeoutquadradic" => Ok(StandardEasing::OutQuadradic),
+        "easeinoutquad" | "easeinoutquadradic" => Ok(StandardEasing::InOutQuadradic),
+        "easeincubic" => Ok(StandardEasing::InCubic),
+        "easeoutcubic" => Ok(StandardEasing::OutCubic),
+        "easeinoutcubic" => Ok(StandardEasing::InOutCubic),
+        "easeinquart" | "easeinquartic" => Ok(StandardEasing::InQuartic),
+        "easeoutquart" | "easeoutquartic" => Ok(StandardEasing::OutQuartic),
+        "easeinoutquart" | "easeinoutquartic" => Ok(StandardEasing::InOutQuartic),
+        "easeinquint" | "easeinquintic" => Ok(StandardEasing::InQuintic),
+        "easeoutquint" | "easeoutquintic" => Ok(StandardEasing::OutQuintic),
+        "easeinoutquint" | "easeinoutquintic" => Ok(StandardEasing::InOutQuintic),
+        "easeinexpo" | "easeinexponential" => Ok(StandardEasing::InExponential),
+        "easeoutexpo" | "easeoutexponential" => Ok(StandardEasing::OutExponential),
+        "easeinoutexpo" | "easeinoutexponential" => Ok(StandardEasing::InOutExponential),
+        "easeincirc" | "easeincircular" => Ok(StandardEasing::InCircular),
+        "easeoutcirc" | "easeoutcircular" => Ok(StandardEasing::OutCircular),
+        "easeinoutcirc" | "easeinoutcircular" => Ok(StandardEasing::InOutCircular),
+        "easeinback" => Ok(StandardEasing::InBack),
+        "easeoutback" => Ok(StandardEasing::OutBack),
+        "easeinoutback" => Ok(StandardEasing::InOutBack),
+        "easeinelastic" => Ok(StandardEasing::InElastic),
+        "easeoutelastic" => Ok(StandardEasing::OutElastic),
+        "easeinoutelastic" => Ok(StandardEasing::InOutElastic),
+        "easeinbounce" => Ok(StandardEasing::InBounce),
+        "easeoutbounce" => Ok(StandardEasing::OutBounce),
+        "easeinoutbounce" => Ok(StandardEasing::InOutBounce),
+        _ => Err(anyhow!("unsupported easing function: {}", name)),
+    }
+}
+
+fn parse_mouse_config(
+    head: &str,
+    prefix: &str,
+    default_delay: Duration,
+) -> Result<(Duration, Option<StandardEasing>)> {
+    let parts = head.strip_prefix(prefix)
+        .and_then(|s| s.strip_prefix('@'))
+        .unwrap_or("");
+    if parts.is_empty() {
+        return Ok((default_delay, None));
+    }
+    
+    // Split by '@'
+    let sub_parts: Vec<&str> = parts.split('@').collect();
+    match sub_parts.len() {
+        1 => {
+            let token = sub_parts[0];
+            if let Ok(easing) = parse_easing(token) {
+                Ok((default_delay, Some(easing)))
+            } else {
+                let delay = parse_duration(token)?;
+                Ok((delay, None))
+            }
+        }
+        2 => {
+            let delay = parse_duration(sub_parts[0])?;
+            let easing = parse_easing(sub_parts[1])?;
+            Ok((delay, Some(easing)))
+        }
+        _ => bail!("Invalid mouse configuration syntax on {}: {}", prefix, head),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1187,11 +1260,11 @@ mod tests {
         ));
         assert!(matches!(
             &s.events[4],
-            Event::MouseDrag { start_col: 10, start_row: 10, end_col: 20, end_row: 20, delay } if *delay == Duration::from_millis(50)
+            Event::MouseDrag { start_col: 10, start_row: 10, end_col: 20, end_row: 20, delay, easing: None } if *delay == Duration::from_millis(50)
         ));
         assert!(matches!(
             &s.events[5],
-            Event::MouseMove { start_col: 30, start_row: 30, end_col: 40, end_row: 40, delay } if *delay == Duration::from_millis(50)
+            Event::MouseMove { start_col: 30, start_row: 30, end_col: 40, end_row: 40, delay, easing: None } if *delay == Duration::from_millis(50)
         ));
         assert!(matches!(
             &s.events[6],
@@ -1200,6 +1273,23 @@ mod tests {
         assert!(matches!(
             &s.events[7],
             Event::MouseScroll { col: 70, row: 80, direction: ScrollDirection::Down, delay } if *delay == Duration::from_millis(50)
+        ));
+
+        // Test explicit custom easings
+        let src_easing = r#"
+            Output out.gif
+            MouseMove@100ms@EaseInOutElastic 10 10 20 20
+            MouseDrag@EaseInOutQuad 30 30 40 40
+        "#;
+        let s_easing = parse(src_easing).unwrap();
+        assert_eq!(s_easing.events.len(), 2);
+        assert!(matches!(
+            &s_easing.events[0],
+            Event::MouseMove { start_col: 10, start_row: 10, end_col: 20, end_row: 20, delay, easing: Some(StandardEasing::InOutElastic) } if *delay == Duration::from_millis(100)
+        ));
+        assert!(matches!(
+            &s_easing.events[1],
+            Event::MouseDrag { start_col: 30, start_row: 30, end_col: 40, end_row: 40, delay, easing: Some(StandardEasing::InOutQuadradic) } if *delay == Duration::from_millis(50)
         ));
     }
 }

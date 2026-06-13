@@ -17,6 +17,7 @@
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+use easing_function::easings::StandardEasing;
 
 use anyhow::{Context, Result};
 use crossbeam_channel::{Sender, TrySendError};
@@ -158,51 +159,54 @@ pub fn derive_options(s: &Settings) -> ViewportConfig {
     )
 }
 
-#[derive(Clone, Copy, Debug)]
-struct MouseKeyframe {
-    at: Duration,
-    col: f32,
-    row: f32,
-    state: crate::recording::MouseState,
+#[derive(Clone, Debug)]
+pub struct MouseSegment {
+    pub start_time: Duration,
+    pub end_time: Duration,
+    pub start_col: f32,
+    pub start_row: f32,
+    pub end_col: f32,
+    pub end_row: f32,
+    pub state: crate::recording::MouseState,
+    pub easing: Option<StandardEasing>,
 }
 
 fn resolve_mouse_position(
     recorded_at: Duration,
-    keyframes: &[MouseKeyframe],
+    segments: &[MouseSegment],
 ) -> Option<(f32, f32, crate::recording::MouseState)> {
-    if keyframes.is_empty() {
+    if segments.is_empty() {
         return None;
     }
 
-    let prev_idx = keyframes.iter().rposition(|k| k.at <= recorded_at);
-    let prev = match prev_idx {
-        Some(idx) => &keyframes[idx],
-        None => return None,
-    };
-
-    let next = keyframes.get(prev_idx.unwrap() + 1);
-    match next {
-        Some(n) => {
-            let gap = n.at.saturating_sub(prev.at);
-            if gap > Duration::ZERO && gap <= Duration::from_millis(500) {
-                let elapsed = recorded_at.saturating_sub(prev.at);
-                let f = elapsed.as_secs_f32() / gap.as_secs_f32();
-                let f = f.clamp(0.0, 1.0);
-                let col = prev.col + f * (n.col - prev.col);
-                let row = prev.row + f * (n.row - prev.row);
-                let state = if prev.state == crate::recording::MouseState::Clicking
-                    || n.state == crate::recording::MouseState::Clicking
-                {
-                    crate::recording::MouseState::Clicking
-                } else {
-                    prev.state
-                };
-                Some((col, row, state))
-            } else {
-                Some((prev.col, prev.row, prev.state))
-            }
+    let active = segments.iter().find(|s| s.start_time <= recorded_at && recorded_at <= s.end_time);
+    if let Some(s) = active {
+        let duration = s.end_time.saturating_sub(s.start_time);
+        if duration == Duration::ZERO {
+            return Some((s.end_col, s.end_row, s.state));
         }
-        None => Some((prev.col, prev.row, prev.state)),
+        let elapsed = recorded_at.saturating_sub(s.start_time);
+        let f = elapsed.as_secs_f32() / duration.as_secs_f32();
+        let f = f.clamp(0.0, 1.0);
+        
+        use easing_function::Easing;
+        let easing = s.easing.unwrap_or(StandardEasing::InOutCubic);
+        let f_eased = easing.ease(f);
+        
+        let col = s.start_col + f_eased * (s.end_col - s.start_col);
+        let row = s.start_row + f_eased * (s.end_row - s.start_row);
+        
+        Some((col, row, s.state))
+    } else {
+        let last_before = segments.iter()
+            .filter(|s| s.end_time <= recorded_at)
+            .max_by_key(|s| s.end_time);
+        if let Some(s) = last_before {
+            Some((s.end_col, s.end_row, crate::recording::MouseState::Moving))
+        } else {
+            let first = &segments[0];
+            Some((first.start_col, first.start_row, crate::recording::MouseState::Moving))
+        }
     }
 }
 
@@ -268,38 +272,7 @@ pub fn run_with_raw_frame_consumers(
 
     let mut translator = KeyTranslator::new()?;
 
-    let (timeline, timeline_end) = build_timeline(&script.events, &script.settings);
-
-    // Pre-scan timeline to extract mouse keyframes
-    let mut mouse_keyframes = Vec::new();
-    let mut mouse_pressed = false;
-    for scheduled in &timeline {
-        if let Event::MouseInput { action, col, row, .. } = &scheduled.event {
-            let state = match action {
-                crate::script::MouseAction::Press => {
-                    mouse_pressed = true;
-                    crate::recording::MouseState::Clicking
-                }
-                crate::script::MouseAction::Release => {
-                    mouse_pressed = false;
-                    crate::recording::MouseState::Moving
-                }
-                crate::script::MouseAction::Motion => {
-                    if mouse_pressed {
-                        crate::recording::MouseState::Dragging
-                    } else {
-                        crate::recording::MouseState::Moving
-                    }
-                }
-            };
-            mouse_keyframes.push(MouseKeyframe {
-                at: scheduled.at,
-                col: *col as f32,
-                row: *row as f32,
-                state,
-            });
-        }
-    }
+    let (timeline, mouse_segments, timeline_end) = build_timeline(&script.events, &script.settings);
 
     // The recording continues for one full frame interval after the last
     // event so the final state is always captured.
@@ -457,7 +430,7 @@ pub fn run_with_raw_frame_consumers(
                         last_cursor_moved_at,
                         script.settings.theme.cursor_accent_rgb().ok().flatten(),
                     )?;
-                    frame.mouse_cursor = resolve_mouse_position(recorded_at, &mouse_keyframes);
+                    frame.mouse_cursor = resolve_mouse_position(recorded_at, &mouse_segments);
                     if let Some(prev) = prev_cursor_capture {
                         if raw_cursor_pos != prev {
                             last_cursor_moved_at = Some(recorded_at);
@@ -665,8 +638,9 @@ struct Scheduled {
     event: Event,
 }
 
-fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Duration) {
+fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Vec<MouseSegment>, Duration) {
     let mut out = Vec::new();
+    let mut mouse_segments = Vec::new();
     let mut cursor = Duration::ZERO;
     let speed = settings.playback_speed.max(0.01);
     let scale = |d: Duration| Duration::from_secs_f64(d.as_secs_f64() / speed as f64);
@@ -675,9 +649,6 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Dur
         match ev {
             Event::Type { text, delay } => {
                 let per = scale(*delay);
-                // `Type` produces N character events per character so each
-                // codepoint has its own deadline. We expand it here so the
-                // runner just sends a single event at each tick.
                 for (i, ch) in text.chars().enumerate() {
                     if i > 0 {
                         cursor += per;
@@ -686,13 +657,10 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Dur
                         at: cursor,
                         event: Event::Type {
                             text: ch.to_string(),
-                            // `delay` on the expanded events is unused.
                             delay: Duration::ZERO,
                         },
                     });
                 }
-                // Preserve the gap after the final typed character so the
-                // next event (e.g. `Enter`) does not share the same timestamp.
                 if !text.is_empty() {
                     cursor += per;
                 }
@@ -722,6 +690,16 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Dur
             }
             Event::Click { col, row, delay } => {
                 let per = scale(*delay);
+                mouse_segments.push(MouseSegment {
+                    start_time: cursor,
+                    end_time: cursor + per,
+                    start_col: *col as f32,
+                    start_row: *row as f32,
+                    end_col: *col as f32,
+                    end_row: *row as f32,
+                    state: crate::recording::MouseState::Clicking,
+                    easing: None,
+                });
                 out.push(Scheduled {
                     at: cursor,
                     event: Event::MouseInput {
@@ -744,6 +722,16 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Dur
             }
             Event::RightClick { col, row, delay } => {
                 let per = scale(*delay);
+                mouse_segments.push(MouseSegment {
+                    start_time: cursor,
+                    end_time: cursor + per,
+                    start_col: *col as f32,
+                    start_row: *row as f32,
+                    end_col: *col as f32,
+                    end_row: *row as f32,
+                    state: crate::recording::MouseState::Clicking,
+                    easing: None,
+                });
                 out.push(Scheduled {
                     at: cursor,
                     event: Event::MouseInput {
@@ -766,6 +754,26 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Dur
             }
             Event::DoubleClick { col, row, delay } => {
                 let per = scale(*delay);
+                mouse_segments.push(MouseSegment {
+                    start_time: cursor,
+                    end_time: cursor + per,
+                    start_col: *col as f32,
+                    start_row: *row as f32,
+                    end_col: *col as f32,
+                    end_row: *row as f32,
+                    state: crate::recording::MouseState::Clicking,
+                    easing: None,
+                });
+                mouse_segments.push(MouseSegment {
+                    start_time: cursor + per,
+                    end_time: cursor + 2 * per,
+                    start_col: *col as f32,
+                    start_row: *row as f32,
+                    end_col: *col as f32,
+                    end_row: *row as f32,
+                    state: crate::recording::MouseState::Clicking,
+                    easing: None,
+                });
                 for _ in 0..2 {
                     out.push(Scheduled {
                         at: cursor,
@@ -826,6 +834,7 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Dur
                 end_col,
                 end_row,
                 delay,
+                easing,
             } => {
                 let per = scale(*delay);
                 let points = generate_line_points(
@@ -845,6 +854,28 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Dur
                             row: y0,
                         },
                     });
+                    
+                    mouse_segments.push(MouseSegment {
+                        start_time: cursor,
+                        end_time: cursor + (points.len() - 1) as u32 * per,
+                        start_col: *start_col as f32,
+                        start_row: *start_row as f32,
+                        end_col: *end_col as f32,
+                        end_row: *end_row as f32,
+                        state: crate::recording::MouseState::Dragging,
+                        easing: *easing,
+                    });
+                    mouse_segments.push(MouseSegment {
+                        start_time: cursor + (points.len() - 1) as u32 * per,
+                        end_time: cursor + points.len() as u32 * per,
+                        start_col: *end_col as f32,
+                        start_row: *end_row as f32,
+                        end_col: *end_col as f32,
+                        end_row: *end_row as f32,
+                        state: crate::recording::MouseState::Clicking,
+                        easing: None,
+                    });
+
                     for &(x, y) in points.iter().skip(1) {
                         cursor += per;
                         out.push(Scheduled {
@@ -876,6 +907,7 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Dur
                 end_col,
                 end_row,
                 delay,
+                easing,
             } => {
                 let per = scale(*delay);
                 let points = generate_line_points(
@@ -895,6 +927,18 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Dur
                             row: y0,
                         },
                     });
+
+                    mouse_segments.push(MouseSegment {
+                        start_time: cursor,
+                        end_time: cursor + (points.len() - 1) as u32 * per,
+                        start_col: *start_col as f32,
+                        start_row: *start_row as f32,
+                        end_col: *end_col as f32,
+                        end_row: *end_row as f32,
+                        state: crate::recording::MouseState::Moving,
+                        easing: *easing,
+                    });
+
                     for &(x, y) in points.iter().skip(1) {
                         cursor += per;
                         out.push(Scheduled {
@@ -921,7 +965,7 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Dur
             }),
         }
     }
-    (out, cursor)
+    (out, mouse_segments, cursor)
 }
 
 fn generate_line_points(x0: i16, y0: i16, x1: i16, y1: i16) -> Vec<(u16, u16)> {
@@ -1618,7 +1662,7 @@ mod tests {
             },
         ];
 
-        let (timeline, end) = build_timeline(&events, &Settings::default());
+        let (timeline, _, end) = build_timeline(&events, &Settings::default());
         assert_eq!(timeline.len(), 3);
         assert_eq!(timeline[0].at, Duration::from_millis(0));
         assert_eq!(timeline[1].at, Duration::from_millis(40));
