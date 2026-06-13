@@ -36,7 +36,7 @@ EVP is extends [VHS](https://github.com/charmbracelet/vhs) in these ways:
 - EVP has no runtime dependencies
     - It is a statically linked [musl binary](https://www.musl-libc.org/)
     - A collection of useful fonts are embedded into EVP
-- Mouse support: you can script mouse input (clicking, dragging, mouse moving) <img src="https://github.com/HalFrgrd/evp/releases/download/assets/mouse_small.gif" alt="mouse_small" width="200" />
+- Mouse support: you can script mouse input (clicking, dragging, mouse moving) <img src="https://github.com/HalFrgrd/evp/releases/download/assets/mouse_small.gif" alt="mouse_small" width="500" />
 - Set the terminal size by number of rows / cols or by number of pixels.
 - Coming soon: resize support
 - Coming soon: snapshot process metrics to help debug interactive use
@@ -166,9 +166,9 @@ Wait "Ready"                        # Wait for output matching text pattern
 Wait /regex/                        # Wait for output matching regular expression
 Wait+Screen /regex/                 # Wait scanning full screen instead of only the last line
 Wait+Line /regex/                   # Explicitly wait scanning last line only (default)
-Wait@10ms /regex/                   # Wait with an overridden timeout of 10ms (default is 15s)
-Wait+Line@10ms /regex/              # Wait scanning last line with 10ms timeout override
-Wait+Screen@10ms /regex/            # Wait scanning full screen with 10ms timeout override
+Wait@1s /regex/                     # Wait with an overridden timeout of 1s (default is 15s)
+Wait+Line@1s /regex/                # Wait scanning last line with 1s timeout override
+Wait+Screen@1s /regex/              # Wait scanning full screen with 1s timeout override
 ```
 <!-- END_REF_SCRIPT -->
 
