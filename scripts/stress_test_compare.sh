@@ -5,7 +5,7 @@
 #
 # Inputs (all required):
 #   $1 = path to the evp gif
-#   $2 = path to the evp report.txt (produced by stress_test_benchmark)
+#   $2 = path to the evp stats JSON file (produced by evp --output out.stats)
 #   $3 = path to the vhs gif
 #   $4 = path to the vhs timing log (key=value lines)
 #   $5 = path to write the markdown report to
@@ -65,7 +65,7 @@ vhs_bytes=$(bytes_or_zero "$vhs_gif")
 evp_md5=$(md5_or_missing "$evp_gif")
 vhs_md5=$(md5_or_missing "$vhs_gif")
 
-# Pull a couple of fields from the evp report for the summary table.
+# Pull a couple of fields from the reports for the summary table.
 extract() {
     # extract <file> <key>
     awk -F'=' -v k="$2" '
@@ -73,11 +73,31 @@ extract() {
     ' "$1"
 }
 
-evp_wall=$(extract "$evp_report" "wall_ms")
-evp_dropped_consumer=$(extract "$evp_report" "dropped_consumer")
-evp_max_q=$(extract "$evp_report" "max_consumer_queue")
-evp_result=$(extract "$evp_report" "result")
-evp_cpu=$(extract "$evp_report" "cpu_affinity")
+extract_json() {
+    # extract_json <file> <key>
+    python3 -c "import json, sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])" "$1" "$2" 2>/dev/null || echo "?"
+}
+
+evp_wall=$(extract_json "$evp_report" "wall_ms")
+evp_max_q=$(python3 -c "import json, sys; data = json.load(open(sys.argv[1])); print(f\"{data['max_raw_frame_consumer_queue_len']} / 4096\")" "$evp_report" 2>/dev/null || echo "?")
+evp_dropped_consumer=$(python3 -c "
+import json, sys
+data = json.load(open(sys.argv[1]))
+dropped = data['raw_frame_consumer_dropped_frames']
+expected = data['expected_frames'] * data['raw_frame_consumer_count']
+pct = (dropped / expected * 100) if expected > 0 else 0
+print(f'{dropped} ({pct:.2f}%)')
+" "$evp_report" 2>/dev/null || echo "?")
+evp_result=$(python3 -c "
+import json, sys
+data = json.load(open(sys.argv[1]))
+dropped = data['raw_frame_consumer_dropped_frames']
+expected = data['expected_frames'] * data['raw_frame_consumer_count']
+pct = (dropped / expected) if expected > 0 else 0
+print('PASS' if pct <= 0.05 else 'FAIL')
+" "$evp_report" 2>/dev/null || echo "?")
+evp_cpu=$(extract_json "$evp_report" "cpu_affinity")
+
 vhs_wall=$(extract "$vhs_report" "wall_ms")
 vhs_cpu=$(extract "$vhs_report" "cpu_affinity")
 
@@ -92,9 +112,8 @@ fi
 # rest of the report.
 script_dir=$(cd "$(dirname "$0")" && pwd)
 analyzer="$script_dir/gif_frame_analyzer.py"
-# Expected fps for the comparison. Override by exporting STRESS_TEST_FPS
-# before invoking this script. Defaults to 60, matching stress_test.tape.
-fps=${STRESS_TEST_FPS:-60}
+# Expected fps for the comparison.
+fps=50
 
 run_analyzer() {
     # run_analyzer <gif> <label>

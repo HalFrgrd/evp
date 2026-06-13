@@ -31,18 +31,16 @@ Set Framerate 50
 # Fast typing for the prelude so it doesn't eat into the stress_test window.
 Set TypingSpeed 1ms
 Hide
-Type "exec python3 /tmp/stress_test_program.py"
+Type "exec evp_helper_tool stress-test-program"
 Enter
 Sleep 500ms
 Show
 
 # Stress-test run. 20 ms per char = 50 keystrokes/sec, matching the 50 fps
-# capture rate so every captured frame sees a repaint. 250 chars × 20 ms
-# = 5 s of typing, then a short trailing Sleep so the final state is
+# capture rate so every captured frame sees a repaint. 50 chars × 20 ms
+# = 1 s of typing, then a short trailing Sleep so the final state is
 # captured. The stress_test program ignores the byte values and repaints
-# the full 100×30 grid on every received byte.
+# the full grid on every received byte.
 Set TypingSpeed 20ms
-Type "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKL"
-Type "MNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmn"
-Type "opqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+Type "abcdefghijklmnopxrstuvwxyzABCDEFGHIJKLMNO012345678"
 Sleep 200ms

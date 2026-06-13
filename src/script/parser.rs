@@ -165,10 +165,10 @@ fn parse_line(
                 .and_then(|e| e.to_str())
                 .map(|s| s.to_ascii_lowercase());
             match ext.as_deref() {
-                Some("gif") | Some("svg") | Some("svgz") | Some("json") => {}
+                Some("gif") | Some("svg") | Some("svgz") | Some("json") | Some("stats") => {}
                 Some(other) => bail!(
                     "Output `{path}` has unsupported extension `.{other}`. \
-                     evp currently writes `.gif`, `.svg`, or `.json` only. \
+                     evp currently writes `.gif`, `.svg`, `.json`, or `.stats` only. \
                      `.mp4`, `.webm`, `.png` (frame directory), `.txt`, and `.ascii` outputs \
                      are VHS features evp does not implement yet \
                      (see README \"VHS feature parity\")."

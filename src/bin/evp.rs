@@ -241,8 +241,19 @@ fn run_script(cli: &Cli, script: &evp::Script, evp_start: Instant) -> Result<()>
         output_paths.push(path);
     }
 
-    let mut renderers = Vec::with_capacity(output_paths.len());
-    for path in &output_paths {
+    let mut stats_paths = Vec::new();
+    let mut render_paths = Vec::new();
+    for path in output_paths {
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if ext.eq_ignore_ascii_case("stats") {
+            stats_paths.push(path);
+        } else {
+            render_paths.push(path);
+        }
+    }
+
+    let mut renderers = Vec::with_capacity(render_paths.len());
+    for path in &render_paths {
         renderers.push((
             backend_for_output(path, &render_opts, !cli.no_embed_fonts, cli.no_system_fonts)?,
             path.clone(),
@@ -253,6 +264,31 @@ fn run_script(cli: &Cli, script: &evp::Script, evp_start: Instant) -> Result<()>
     let stats =
         evp::run_and_render(&script, renderers).context("running script + streaming renders")?;
     info!(frames = stats.captured_frames, "frames captured");
+
+    if !stats_paths.is_empty() {
+        let cpu_set = current_cpu_affinity().unwrap_or_else(|| "(unknown)".to_string());
+        let stats_out = StatsOutput {
+            expected_frames: stats.expected_frames,
+            captured_frames: stats.captured_frames,
+            raw_frame_consumer_count: stats.raw_frame_consumer_count,
+            max_raw_frame_consumer_queue_len: stats.max_raw_frame_consumer_queue_len,
+            raw_frame_consumer_dropped_frames: stats.raw_frame_consumer_dropped_frames,
+            wall_ms: evp_start.elapsed().as_millis(),
+            total_events: script.events.len(),
+            cpu_affinity: cpu_set,
+        };
+        let json_str = serde_json::to_string_pretty(&stats_out)
+            .context("serializing run stats to JSON")?;
+        for path in &stats_paths {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            std::fs::write(path, &json_str)
+                .with_context(|| format!("writing stats to {}", path.display()))?;
+            info!(path = %path.display(), "wrote stats output");
+        }
+    }
+
     info!(elapsed_ms = evp_start.elapsed().as_millis(), "evp finished");
     Ok(())
 }
@@ -278,9 +314,11 @@ fn backend_for_output(
         }))
     } else if ext.eq_ignore_ascii_case("json") {
         Ok(evp::renderer::RendererBackend::Json)
+    } else if ext.eq_ignore_ascii_case("stats") {
+        bail!("rendering `.stats` files from intermediate JSON recordings is not supported; `.stats` can only be generated when running a `.tape` script.");
     } else {
         bail!(
-            "only .gif, .svg, and .json outputs are supported (got `{}`)",
+            "only .gif, .svg, .json, and .stats outputs are supported (got `{}`)",
             path.display()
         );
     }
@@ -353,6 +391,34 @@ fn log_build_info_debug() {
         opt_level = env!("VERGEN_CARGO_OPT_LEVEL"),
         "build information"
     );
+}
+
+#[derive(serde::Serialize)]
+struct StatsOutput {
+    expected_frames: u64,
+    captured_frames: u64,
+    raw_frame_consumer_count: usize,
+    max_raw_frame_consumer_queue_len: usize,
+    raw_frame_consumer_dropped_frames: u64,
+    wall_ms: u128,
+    total_events: usize,
+    cpu_affinity: String,
+}
+
+#[cfg(target_os = "linux")]
+fn current_cpu_affinity() -> Option<String> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("Cpus_allowed_list:") {
+            return Some(rest.trim().to_string());
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "linux"))]
+fn current_cpu_affinity() -> Option<String> {
+    None
 }
 
 #[cfg(test)]

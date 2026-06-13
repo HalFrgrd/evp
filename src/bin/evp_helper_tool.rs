@@ -1,5 +1,5 @@
 use std::{
-    io::{Write, stdout},
+    io::{Read, Write, stdout},
     time::Duration,
 };
 
@@ -24,8 +24,9 @@ fn main() -> std::io::Result<()> {
     match mode {
         "key" => run_key_mode(),
         "mouse" => run_mouse_mode(),
+        "stress-test-program" | "stress_test_program" => run_stress_test_program(),
         _ => {
-            eprintln!("Usage: {} [key|mouse]", args[0]);
+            eprintln!("Usage: {} [key|mouse|stress-test-program]", args[0]);
             std::process::exit(1);
         }
     }
@@ -183,5 +184,129 @@ fn run_mouse_mode() -> std::io::Result<()> {
         cursor::Show
     )?;
     terminal::disable_raw_mode()?;
+    Ok(())
+}
+
+struct SimpleRng {
+    state: u64,
+}
+
+impl SimpleRng {
+    fn new(seed: u64) -> Self {
+        let state = if seed == 0 { 0xEEA } else { seed };
+        Self { state }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        let mut x = self.state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.state = x;
+        x
+    }
+
+    fn gen_range(&mut self, min: u32, max: u32) -> u32 {
+        let range = (max - min + 1) as u64;
+        min + (self.next_u64() % range) as u32
+    }
+}
+
+fn run_stress_test_program() -> std::io::Result<()> {
+    let (t_cols, t_rows) = terminal::size().unwrap_or((100, 30));
+    let cols = if t_cols == 0 { 100 } else { t_cols as usize };
+    let rows = if t_rows == 0 { 30 } else { t_rows as usize };
+    let seed = 0xEEA;
+
+    let mut rng = SimpleRng::new(seed);
+    let mut out = stdout();
+
+    let render_frame = |rng: &mut SimpleRng, out: &mut std::io::Stdout| -> std::io::Result<()> {
+        let mut buffer = String::new();
+        // Reset, hide cursor, home
+        buffer.push_str("\x1b[0m\x1b[?25l\x1b[H");
+        for r in 1..=rows {
+            buffer.push_str(&format!("\x1b[{r};1H"));
+            for _c in 0..cols {
+                let ch = char::from_u32(rng.gen_range(0x21, 0x7E)).unwrap_or(' ');
+                let fg_r = rng.gen_range(0, 255);
+                let fg_g = rng.gen_range(0, 255);
+                let fg_b = rng.gen_range(0, 255);
+                let bg_r = rng.gen_range(0, 255);
+                let bg_g = rng.gen_range(0, 255);
+                let bg_b = rng.gen_range(0, 255);
+                
+                let mut sgr = String::from("\x1b[0");
+                if rng.gen_range(0, 1) == 1 { sgr.push_str(";1"); }
+                if rng.gen_range(0, 1) == 1 { sgr.push_str(";3"); }
+                if rng.gen_range(0, 1) == 1 { sgr.push_str(";4"); }
+                if rng.gen_range(0, 1) == 1 { sgr.push_str(";7"); }
+                sgr.push_str(&format!(";38;2;{fg_r};{fg_g};{fg_b};48;2;{bg_r};{bg_g};{bg_b}m"));
+                
+                buffer.push_str(&sgr);
+                buffer.push(ch);
+            }
+        }
+        buffer.push_str("\x1b[0m");
+        out.write_all(buffer.as_bytes())?;
+        out.flush()?;
+        Ok(())
+    };
+
+    // Initial paint
+    if let Err(e) = render_frame(&mut rng, &mut out) {
+        if e.kind() == std::io::ErrorKind::BrokenPipe {
+            return Ok(());
+        }
+        return Err(e);
+    }
+
+    use std::io::IsTerminal;
+    let is_tty = std::io::stdin().is_terminal();
+    if is_tty {
+        terminal::enable_raw_mode()?;
+    }
+
+    let mut stdin = std::io::stdin();
+    let mut buf = [0u8; 1];
+    loop {
+        match stdin.read(&mut buf) {
+            Ok(0) => break, // EOF
+            Ok(_) => {
+                if buf[0] == b'q' {
+                    break;
+                }
+                if let Err(e) = render_frame(&mut rng, &mut out) {
+                    if e.kind() == std::io::ErrorKind::BrokenPipe {
+                        break;
+                    }
+                    if is_tty {
+                        let _ = terminal::disable_raw_mode();
+                    }
+                    return Err(e);
+                }
+            }
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                break;
+            }
+        }
+    }
+
+    if is_tty {
+        terminal::disable_raw_mode()?;
+    }
+    
+    // Restore cursor and clear SGR on exit so host shell isn't left in a weird state
+    if let Err(e) = out.write_all(b"\x1b[0m\x1b[?25h\n") {
+        if e.kind() != std::io::ErrorKind::BrokenPipe {
+            return Err(e);
+        }
+    } else {
+        let _ = out.flush();
+    }
+    
     Ok(())
 }
