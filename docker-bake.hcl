@@ -70,8 +70,10 @@ group "examples" {
     "example-evp_demo",
     "example-hello",
     "example-keys",
+    "example-margin",
     "example-mouse",
     "example-my_program_demo",
+    "example-padding",
     "example-progress",
     "example-shell-tour",
     "example-test"
@@ -156,4 +158,17 @@ target "example-shell-tour" {
   args     = { EXAMPLE_NAME = "shell-tour" }
   output   = ["type=local,dest=${EXTRACT_EXAMPLES_DEST}"]
 }
+
+target "example-padding" {
+  inherits = ["example-base"]
+  args     = { EXAMPLE_NAME = "padding" }
+  output   = ["type=local,dest=${EXTRACT_EXAMPLES_DEST}"]
+}
+
+target "example-margin" {
+  inherits = ["example-base"]
+  args     = { EXAMPLE_NAME = "margin" }
+  output   = ["type=local,dest=${EXTRACT_EXAMPLES_DEST}"]
+}
+
 
