@@ -10,21 +10,26 @@ EVP runs a real shell inside an embedded [libghostty](https://ghostty.org) termi
 ## VHS comparison
 EVP is extends [VHS](https://github.com/charmbracelet/vhs) in these ways:
 - Significantly faster. No more skipped frames when creating demos in GHA!
-- Supports kitty extended keycodes. e.g:
+- Supports [kitty extended keycodes](https://sw.kovidgoyal.net/kitty/keyboard-protocol/). e.g:
     - Ctrl+Shift+Alt+Left
     - Ctrl+Alt+Shift+P
-- specify full shell path with arguments
-- SVG output (as well as gif)
-- no runtime dependencies (everything is statically linked)
-- embedded, character-subsetted fonts (so SVG renders the same everywhere)
-- selectable SVG text
-- mouse support
-- TODO: resize support
-- TODO: process metrics
-- TODO: show the key inputs on screen overlay
-- render from a json recording
-- svg box drawing
-- svg copiable text
+- Supports animated SVGs:
+    - Super crisp demos
+    - You can select and copy text from the SVG as it is playing!
+    - Fonts are embedded into the SVG so the demos are portable (fonts are subsetted before embedding)
+    - SVG screenshots
+    - [Box-drawing chars](https://en.wikipedia.org/wiki/Box-drawing_characters) are rendered as SVG shapes. Don't worry, an invisible character is still written to the SVG so selecting and copying text works as expected.
+- Specify full shell path with arguments. e.g.:
+    - `Set Shell bash --init-file test.rc`
+    - `Set Shell yazi` you can specify and program, not just a shell!
+- EVP has no runtime dependencies
+    - It is a statically linked [musl binary](https://www.musl-libc.org/)
+    - A collection of useful fonts are embedded into EVP
+- Mouse support
+    - 
+- Coming soon: resize support
+- Coming soon: snapshot process metrics to help debug interactive use
+- Coming soon: key event overlay
 
 ## Output Formats
 
@@ -76,7 +81,9 @@ Env PS1 "$ "                        # Set environment variables for the shell pr
 Sleep 1s                            # Pause playback for a duration (e.g. 500ms, 1.5s, 2m)
 Hide                                # Hide subsequent commands from recording output
 Show                                # Resume recording commands to output files
-Screenshot frame.png                # Capture the current terminal window frame as a PNG
+Screenshot frame.png                # Capture the current terminal window frame as a PNG, SVG, or JSON
+Screenshot frame.svg
+Screenshot frame.json
 
 # --- Clipboard Controls ---
 Copy "text to clipboard"            # Copy a string into the system clipboard

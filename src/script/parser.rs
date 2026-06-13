@@ -212,8 +212,9 @@ fn parse_line(
             if !path_lower.ends_with(".png")
                 && !path_lower.ends_with(".svg")
                 && !path_lower.ends_with(".svgz")
+                && !path_lower.ends_with(".json")
             {
-                bail!("Screenshot path must end with .png, .svg, or .svgz (got `{path}`)");
+                bail!("Screenshot path must end with .png, .svg, .svgz, or .json (got `{path}`)");
             }
             script.events.push(Event::Screenshot(path));
         }
@@ -996,6 +997,8 @@ mod tests {
         assert!(matches!(&s.events[0], Event::Screenshot(p) if p == "shot.svg"));
         let s = parse("Output out.gif\nScreenshot shot.svgz\n").unwrap();
         assert!(matches!(&s.events[0], Event::Screenshot(p) if p == "shot.svgz"));
+        let s = parse("Output out.gif\nScreenshot shot.json\n").unwrap();
+        assert!(matches!(&s.events[0], Event::Screenshot(p) if p == "shot.json"));
     }
 
     #[test]

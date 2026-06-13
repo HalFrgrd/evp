@@ -1061,6 +1061,7 @@ fn write_screenshot(frame: &RawFrame, script: &Script, path: &std::path::Path) -
         let svg_opts = crate::render_svg::SvgOptions {
             font_path: script.settings.font_family.clone(),
             font_size: script.settings.font_size,
+            is_screenshot: true,
             ..Default::default()
         };
         let s = crate::render_svg::render_svg_frame_to_string(frame, cfg, &svg_opts)?;
@@ -1082,6 +1083,35 @@ fn write_screenshot(frame: &RawFrame, script: &Script, path: &std::path::Path) -
                 .write_all(s.as_bytes())
                 .with_context(|| format!("writing {}", path.display()))?;
         }
+        Ok(())
+    } else if ext.eq_ignore_ascii_case("json") {
+        let cfg = derive_options(&script.settings);
+        let rec = crate::recording::Recording {
+            cols: frame.cols,
+            rows: frame.rows,
+            framerate: script.settings.framerate,
+            cell_width_px: cfg.cell_width_px,
+            cell_height_px: cfg.cell_height_px,
+            font_size_px: cfg.font_size_px,
+            char_height_px: cfg.char_height_px,
+            ascent_px: cfg.ascent_px,
+            letter_spacing: cfg.letter_spacing,
+            frame_style: cfg.frame_style,
+            frames: vec![crate::recording::Frame::Key {
+                t_ms: 0,
+                cursor: frame.cursor,
+                default_fg: frame.default_fg,
+                default_bg: frame.default_bg,
+                cursor_color: frame.cursor_color,
+                cursor_accent: frame.cursor_accent,
+                mouse_cursor: frame.mouse_cursor,
+                cells: frame.cells.clone(),
+            }],
+        };
+        let s = serde_json::to_string_pretty(&rec)
+            .context("serializing screenshot recording to JSON")?;
+        std::fs::write(path, s.as_bytes())
+            .with_context(|| format!("writing screenshot {}", path.display()))?;
         Ok(())
     } else {
         anyhow::bail!("Unsupported screenshot extension: {}", ext);

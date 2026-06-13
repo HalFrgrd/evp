@@ -226,6 +226,8 @@ pub struct SvgOptions {
     pub embed_fonts: bool,
     /// Whether to exclude system fonts from the font-family stack.
     pub no_system_fonts: bool,
+    /// Whether this is a static screenshot (disables all animation/SMIL elements).
+    pub is_screenshot: bool,
 }
 
 pub struct SvgStreamHandle {
@@ -262,6 +264,7 @@ impl Default for SvgOptions {
             font_size: 16.0,
             embed_fonts: true,
             no_system_fonts: false,
+            is_screenshot: false,
         }
     }
 }
@@ -1512,6 +1515,7 @@ pub struct SvgDoc {
     pub text_elements: Vec<TextElement>,
     pub cursor_rects: Vec<CursorRect>,
     pub mouse_spans: Vec<MouseSpan>,
+    pub is_static: bool,
 }
 
 fn is_static(start_ms: u32, end_ms: u32, total_ms: u32) -> bool {
@@ -1954,7 +1958,9 @@ impl SvgDoc {
         // 2. Assemble style block
         let mut style = self.style_block.clone();
         let mut extra_css = String::new();
-        extra_css.push_str(".h { visibility: hidden; }\n");
+        if !self.is_static {
+            extra_css.push_str(".h { visibility: hidden; }\n");
+        }
         extra_css.push_str(".b { font-weight: bold; }\n");
         extra_css.push_str(".i { font-style: italic; }\n");
         extra_css.push_str(".u { text-decoration: underline; }\n");
@@ -2059,11 +2065,13 @@ impl SvgDoc {
         }
 
         // Master timer - rendered directly as an animate element under the svg root
-        s.push_str(&format!(
-            r#"<animate id="t" attributeName="x" from="0" to="0" dur="{dur}" begin="0s;t.end"/>
+        if !self.is_static {
+            s.push_str(&format!(
+                r#"<animate id="t" attributeName="x" from="0" to="0" dur="{dur}" begin="0s;t.end"/>
 "#,
-            dur = format_seconds(self.master_timer_dur)
-        ));
+                dur = format_seconds(self.master_timer_dur)
+            ));
+        }
 
         // Background rects
         let total_ms = (self.master_timer_dur * 1000.0).round() as u32;
@@ -2593,6 +2601,16 @@ fn render_from_frames(
         ));
     }
 
+    let frames_buf;
+    let frames = if opts.is_screenshot && frames.len() == 1 {
+        let mut f = frames[0].clone();
+        f.t_ms = 0;
+        frames_buf = vec![f];
+        &frames_buf[..]
+    } else {
+        frames
+    };
+
     // Total animation duration.
     let last_t_ms = frames.last().map(|f| f.t_ms).unwrap_or(0);
     let frame_ms = if cfg.framerate > 0 {
@@ -3074,6 +3092,7 @@ fn render_from_frames(
         text_elements,
         cursor_rects,
         mouse_spans,
+        is_static: opts.is_screenshot,
     };
 
     Ok(doc.to_svg())

@@ -540,7 +540,7 @@ Sleep 200ms
 }
 
 #[test]
-fn svg_and_svgz_screenshots_render_successfully() {
+fn svg_svgz_and_json_screenshots_render_successfully() {
     let temp_dir = std::env::temp_dir();
     let unique_id = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -548,6 +548,7 @@ fn svg_and_svgz_screenshots_render_successfully() {
         .as_nanos();
     let svg_path = temp_dir.join(format!("test-shot-{unique_id}.svg"));
     let svgz_path = temp_dir.join(format!("test-shot-{unique_id}.svgz"));
+    let json_path = temp_dir.join(format!("test-shot-{unique_id}.json"));
 
     let tape = format!(
         r#"
@@ -559,20 +560,25 @@ Set Shell /bin/sh
 Sleep 200ms
 Screenshot {svg}
 Screenshot {svgz}
+Screenshot {json}
 "#,
         svg = svg_path.to_str().unwrap(),
         svgz = svgz_path.to_str().unwrap(),
+        json = json_path.to_str().unwrap(),
     );
 
     let _rec = record(&tape);
 
     assert!(svg_path.exists(), "SVG screenshot file does not exist");
     assert!(svgz_path.exists(), "SVGZ screenshot file does not exist");
+    assert!(json_path.exists(), "JSON screenshot file does not exist");
 
     // Verify SVG content
     let svg_content = std::fs::read_to_string(&svg_path).unwrap();
     assert!(svg_content.contains("<svg"), "SVG file doesn't contain <svg tag");
     assert!(svg_content.contains("</svg>"), "SVG file doesn't contain </svg> tag");
+    assert!(!svg_content.contains("<animate"), "SVG screenshot contains <animate element");
+    assert!(!svg_content.contains("<set"), "SVG screenshot contains <set element");
 
     // Verify SVGZ content (gzip magic bytes)
     let svgz_bytes = std::fs::read(&svgz_path).unwrap();
@@ -580,7 +586,14 @@ Screenshot {svgz}
     assert_eq!(svgz_bytes[0], 0x1f);
     assert_eq!(svgz_bytes[1], 0x8b);
 
+    // Verify JSON content
+    let json_content = std::fs::read_to_string(&json_path).unwrap();
+    let parsed: evp::Recording = serde_json::from_str(&json_content).unwrap();
+    assert_eq!(parsed.frames.len(), 1);
+    assert_eq!(parsed.frames[0].t_ms(), 0);
+
     // Clean up
     let _ = std::fs::remove_file(svg_path);
     let _ = std::fs::remove_file(svgz_path);
+    let _ = std::fs::remove_file(json_path);
 }
