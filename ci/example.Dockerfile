@@ -24,6 +24,7 @@ RUN mkdir -p /workspace/target/x86_64-unknown-linux-musl/release && \
 ARG BUILDKIT_SANDBOX_HOSTNAME
 ENV HOSTNAME=${BUILDKIT_SANDBOX_HOSTNAME}
 ENV PS1="\[\e[38;2;90;86;224m\]> \[\e[0m\]"
+RUN echo "export PS1=\"\\[\\e[38;2;90;86;224m\\]> \\[\\e[0m\\]\"" >> ~/.bashrc
 
 ARG EXAMPLE_NAME
 
