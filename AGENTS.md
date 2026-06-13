@@ -79,9 +79,9 @@ If `render thread finished` doesn't print, it is a renderer-thread deadlock.
 
 ## Docker Build Environment
 
-- `docker/libghostty-pkgconfig.Dockerfile` builds the prebuilt `libghostty-vt` static library, headers, and pkg-config files into `assets/libghostty`.
+- `ci/libghostty-pkgconfig.Dockerfile` builds the prebuilt `libghostty-vt` static library, headers, and pkg-config files into `assets/libghostty`.
 - Run `docker buildx bake extract-libghostty` to refresh `assets/libghostty` so local and CI builds do not need network access for Zig/Ghostty fetches.
-- `docker/vhs.Dockerfile` is based on the charmbracelet VHS image and bakes in `scripts/stress_test_program.py` and `scripts/stress_test.tape` for the stress-test comparison run.
+- `ci/vhs.Dockerfile` is based on the charmbracelet VHS image and bakes in `scripts/stress_test_program.py` and `scripts/stress_test.tape` for the stress-test comparison run.
 
 ## Common Mistakes & Gotchas (From Past Agents)
 

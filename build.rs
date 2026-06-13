@@ -25,6 +25,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     if in_git_worktree() {
         let gitcl = Gitcl::all_git();
         emitter.add_instructions(&gitcl)?;
+    } else {
+        let sha = env::var("VERGEN_GIT_SHA").unwrap_or_else(|_| "unknown".to_string());
+        let branch = env::var("VERGEN_GIT_BRANCH").unwrap_or_else(|_| "unknown".to_string());
+        let date = env::var("VERGEN_GIT_COMMIT_DATE").unwrap_or_else(|_| "unknown".to_string());
+        let dirty = env::var("VERGEN_GIT_DIRTY").unwrap_or_else(|_| "false".to_string());
+        println!("cargo:rustc-env=VERGEN_GIT_SHA={sha}");
+        println!("cargo:rustc-env=VERGEN_GIT_BRANCH={branch}");
+        println!("cargo:rustc-env=VERGEN_GIT_COMMIT_DATE={date}");
+        println!("cargo:rustc-env=VERGEN_GIT_DIRTY={dirty}");
     }
 
     emitter.emit()?;
