@@ -65,5 +65,5 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # Verify print-ref-script subcommand
 RUN set -eux; /out/evp print-ref-script > /dev/null
 
-# Verify run-test-script subcommand
-RUN set -eux; /out/evp run-test-script --output /tmp/test-ci.gif
+# Verify run-sample-script subcommand
+RUN set -eux; /out/evp run-sample-script --output /tmp/test-ci.gif

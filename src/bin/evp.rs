@@ -14,7 +14,7 @@ use clap_complete::{Shell as CompletionShell, generate};
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
-/// Embedded demo tape used by `run-test-script`. Source lives in
+/// Embedded demo tape used by `run-sample-script`. Source lives in
 /// `examples/test.tape` so it stays in sync with the rest of the demos.
 const EMBEDDED_TEST_TAPE: &str = include_str!("../../examples/test.tape");
 
@@ -81,7 +81,7 @@ fn cli_styles() -> clap::builder::Styles {
 #[derive(Parser, Debug)]
 #[command(
     name = "evp",
-    about = "Run a VHS-format script and produce a GIF",
+    about = "Run a VHS-format tape and produce demo GIFs or SVGs.",
     version = env!("CARGO_PKG_VERSION"),
     long_version = VERSION_LONG,
     subcommand_negates_reqs = true,
@@ -90,10 +90,10 @@ fn cli_styles() -> clap::builder::Styles {
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
-    /// Path to the `.tape` script.
+    /// Path to the `.tape` tape.
     #[arg(required = true)]
-    script: Option<PathBuf>,
-    /// Override the script's `Output` directives. Repeat to write multiple
+    tape: Option<PathBuf>,
+    /// Override the tape's `Output` directives. Repeat to write multiple
     /// outputs in one run (for example `--output out.gif --output out.svg`).
     #[arg(short, long, global = true)]
     output: Vec<PathBuf>,
@@ -116,13 +116,13 @@ enum Commands {
     /// Print the bundled VHS theme preset names.
     Themes,
     /// Parse a tape and exit without running it.
-    Validate { script: PathBuf },
+    Validate { tape: PathBuf },
     /// Print a shell completion script to stdout.
     Completion { shell: CompletionShell },
     /// Run the built-in demo tape embedded in the binary.
-    #[command(name = "run-test-script")]
-    RunTestScript,
-    /// Print the reference script from README.md commented out, followed by the test script.
+    #[command(name = "run-sample-script")]
+    RunSampleScript,
+    /// Print the reference tape from README.md commented out, followed by the test script.
     #[command(name = "print-ref-script")]
     PrintRefScript,
 }
@@ -172,7 +172,7 @@ fn run_cli(cli: Cli) -> Result<()> {
     init_tracing(&cli, evp_start);
     log_build_info_debug();
 
-    let path = cli.script.as_ref().expect("clap guarantees this is set");
+    let path = cli.tape.as_ref().expect("clap guarantees this is set");
     let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
     match evp::recording_from_json(&bytes) {
         Ok(rec) => {
@@ -354,10 +354,10 @@ fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()
             }
             Ok(())
         }
-        Commands::Validate { script } => {
-            evp::parse_script_file(&script)
-                .with_context(|| format!("parsing {}", script.display()))?;
-            println!("{}: ok", script.display());
+        Commands::Validate { tape } => {
+            evp::parse_script_file(&tape)
+                .with_context(|| format!("parsing {}", tape.display()))?;
+            println!("{}: ok", tape.display());
             Ok(())
         }
         Commands::Completion { shell } => {
@@ -365,17 +365,17 @@ fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()
             generate(shell, &mut cmd, "evp", &mut io::stdout());
             Ok(())
         }
-        Commands::RunTestScript => {
+        Commands::RunSampleScript => {
             init_tracing(cli, evp_start);
             log_build_info_debug();
-            info!("running embedded test tape (run-test-script)");
+            info!("running embedded test tape (run-sample-script)");
             let script = evp::parse_script(EMBEDDED_TEST_TAPE).context("parsing embedded test tape")?;
             run_script(cli, &script, evp_start)?;
             Ok(())
         }
         Commands::PrintRefScript => {
-            println!("# This is a reference script to help you write your tape scripts.");
-            println!("# We recommend viewing this script with Elixir syntax highlighting.");
+            println!("# This is a reference tape to help you write your tape files.");
+            println!("# We recommend viewing this tape with Elixir syntax highlighting.");
             println!("#");
             for line in REF_SCRIPT.lines() {
                 println!("# {}", line);
@@ -470,7 +470,7 @@ mod tests {
         let cli = Cli::try_parse_from(["evp", "validate", "demo.tape"]).unwrap();
         assert!(matches!(
             cli.command,
-            Some(Commands::Validate { script }) if script == PathBuf::from("demo.tape")
+            Some(Commands::Validate { tape }) if tape == PathBuf::from("demo.tape")
         ));
     }
 
@@ -492,11 +492,11 @@ mod tests {
     }
 
     #[test]
-    fn parses_run_test_script_subcommand() {
-        let cli = Cli::try_parse_from(["evp", "run-test-script"]).unwrap();
+    fn parses_run_sample_script_subcommand() {
+        let cli = Cli::try_parse_from(["evp", "run-sample-script"]).unwrap();
         assert!(matches!(
             cli.command,
-            Some(Commands::RunTestScript)
+            Some(Commands::RunSampleScript)
         ));
     }
 

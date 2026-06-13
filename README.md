@@ -58,10 +58,19 @@ cargo build
 ```
 
 ## Usage
-```bash
-# Write your script 
 
+### CLI
+```bash
+# Start from a base script:
+evp print-ref-script > demo.tape
+# Modify the script then run it!
+evp demo.tape
 ```
+Or if you already have a VHS script:
+```bash
+evp --mimic-vhs demo.tape
+```
+
 
 ### GHA
 
@@ -91,7 +100,7 @@ Set Shell bash                      # Configure shell execution path (e.g. bash,
 Set Shell bash --norc               # EVP supports any command as the "shell"
 Set Shell yazi                      # You can boot right into your TUI
 
-Set Theme "Catppuccin Mocha"        # Apply a predefined color theme (e.g. Catppuccin Mocha, Dracula)
+Set Theme "Catppuccin Mocha"        # Apply a predefined colour theme (run `evp themes` to discover themes)
 Set Font "JetBrains Mono"           # Monospace font family name
 Set FontSize 20                     # Font size in pixels
 Set LineHeight 1.2                  # Line spacing multiplier
@@ -100,7 +109,7 @@ Set Width 800                       # Terminal window width in pixels
 Set Height 400                      # Terminal window height in pixels
 Set Padding 10                      # Inner padding between terminal grid and window frame
 Set Margin 20                       # Outer margin around window frame
-Set MarginFill "#6B50FF"            # Background color of outer margin area
+Set MarginFill "#6B50FF"            # Background colour of outer margin area
 Set Framerate 30                    # Recording framerate in FPS
 Set TypingSpeed 50ms                # Default speed/interval for typed text
 
@@ -150,7 +159,7 @@ Wait /regex/                        # Wait for output matching regular expressio
 EVP is based on the vhs project.
 They share little code but EVP does try use the same `.tape` file format.
 
-The color themes in [`assets/vhs-themes.json`](assets/vhs-themes.json) are taken from the [VHS](https://github.com/charmbracelet/vhs) project and are licensed under the MIT License. See [licenses/VHS-MIT.txt](licenses/VHS-MIT.txt) for the full license text.
+The colour themes in [`assets/vhs-themes.json`](assets/vhs-themes.json) are taken from the [VHS](https://github.com/charmbracelet/vhs) project and are licensed under the MIT License. See [licenses/VHS-MIT.txt](licenses/VHS-MIT.txt) for the full license text.
 
 ### Font providers
 

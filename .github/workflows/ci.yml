@@ -56,7 +56,7 @@ jobs:
         run: |
           chmod +x ${{ runner.temp }}/docker/build/evp
           ${{ runner.temp }}/docker/build/evp print-ref-script > /dev/null
-          ${{ runner.temp }}/docker/build/evp run-test-script --output ${{ runner.temp }}/test-ci.gif
+          ${{ runner.temp }}/docker/build/evp run-sample-script --output ${{ runner.temp }}/test-ci.gif
 
   render-examples:
     name: Render Examples and Release

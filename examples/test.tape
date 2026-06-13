@@ -1,10 +1,11 @@
-# Built-in smoke test — runs via `evp run-test-script`.
+# Built-in smoke test — runs via `evp run-sample-script`.
 #
 # Designed to work on any POSIX system: only `/bin/sh` builtins and
-# `printf` are used. Output goes to ./evp-test.gif in the cwd so the
-# user can immediately open it.
+# `printf` are used. Output goes to ./evp-test.gif and ./evp-test.svg
+# in the cwd so the user can immediately open them.
 
 Output evp-test.gif
+Output evp-test.svg
 
 Set Shell bash --norc
 Set Width 900
