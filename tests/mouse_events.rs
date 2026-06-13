@@ -90,4 +90,25 @@ Sleep 200ms
         is_purple(cell_drag_end.bg),
         "expected cell (17,15) to be Purple/Bright Purple: {:?}", cell_drag_end
     );
+
+    // Render to SVG string and assert mouse rendering exists in SVG
+    let svg_opts = evp::render_svg::SvgOptions::default();
+    let svg_str = evp::render_svg::render_svg_to_string(&rec, &svg_opts).expect("render svg to string");
+    
+    assert!(
+        svg_str.contains("<animateTransform attributeName=\"transform\" type=\"translate\" calcMode=\"discrete\""),
+        "expected SVG to contain discrete translate animation for mouse pointer"
+    );
+    assert!(
+        svg_str.contains("fill=\"#ff0000\" fill-opacity=\"0.5\""),
+        "expected SVG to contain red clicking ripple circle"
+    );
+    assert!(
+        svg_str.contains("fill=\"#ed61d7\" fill-opacity=\"0.5\""),
+        "expected SVG to contain purple dragging ripple circle"
+    );
+    assert!(
+        svg_str.contains("<path d=\"M0,0 L0,30 L8,22 L14,36 L18,34 L12,20 L20,20 Z\""),
+        "expected SVG to contain the cursor vector path"
+    );
 }

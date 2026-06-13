@@ -425,6 +425,7 @@ mod tests {
                 default_bg: [0, 0, 0],
                 cursor_color: None,
                 cursor_accent: None,
+                mouse_cursor: None,
                 cells: vec![blank; 80 * 24],
             }],
         }

@@ -565,6 +565,44 @@ fn rasterize_raw_frame(
         }
     }
 
+    // Render mouse cursor if visible in the frame
+    if let Some((m_col, m_row, m_state)) = frame.mouse_cursor {
+        use crate::recording::MouseState;
+        let cx = (cfg.content_x + m_col as u32 * cell_w + cell_w / 2) as i32;
+        let cy = (cfg.content_y + m_row as u32 * cell_h + cell_h / 2) as i32;
+
+        // Draw click/drag visual ripple circle under the pointer
+        match m_state {
+            MouseState::Clicking => {
+                draw_circle(&mut buf, cfg.canvas_w, cfg.canvas_h, cx, cy, 16, [255, 0, 0], 0.5);
+            }
+            MouseState::Dragging => {
+                draw_circle(&mut buf, cfg.canvas_w, cfg.canvas_h, cx, cy, 16, [237, 97, 215], 0.5);
+            }
+            MouseState::Moving => {}
+        }
+
+        // Draw cursor diagonal arrow pointer on top (scaled 2x)
+        for dy in 0..CURSOR_HEIGHT {
+            for dx in 0..CURSOR_WIDTH {
+                let val = CURSOR_BITMAP[(dy * CURSOR_WIDTH + dx) as usize];
+                if val == 0 {
+                    continue;
+                }
+                let color = if val == 1 { [255, 255, 255] } else { [0, 0, 0] };
+                for sy in 0..2 {
+                    for sx in 0..2 {
+                        let px = cx + (dx as i32 * 2) + sx;
+                        let py = cy + (dy as i32 * 2) + sy;
+                        if px >= 0 && px < cfg.canvas_w as i32 && py >= 0 && py < cfg.canvas_h as i32 {
+                            blend_pixel(&mut buf, cfg.canvas_w, px as u32, py as u32, color, 1.0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if cfg.frame_style.border_radius_px > 0 {
         mask_outside_rounded_rect(
             &mut buf,
@@ -732,4 +770,44 @@ fn dim_color(fg: [u8; 3], bg: [u8; 3]) -> [u8; 3] {
         ((fg[1] as u16 + bg[1] as u16) / 2) as u8,
         ((fg[2] as u16 + bg[2] as u16) / 2) as u8,
     ]
+}
+
+const CURSOR_WIDTH: u32 = 12;
+const CURSOR_HEIGHT: u32 = 19;
+
+// 1 represents cursor fill (white), 2 represents cursor border (black), 0 is transparent
+const CURSOR_BITMAP: [u8; 12 * 19] = [
+    2,0,0,0,0,0,0,0,0,0,0,0,
+    2,2,0,0,0,0,0,0,0,0,0,0,
+    2,1,2,0,0,0,0,0,0,0,0,0,
+    2,1,1,2,0,0,0,0,0,0,0,0,
+    2,1,1,1,2,0,0,0,0,0,0,0,
+    2,1,1,1,1,2,0,0,0,0,0,0,
+    2,1,1,1,1,1,2,0,0,0,0,0,
+    2,1,1,1,1,1,1,2,0,0,0,0,
+    2,1,1,1,1,1,1,1,2,0,0,0,
+    2,1,1,1,1,1,1,1,1,2,0,0,
+    2,1,1,1,1,1,2,2,2,2,2,0,
+    2,1,1,2,1,1,2,0,0,0,0,0,
+    2,1,2,0,2,1,1,2,0,0,0,0,
+    2,2,0,0,2,1,1,2,0,0,0,0,
+    0,0,0,0,0,2,1,1,2,0,0,0,
+    0,0,0,0,0,2,1,1,2,0,0,0,
+    0,0,0,0,0,0,2,2,2,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,
+];
+
+fn draw_circle(buf: &mut [u8], w: u32, canvas_h: u32, cx: i32, cy: i32, radius: i32, color: [u8; 3], opacity: f32) {
+    for dy in -radius..=radius {
+        for dx in -radius..=radius {
+            if dx * dx + dy * dy <= radius * radius {
+                let px = cx + dx;
+                let py = cy + dy;
+                if px >= 0 && px < w as i32 && py >= 0 && py < canvas_h as i32 {
+                    blend_pixel(buf, w, px as u32, py as u32, color, opacity);
+                }
+            }
+        }
+    }
 }

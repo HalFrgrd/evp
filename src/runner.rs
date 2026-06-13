@@ -258,6 +258,10 @@ pub fn run_with_raw_frame_consumers(
     let mut last_cursor_moved_at: Option<Duration> = None;
     let mut prev_cursor_capture: Option<Option<(u16, u16)>> = None;
 
+    // Mouse tracking state
+    let mut current_mouse: Option<(u16, u16, crate::recording::MouseState)> = None;
+    let mut mouse_pressed = false;
+
     // Wait‑for state. When we're inside a `Wait`, all later events stall
     // until the regex matches or the timeout elapses.
     let mut wait_state: Option<WaitState> = None;
@@ -336,6 +340,26 @@ pub fn run_with_raw_frame_consumers(
                     "dispatching scheduled event"
                 );
                 let was_hidden = hidden;
+                if let Event::MouseInput { action, col, row, .. } = &scheduled.event {
+                    match action {
+                        crate::script::MouseAction::Press => {
+                            mouse_pressed = true;
+                            current_mouse = Some((*col, *row, crate::recording::MouseState::Clicking));
+                        }
+                        crate::script::MouseAction::Release => {
+                            mouse_pressed = false;
+                            current_mouse = Some((*col, *row, crate::recording::MouseState::Moving));
+                        }
+                        crate::script::MouseAction::Motion => {
+                            let state = if mouse_pressed {
+                                crate::recording::MouseState::Dragging
+                            } else {
+                                crate::recording::MouseState::Moving
+                            };
+                            current_mouse = Some((*col, *row, state));
+                        }
+                    }
+                }
                 execute_event(
                     &scheduled.event,
                     &pty,
@@ -361,7 +385,7 @@ pub fn run_with_raw_frame_consumers(
                 // Capture frame
                 if !hidden || !pending_screenshots.is_empty() {
                     let recorded_at = next_frame_at.saturating_sub(skipped_recording_time);
-                    let (frame, raw_cursor_pos) = capture(
+                    let (mut frame, raw_cursor_pos) = capture(
                         &mut render_state,
                         &mut row_it,
                         &mut cell_it,
@@ -373,6 +397,7 @@ pub fn run_with_raw_frame_consumers(
                         last_cursor_moved_at,
                         script.settings.theme.cursor_accent_rgb().ok().flatten(),
                     )?;
+                    frame.mouse_cursor = current_mouse;
                     if let Some(prev) = prev_cursor_capture {
                         if raw_cursor_pos != prev {
                             last_cursor_moved_at = Some(recorded_at);
@@ -1208,6 +1233,7 @@ fn capture<'a>(
             default_bg,
             cursor_color,
             cursor_accent,
+            mouse_cursor: None,
         },
         raw_cursor_pos,
     ))

@@ -426,6 +426,15 @@ struct CursorSpan {
     color: [u8; 3],
 }
 
+#[derive(Clone)]
+pub struct MouseSpan {
+    pub cx: u32,
+    pub cy: u32,
+    pub state: crate::recording::MouseState,
+    pub start_ms: u32,
+    pub end_ms: u32,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct StyleKeyframe {
     pub start_ms: u32,
@@ -1493,6 +1502,7 @@ pub struct SvgDoc {
     pub bg_rects: Vec<BgRect>,
     pub text_elements: Vec<TextElement>,
     pub cursor_rects: Vec<CursorRect>,
+    pub mouse_spans: Vec<MouseSpan>,
 }
 
 fn is_static(start_ms: u32, end_ms: u32, total_ms: u32) -> bool {
@@ -1722,6 +1732,178 @@ fn serialize_cursor_rects(cursors: &[CursorRect], total_ms: u32) -> String {
     s
 }
 
+fn serialize_mouse_elements(mouse_spans: &[MouseSpan], total_ms: u32) -> String {
+    if mouse_spans.is_empty() {
+        return String::new();
+    }
+
+    let mut boundaries = vec![0, total_ms];
+    for s in mouse_spans {
+        boundaries.push(s.start_ms);
+        boundaries.push(s.end_ms);
+    }
+    boundaries.sort_unstable();
+    boundaries.dedup();
+
+    let mut key_times_f32 = Vec::new();
+    let mut translate_vals = Vec::new();
+    let mut pointer_vis_vals = Vec::new();
+    let mut click_vis_vals = Vec::new();
+    let mut drag_vis_vals = Vec::new();
+
+    let mut last_cx = 0;
+    let mut last_cy = 0;
+
+    for i in 0..(boundaries.len() - 1) {
+        let start = boundaries[i];
+        let end = boundaries[i + 1];
+        let k = start as f32 / total_ms as f32;
+        key_times_f32.push(k);
+
+        let active = mouse_spans.iter().find(|s| s.start_ms <= start && s.end_ms >= end);
+        if let Some(s) = active {
+            translate_vals.push(format!("{},{}", s.cx, s.cy));
+            pointer_vis_vals.push("visible".to_string());
+            if s.state == crate::recording::MouseState::Clicking {
+                click_vis_vals.push("visible".to_string());
+            } else {
+                click_vis_vals.push("hidden".to_string());
+            }
+            if s.state == crate::recording::MouseState::Dragging {
+                drag_vis_vals.push("visible".to_string());
+            } else {
+                drag_vis_vals.push("hidden".to_string());
+            }
+            last_cx = s.cx;
+            last_cy = s.cy;
+        } else {
+            translate_vals.push(format!("{},{}", last_cx, last_cy));
+            pointer_vis_vals.push("hidden".to_string());
+            click_vis_vals.push("hidden".to_string());
+            drag_vis_vals.push("hidden".to_string());
+        }
+    }
+
+    let (kt_trans, vals_trans) = simplify_discrete_animation(&key_times_f32, &translate_vals);
+    let (kt_ptr_vis, vals_ptr_vis) = simplify_discrete_animation(&key_times_f32, &pointer_vis_vals);
+    let (kt_click_vis, vals_click_vis) = simplify_discrete_animation(&key_times_f32, &click_vis_vals);
+    let (kt_drag_vis, vals_drag_vis) = simplify_discrete_animation(&key_times_f32, &drag_vis_vals);
+
+    let mut g_attrs = Vec::new();
+    let mut g_anims = Vec::new();
+
+    let dur = format_time(total_ms);
+
+    // Translation
+    if vals_trans.len() == 1 {
+        g_attrs.push(format!(r#"transform="translate({})""#, vals_trans[0]));
+    } else {
+        g_attrs.push(format!(r#"transform="translate({})""#, vals_trans[0]));
+        let kt_str = format_key_time_list(&kt_trans);
+        let val_str = vals_trans.join(";");
+        g_anims.push(format!(
+            r#"  <animateTransform attributeName="transform" type="translate" calcMode="discrete" values="{}" keyTimes="{}" dur="{}" begin="t.begin" fill="freeze"/>"#,
+            val_str, kt_str, dur
+        ));
+    }
+
+    // Pointer Visibility
+    if vals_ptr_vis.len() == 1 {
+        if vals_ptr_vis[0] == "hidden" {
+            g_attrs.push(r#"class="h""#.to_string());
+        }
+    } else {
+        g_attrs.push(r#"class="h""#.to_string());
+        let kt_str = format_key_time_list(&kt_ptr_vis);
+        let val_str = format_val_list(&vals_ptr_vis);
+        g_anims.push(format!(
+            r#"  <animate attributeName="visibility" calcMode="discrete" values="{}" keyTimes="{}" dur="{}" begin="t.begin" fill="freeze"/>"#,
+            val_str, kt_str, dur
+        ));
+    }
+
+    // Click Ripple Circle
+    let mut click_attrs = Vec::new();
+    let mut click_anims = Vec::new();
+    if vals_click_vis.len() == 1 {
+        if vals_click_vis[0] == "hidden" {
+            click_attrs.push(r#"class="h""#.to_string());
+        }
+    } else {
+        click_attrs.push(r#"class="h""#.to_string());
+        let kt_str = format_key_time_list(&kt_click_vis);
+        let val_str = format_val_list(&vals_click_vis);
+        click_anims.push(format!(
+            r#"  <animate attributeName="visibility" calcMode="discrete" values="{}" keyTimes="{}" dur="{}" begin="t.begin" fill="freeze"/>"#,
+            val_str, kt_str, dur
+        ));
+    }
+
+    let click_inner = if click_anims.is_empty() {
+        let class_str = if click_attrs.is_empty() { "".to_string() } else { format!(" {}", click_attrs.join(" ")) };
+        format!(r##"<circle cx="0" cy="0" r="16" fill="#ff0000" fill-opacity="0.5"{}/>"##, class_str)
+    } else {
+        let class_str = if click_attrs.is_empty() { "".to_string() } else { format!(" {}", click_attrs.join(" ")) };
+        format!(
+            r##"<circle cx="0" cy="0" r="16" fill="#ff0000" fill-opacity="0.5"{}>
+{}
+</circle>"##,
+            class_str,
+            click_anims.join("\n")
+        )
+    };
+
+    // Drag Ripple Circle
+    let mut drag_attrs = Vec::new();
+    let mut drag_anims = Vec::new();
+    if vals_drag_vis.len() == 1 {
+        if vals_drag_vis[0] == "hidden" {
+            drag_attrs.push(r#"class="h""#.to_string());
+        }
+    } else {
+        drag_attrs.push(r#"class="h""#.to_string());
+        let kt_str = format_key_time_list(&kt_drag_vis);
+        let val_str = format_val_list(&vals_drag_vis);
+        drag_anims.push(format!(
+            r#"  <animate attributeName="visibility" calcMode="discrete" values="{}" keyTimes="{}" dur="{}" begin="t.begin" fill="freeze"/>"#,
+            val_str, kt_str, dur
+        ));
+    }
+
+    let drag_inner = if drag_anims.is_empty() {
+        let class_str = if drag_attrs.is_empty() { "".to_string() } else { format!(" {}", drag_attrs.join(" ")) };
+        format!(r##"<circle cx="0" cy="0" r="16" fill="#ed61d7" fill-opacity="0.5"{}/>"##, class_str)
+    } else {
+        let class_str = if drag_attrs.is_empty() { "".to_string() } else { format!(" {}", drag_attrs.join(" ")) };
+        format!(
+            r##"<circle cx="0" cy="0" r="16" fill="#ed61d7" fill-opacity="0.5"{}>
+{}
+</circle>"##,
+            class_str,
+            drag_anims.join("\n")
+        )
+    };
+
+    let anims_str = if g_anims.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", g_anims.join("\n"))
+    };
+
+    format!(
+        r#"<g {}>
+{}{}
+  {}
+  <path d="M0,0 L0,30 L8,22 L14,36 L18,34 L12,20 L20,20 Z" fill="white" stroke="black" stroke-width="2"/>
+</g>
+"#,
+        g_attrs.join(" "),
+        anims_str,
+        click_inner,
+        drag_inner
+    )
+}
+
 impl SvgDoc {
     pub fn to_svg(&self) -> String {
         // 1. Gather color classes
@@ -1939,6 +2121,9 @@ impl SvgDoc {
 
         // Cursor rects
         s.push_str(&serialize_cursor_rects(&self.cursor_rects, total_ms));
+
+        // Mouse elements
+        s.push_str(&serialize_mouse_elements(&self.mouse_spans, total_ms));
 
         s.push_str("\n</svg>\n");
         s
@@ -2568,6 +2753,59 @@ fn render_from_frames(
         });
     }
 
+    // Build mouse spans.
+    let cell_w = cfg.cell_width_px.max(1);
+    let cell_h = cfg.cell_height_px.max(1);
+
+    let mut mouse_spans: Vec<MouseSpan> = Vec::new();
+    let mut cur_mouse: Option<(u16, u16, crate::recording::MouseState, u32)> = None;
+
+    for frame in frames.iter() {
+        match (cur_mouse, frame.mouse_cursor) {
+            (None, Some((col, row, state))) => {
+                cur_mouse = Some((col, row, state, frame.t_ms));
+            }
+            (Some((ocol, orow, ostate, start)), Some((col, row, state))) => {
+                if ocol != col || orow != row || ostate != state {
+                    let cx = cfg.content_x + ocol as u32 * cell_w + cell_w / 2;
+                    let cy = cfg.content_y + orow as u32 * cell_h + cell_h / 2;
+                    mouse_spans.push(MouseSpan {
+                        cx,
+                        cy,
+                        state: ostate,
+                        start_ms: start,
+                        end_ms: frame.t_ms,
+                    });
+                    cur_mouse = Some((col, row, state, frame.t_ms));
+                }
+            }
+            (Some((ocol, orow, ostate, start)), None) => {
+                let cx = cfg.content_x + ocol as u32 * cell_w + cell_w / 2;
+                let cy = cfg.content_y + orow as u32 * cell_h + cell_h / 2;
+                mouse_spans.push(MouseSpan {
+                    cx,
+                    cy,
+                    state: ostate,
+                    start_ms: start,
+                    end_ms: frame.t_ms,
+                });
+                cur_mouse = None;
+            }
+            (None, None) => {}
+        }
+    }
+    if let Some((col, row, state, start)) = cur_mouse {
+        let cx = cfg.content_x + col as u32 * cell_w + cell_w / 2;
+        let cy = cfg.content_y + row as u32 * cell_h + cell_h / 2;
+        mouse_spans.push(MouseSpan {
+            cx,
+            cy,
+            state,
+            start_ms: start,
+            end_ms: total_ms,
+        });
+    }
+
     // Now emit SVG.
     let mut font_family = if opts.no_system_fonts {
         const SYSTEM_FONTS: &[&str] = &[
@@ -2826,6 +3064,7 @@ fn render_from_frames(
         bg_rects,
         text_elements,
         cursor_rects,
+        mouse_spans,
     };
 
     Ok(doc.to_svg())
@@ -2952,6 +3191,7 @@ mod tests {
                 default_bg: [0, 0, 0],
                 cursor_color: None,
                 cursor_accent: None,
+                mouse_cursor: None,
                 cells,
             }],
         }

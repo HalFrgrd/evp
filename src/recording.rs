@@ -48,6 +48,13 @@ impl CellSnap {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum MouseState {
+    Moving,
+    Clicking,
+    Dragging,
+}
+
 /// A complete terminal grid plus cursor state, captured at a single point
 /// in time. Produced by the runner thread and optionally shipped over channels
 /// to raw-frame consumers.
@@ -68,6 +75,8 @@ pub struct RawFrame {
     pub cursor_color: Option<[u8; 3]>,
     #[serde(default)]
     pub cursor_accent: Option<[u8; 3]>,
+    #[serde(default)]
+    pub mouse_cursor: Option<(u16, u16, MouseState)>,
 }
 
 /// A single cell diff entry.
@@ -92,6 +101,8 @@ pub enum Frame {
         cursor_color: Option<[u8; 3]>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         cursor_accent: Option<[u8; 3]>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        mouse_cursor: Option<(u16, u16, MouseState)>,
         cells: Vec<CellSnap>,
     },
     Diff {
@@ -103,6 +114,8 @@ pub enum Frame {
         cursor_color: Option<[u8; 3]>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         cursor_accent: Option<[u8; 3]>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        mouse_cursor: Option<(u16, u16, MouseState)>,
         changes: Vec<CellChange>,
     },
 }
@@ -130,6 +143,12 @@ impl Frame {
     pub fn cursor_accent(&self) -> Option<[u8; 3]> {
         match self {
             Frame::Key { cursor_accent, .. } | Frame::Diff { cursor_accent, .. } => *cursor_accent,
+        }
+    }
+
+    pub fn mouse_cursor(&self) -> Option<(u16, u16, MouseState)> {
+        match self {
+            Frame::Key { mouse_cursor, .. } | Frame::Diff { mouse_cursor, .. } => *mouse_cursor,
         }
     }
 }
@@ -206,6 +225,7 @@ impl RecordingBuilder {
                 default_bg: frame.default_bg,
                 cursor_color: frame.cursor_color,
                 cursor_accent: frame.cursor_accent,
+                mouse_cursor: frame.mouse_cursor,
                 cells: frame.cells.clone(),
             });
             self.frames_since_key = 0;
@@ -227,6 +247,7 @@ impl RecordingBuilder {
                 default_bg: frame.default_bg,
                 cursor_color: frame.cursor_color,
                 cursor_accent: frame.cursor_accent,
+                mouse_cursor: frame.mouse_cursor,
                 changes,
             });
             self.frames_since_key += 1;
@@ -273,6 +294,7 @@ impl Recording {
         let mut default_bg;
         let mut cursor_color;
         let mut cursor_accent;
+        let mut mouse_cursor;
         match &self.frames[key_i] {
             Frame::Key {
                 t_ms: t,
@@ -281,6 +303,7 @@ impl Recording {
                 default_bg: dbg,
                 cursor_color: cc,
                 cursor_accent: ca,
+                mouse_cursor: mc,
                 cells: cs,
             } => {
                 cells = cs.clone();
@@ -290,6 +313,7 @@ impl Recording {
                 default_bg = *dbg;
                 cursor_color = *cc;
                 cursor_accent = *ca;
+                mouse_cursor = *mc;
             }
             Frame::Diff { .. } => unreachable!(),
         }
@@ -305,6 +329,7 @@ impl Recording {
                     default_bg: dbg,
                     cursor_color: cc,
                     cursor_accent: ca,
+                    mouse_cursor: mc,
                     changes,
                 } => {
                     t_ms = *t;
@@ -313,6 +338,7 @@ impl Recording {
                     default_bg = *dbg;
                     cursor_color = *cc;
                     cursor_accent = *ca;
+                    mouse_cursor = *mc;
                     for ch in changes {
                         if let Some(slot) = cells.get_mut(ch.idx as usize) {
                             *slot = ch.cell.clone();
@@ -332,6 +358,7 @@ impl Recording {
             default_bg,
             cursor_color,
             cursor_accent,
+            mouse_cursor,
         })
     }
 }

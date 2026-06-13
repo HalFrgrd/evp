@@ -17,13 +17,13 @@ Set Margin 0
 # Wait for alternate screen transition
 Sleep 500ms
 
-# Click at various places (turns cells Red)
+# Click at various places
 Click 10 5
 Sleep 200ms
 Click 30 5
 Sleep 200ms
 
-# Right click (turns cells Green)
+# Right click
 RightClick 20 10
 Sleep 200ms
 
@@ -33,11 +33,11 @@ Sleep 200ms
 MouseScroll 20 6 Down
 Sleep 200ms
 
-# Move mouse around without clicking (turns cells Light Blue)
+# Move mouse around without clicking
 MouseMove 5 8 15 8
 Sleep 200ms
 
-# Drag mouse (turns cells Blue)
+# Drag mouse
 MouseDrag 15 8 25 8
 Sleep 200ms
 
