@@ -29,7 +29,7 @@ concurrency:
 jobs:
   build-linux-amd64:
     name: build evp-x86_64-unknown-linux-musl
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env:
       TARGET: x86_64-unknown-linux-musl
     steps:
@@ -67,7 +67,7 @@ jobs:
           rm -rf assets/libghostty
           docker buildx bake \
             --set extract-libghostty.cache-from=type=gha,scope=libghostty-pkgconfig-${{ runner.os }}-${{ runner.arch }} \
-            --set extract-libghostty.cache-to=type=gha,scope=libghostty-pkgconfig-${{ runner.os }}-${{ runner.arch }},mode=max \
+            --set extract-libghostty.cache-to=type=gha,scope=libghostty-pkgconfig-${{ runner.os }}-${{ runner.arch }},mode=min \
             extract-libghostty
 
       - name: Build static evp binary

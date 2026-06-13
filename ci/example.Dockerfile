@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 # Install standard commands, fonts, or tools.
 RUN apt-get update && apt-get install -y --no-install-recommends \

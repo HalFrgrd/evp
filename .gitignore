@@ -10,3 +10,4 @@ scripts/compare-out/
 _vhs_work/
 **/.antigravitycli/
 **/compare-out/
+**/stress_test-out/

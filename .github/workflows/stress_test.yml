@@ -2,8 +2,7 @@ name: stress_test
 
 # Runs the stress-test benchmark for the evp PTY → encoder → renderer
 # pipeline and compares the resulting GIF (and timing) against an
-# equivalent VHS run. The evp benchmark and VHS run are executed as
-# native workflow steps rather than inside a monolithic Dockerfile.
+# equivalent VHS run. This is executed entirely inside Docker via Bake.
 #
 # Trigger: manual (workflow_dispatch) or from another workflow via
 # workflow_call.
@@ -24,96 +23,30 @@ concurrency:
 
 jobs:
   stress_test:
-    runs-on: ubuntu-latest
+    name: Run Stress Test in Docker
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
-    env:
-      STRESS_TEST_FPS: 50
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.95"
-          targets: x86_64-unknown-linux-musl
-
-      - name: Install musl tools
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-dev musl-tools
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Prebuild libghostty pkg-config artifacts
-        # mode=min caches only the final export stage (~14 MB of .a + headers),
-        # not the intermediate build layers (apt, zig, git clone, zig build).
+      - name: Run Bake Stress Test
         uses: docker/bake-action@v7
         with:
           files: docker-bake.hcl
-          targets: extract-libghostty
+          targets: stress-test
           set: |
-            extract-libghostty.output=type=local,dest=${{ runner.temp }}/docker/libghostty
+            stress-test.output=type=local,dest=stress_test-out
             *.cache-from=type=gha
             *.cache-to=type=gha,mode=min
-
-      - name: Copy prebuilt libghostty to assets
-        run: |
-          rm -rf assets/libghostty
-          mkdir -p assets
-          cp -r ${{ runner.temp }}/docker/libghostty assets/libghostty
-
-      - name: Build stress_test_benchmark
-        run: cargo build --release --example stress_test_benchmark
-
-      - name: Run evp benchmark
-        run: |
-          set -euo pipefail
-          mkdir -p stress_test-out
-          EVP_STRESS_TEST_TAPE="$(pwd)/scripts/stress_test.tape" \
-          EVP_STRESS_TEST_PROGRAM="$(pwd)/scripts/stress_test_program.py" \
-            ./target/release/examples/stress_test_benchmark \
-              stress_test-out/evp.gif \
-              stress_test-out/evp.report.txt
-
-      - name: Build VHS image
-        run: docker build -t vhs-stress -f ci/vhs.Dockerfile .
-
-      - name: Run VHS stress test
-        run: |
-          set -euo pipefail
-          start_ns=$(date +%s%N)
-          docker run --rm \
-            -v "$PWD/stress_test-out:/work" \
-            -w /work \
-            vhs-stress
-          end_ns=$(date +%s%N)
-          wall_ms=$(( (end_ns - start_ns) / 1000000 ))
-          test -s stress_test-out/stress_test.gif
-          mv stress_test-out/stress_test.gif stress_test-out/vhs.gif
-          vhs_cpu=$(awk '/Cpus_allowed_list/ {print $2}' /proc/self/status)
-          {
-            echo "=== vhs stress_test benchmark ==="
-            echo "renderer            = vhs"
-            echo "image               = ghcr.io/charmbracelet/vhs:v0.10.0"
-            echo "output_gif          = stress_test-out/vhs.gif"
-            echo "output_gif_bytes    = $(stat -c %s stress_test-out/vhs.gif)"
-            echo "wall_ms             = ${wall_ms}"
-            echo "cpu_affinity        = ${vhs_cpu:-(unknown)}"
-          } > stress_test-out/vhs.report.txt
-
-      - name: Run frame analysis and comparison
-        run: |
-          set -euo pipefail
-          ./scripts/stress_test_compare.sh \
-            stress_test-out/evp.gif \
-            stress_test-out/evp.report.txt \
-            stress_test-out/vhs.gif \
-            stress_test-out/vhs.report.txt \
-            stress_test-out/comparison.md
-          python3 ./scripts/gif_frame_analyzer.py stress_test-out/evp.gif \
-            --fps "${STRESS_TEST_FPS}" --json > stress_test-out/evp.gif.analysis.json
-          python3 ./scripts/gif_frame_analyzer.py stress_test-out/vhs.gif \
-            --fps "${STRESS_TEST_FPS}" --json > stress_test-out/vhs.gif.analysis.json
+        env:
+          VERGEN_GIT_SHA: ${{ github.sha }}
+          VERGEN_GIT_BRANCH: ${{ github.ref_name }}
+          VERGEN_GIT_COMMIT_DATE: ${{ github.event.head_commit.timestamp }}
+          VERGEN_GIT_DIRTY: "false"
 
       - name: Print comparison report
         run: |
@@ -136,12 +69,3 @@ jobs:
             stress_test-out/vhs.gif.analysis.json
             stress_test-out/comparison.md
           if-no-files-found: warn
-
-      - name: Enforce pass/fail
-        run: |
-          set -eu
-          test -s stress_test-out/evp.gif
-          test -s stress_test-out/vhs.gif
-          result=$(awk -F'=' '/^result/ { gsub(/[[:space:]]/,"",$2); print $2 }' stress_test-out/evp.report.txt)
-          echo "evp result: $result"
-          test "$result" = "PASS"

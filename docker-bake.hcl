@@ -12,12 +12,6 @@ target "extract-libghostty" {
   output     = ["type=local,dest=${EXTRACT_LIBGHOSTTY_DEST}"]
 }
 
-target "vhs" {
-  context    = "."
-  dockerfile = "ci/vhs.Dockerfile"
-  tags       = ["evp-vhs:latest"]
-}
-
 variable "EXTRACT_EVP_DEST" { default = "ci/build" }
 
 variable "VERGEN_GIT_SHA" { default = "" }
@@ -54,6 +48,18 @@ target "test" {
     VERGEN_GIT_COMMIT_DATE = VERGEN_GIT_COMMIT_DATE
     VERGEN_GIT_DIRTY       = VERGEN_GIT_DIRTY
   }
+}
+
+variable "EXTRACT_STRESS_TEST_DEST" { default = "stress_test-out" }
+
+target "stress-test" {
+  context    = "."
+  dockerfile = "ci/stress_test.Dockerfile"
+  contexts = {
+    evp-binary      = "target:evp"
+    stress-test-bin = "target:evp"
+  }
+  output = ["type=local,dest=${EXTRACT_STRESS_TEST_DEST}"]
 }
 
 group "examples" {

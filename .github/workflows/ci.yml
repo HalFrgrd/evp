@@ -20,7 +20,7 @@ concurrency:
 jobs:
   build-and-test:
     name: Build and Test in Docker
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -38,7 +38,7 @@ jobs:
           set: |
             evp.output=type=local,dest=${{ runner.temp }}/docker/build
             *.cache-from=type=gha
-            *.cache-to=type=gha,mode=max
+            *.cache-to=type=gha,mode=min
         env:
           VERGEN_GIT_SHA: ${{ github.sha }}
           VERGEN_GIT_BRANCH: ${{ github.ref_name }}
@@ -55,7 +55,7 @@ jobs:
   render-examples:
     name: Render Examples and Release
     needs: build-and-test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -71,7 +71,7 @@ jobs:
           set: |
             *.output=type=local,dest=${{ runner.temp }}/docker/examples
             *.cache-from=type=gha
-            *.cache-to=type=gha,mode=max
+            *.cache-to=type=gha,mode=min
         env:
           VERGEN_GIT_SHA: ${{ github.sha }}
           VERGEN_GIT_BRANCH: ${{ github.ref_name }}
