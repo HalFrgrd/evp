@@ -652,3 +652,100 @@ Sleep 200ms
     assert!(saw_xyz, "should have captured final frame with 'XYZ' after wait resolved");
 }
 
+#[test]
+fn hide_show_consecutive_no_frames_between() {
+    let tape = r#"
+Output out.gif
+Set Width 800
+Set Height 300
+Set FontSize 20
+Set TypingSpeed 10ms
+Set Framerate 30
+Set Shell /bin/sh
+Sleep 200ms
+Hide
+Type "echo first-hidden"
+Enter
+Sleep 500ms
+Show
+Hide
+Type "echo second-hidden"
+Enter
+Sleep 500ms
+Show
+Sleep 200ms
+"#;
+
+    let rec = record(tape);
+
+    // Let's inspect all captured frames.
+    // If a frame was captured between the first `Show` and the second `Hide`, it would contain
+    // "first-hidden" but NOT "second-hidden" (as "second-hidden" was typed during the second hidden period).
+    // If no frames were captured between them, then all frames in the recording must either:
+    // 1. Contain neither (captured during the initial 200ms sleep before any hidden commands).
+    // 2. Contain both (captured during the final 200ms sleep after both hidden commands have run).
+    let mut saw_first_hidden = false;
+    let mut saw_second_hidden = false;
+
+    for i in 0..rec.frames.len() {
+        let lines = common::rows_as_strings(&rec, i);
+        let frame_text = lines.join("\n");
+        let has_first = frame_text.contains("first-hidden");
+        let has_second = frame_text.contains("second-hidden");
+
+        if has_first {
+            saw_first_hidden = true;
+        }
+        if has_second {
+            saw_second_hidden = true;
+        }
+
+        assert!(
+            !(has_first && !has_second),
+            "Frame {} (at {}ms) contains 'first-hidden' but not 'second-hidden'. This indicates a frame was leaked/captured between consecutive Show and Hide commands!",
+            i,
+            rec.frames[i].t_ms()
+        );
+    }
+
+    assert!(saw_first_hidden, "should have captured frames containing 'first-hidden'");
+    assert!(saw_second_hidden, "should have captured frames containing 'second-hidden'");
+}
+
+#[test]
+fn hide_at_start_no_captured_frames() {
+    let tape = r#"
+Output out.gif
+Set Width 800
+Set Height 300
+Set FontSize 20
+Set TypingSpeed 10ms
+Set Framerate 30
+Set Shell /bin/sh
+Hide
+Sleep 500ms
+Show
+Sleep 200ms
+"#;
+
+    let rec = record(tape);
+    // Since Hide is at the very start (t = 0), and then we Sleep 500ms, and then Show, and then Sleep 200ms:
+    // - No frames should be captured/recorded during the 500ms sleep.
+    // - The only frames captured should be after the Show (which corresponds to the final 200ms).
+    // Let's verify the total recorded length/time.
+    // The skipped time is 500ms.
+    // The total execution time is 700ms.
+    // The recorded duration should be around 200ms.
+    assert!(!rec.frames.is_empty());
+    let max_t = rec.frames.last().unwrap().t_ms();
+    assert!(
+        max_t < 360,
+        "Expected recorded duration to be around 333ms, but got {}ms (frames: {:?})",
+        max_t,
+        rec.frames.iter().map(|f| f.t_ms()).collect::<Vec<_>>()
+    );
+}
+
+
+
+
