@@ -431,6 +431,33 @@ fn rasterize_raw_frame(
     );
     if cfg.frame_style.window_bar.enabled() {
         draw_window_bar(&mut buf, cfg.canvas_w, cfg);
+        if let Some(ref title) = frame.title {
+            if !title.is_empty() {
+                let title_fs = (cfg.bar_h as f32 * 0.45).max(10.0);
+                let title_scale = PxScale::from(title_fs);
+                let text_w = string_width(title, font_set, title_scale);
+
+                let cx = cfg.frame_x as f32 + cfg.frame_w as f32 / 2.0;
+                let start_x = (cx - text_w / 2.0).max(cfg.frame_x as f32);
+
+                let cy = cfg.frame_y as f32 + cfg.bar_h as f32 / 2.0;
+                let (_, font) = font_set.select_for_char(0, 'M');
+                let scaled = font.as_scaled(title_scale);
+                let baseline_y = cy + (scaled.ascent() + scaled.descent()) / 2.0;
+
+                draw_string(
+                    &mut buf,
+                    cfg.canvas_w,
+                    start_x as u32,
+                    baseline_y as u32,
+                    title,
+                    font_set,
+                    title_scale,
+                    [142, 142, 147], // #8e8e93
+                    glyph_cache,
+                );
+            }
+        }
     }
 
     for row in 0..frame.rows {
@@ -831,3 +858,92 @@ fn draw_circle(
         }
     }
 }
+
+fn string_width(text: &str, font_set: &FontSet, scale: PxScale) -> f32 {
+    let mut w = 0.0;
+    for ch in text.chars() {
+        let (_, font) = font_set.select_for_char(0, ch);
+        let glyph_id = font.glyph_id(ch);
+        let scaled = font.as_scaled(scale);
+        w += scaled.h_advance(glyph_id);
+    }
+    w
+}
+
+fn draw_string(
+    buf: &mut [u8],
+    w: u32,
+    x: u32,
+    y: u32,
+    text: &str,
+    font_set: &FontSet,
+    scale: PxScale,
+    fg: [u8; 3],
+    glyph_cache: &mut GlyphCache,
+) {
+    let mut pen_x = x as f32;
+    for ch in text.chars() {
+        let (font_idx, font) = font_set.select_for_char(0, ch);
+        let glyph_id = font.glyph_id(ch);
+        let scaled = font.as_scaled(scale);
+
+        let cache_key = GlyphCacheKey {
+            font_idx: font_idx as u16,
+            glyph_id: glyph_id.0,
+            scale_bits_x: scale.x.to_bits(),
+            scale_bits_y: scale.y.to_bits(),
+        };
+
+        let bitmap = glyph_cache.entry(cache_key).or_insert_with(|| {
+            let glyph = glyph_id.with_scale(scale);
+            font.outline_glyph(glyph).map(|outline| {
+                let bounds = outline.px_bounds();
+                let width = bounds.width().round() as u32;
+                let height = bounds.height().round() as u32;
+                let mut pixels = vec![0.0f32; (width * height) as usize];
+                outline.draw(|x, y, c| {
+                    let idx = (y * width + x) as usize;
+                    if idx < pixels.len() {
+                        pixels[idx] = c;
+                    }
+                });
+                GlyphBitmap {
+                    width,
+                    height,
+                    offset_x: bounds.min.x.round() as i32,
+                    offset_y: bounds.min.y.round() as i32,
+                    pixels,
+                }
+            })
+        });
+
+        if let Some(bitmap) = bitmap {
+            let bx = (pen_x + bitmap.offset_x as f32).round() as i32;
+            let by = (y as f32 + bitmap.offset_y as f32).round() as i32;
+            for gy in 0..bitmap.height {
+                let dest_y = by + gy as i32;
+                if dest_y < 0 {
+                    continue;
+                }
+                for gx in 0..bitmap.width {
+                    let dest_x = bx + gx as i32;
+                    if dest_x < 0 || dest_x >= w as i32 {
+                        continue;
+                    }
+                    let coverage = bitmap.pixels[(gy * bitmap.width + gx) as usize];
+                    if coverage > 0.0 {
+                        let i = ((dest_y as u32 * w + dest_x as u32) * 3) as usize;
+                        if i + 2 < buf.len() {
+                            let alpha = coverage;
+                            buf[i] = ((1.0 - alpha) * buf[i] as f32 + alpha * fg[0] as f32).round() as u8;
+                            buf[i + 1] = ((1.0 - alpha) * buf[i + 1] as f32 + alpha * fg[1] as f32).round() as u8;
+                            buf[i + 2] = ((1.0 - alpha) * buf[i + 2] as f32 + alpha * fg[2] as f32).round() as u8;
+                        }
+                    }
+                }
+            }
+        }
+        pen_x += scaled.h_advance(glyph_id);
+    }
+}
+

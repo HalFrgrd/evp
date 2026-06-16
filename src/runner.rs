@@ -1246,6 +1246,7 @@ fn write_screenshot(frame: &RawFrame, script: &Script, path: &std::path::Path) -
                 cursor_color: frame.cursor_color,
                 cursor_accent: frame.cursor_accent,
                 mouse_cursor: frame.mouse_cursor,
+                title: frame.title.clone(),
                 cells: frame.cells.clone(),
             }],
         };
@@ -1426,6 +1427,8 @@ fn capture<'a>(
         None
     };
 
+    let title = terminal.title().ok().map(|s| s.to_string());
+
     Ok((
         RawFrame {
             t_ms: at.as_millis() as u32,
@@ -1438,6 +1441,7 @@ fn capture<'a>(
             cursor_color,
             cursor_accent,
             mouse_cursor: None,
+            title,
         },
         raw_cursor_pos,
     ))

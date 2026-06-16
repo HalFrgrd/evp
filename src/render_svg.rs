@@ -1495,6 +1495,13 @@ impl WindowBarCircle {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct TitleSegment {
+    pub title: String,
+    pub start_ms: u32,
+    pub end_ms: u32,
+}
+
 pub struct SvgDoc {
     pub canvas_w: u32,
     pub canvas_h: u32,
@@ -1516,6 +1523,8 @@ pub struct SvgDoc {
     pub cursor_rects: Vec<CursorRect>,
     pub mouse_spans: Vec<MouseSpan>,
     pub is_static: bool,
+    pub bar_h: u32,
+    pub title_segments: Vec<TitleSegment>,
 }
 
 fn is_static(start_ms: u32, end_ms: u32, total_ms: u32) -> bool {
@@ -1944,6 +1953,7 @@ fn serialize_mouse_elements(mouse_spans: &[MouseSpan], total_ms: u32) -> String 
 
 impl SvgDoc {
     pub fn to_svg(&self) -> String {
+        let total_ms = (self.master_timer_dur * 1000.0).round() as u32;
         // 1. Gather color classes
         let mut text_color_counts: HashMap<[u8; 3], usize> = HashMap::new();
         for te in &self.text_elements {
@@ -2089,6 +2099,37 @@ impl SvgDoc {
             s.push_str(&circle.to_svg_string());
         }
 
+        // Window bar title
+        if !self.window_bar_circles.is_empty() && self.bar_h > 0 {
+            let cx = self.frame_bg_x + self.frame_bg_w / 2;
+            let cy = self.frame_bg_y + self.bar_h / 2;
+            let title_fs = (self.bar_h as f32 * 0.45).max(10.0);
+            for segment in &self.title_segments {
+                let escaped_title = escape_text(&segment.title);
+                if self.is_static {
+                    s.push_str(&format!(
+                        r##"<text x="{cx}" y="{cy}" fill="#8e8e93" text-anchor="middle" dominant-baseline="central" font-size="{title_fs}" font-weight="bold">{escaped_title}</text>
+"##,
+                        cx = cx,
+                        cy = cy,
+                        title_fs = format_seconds(title_fs),
+                        escaped_title = escaped_title,
+                    ));
+                } else {
+                    let set_str = visibility_set(segment.start_ms, segment.end_ms, total_ms);
+                    s.push_str(&format!(
+                        r##"<text x="{cx}" y="{cy}" fill="#8e8e93" text-anchor="middle" dominant-baseline="central" font-size="{title_fs}" font-weight="bold" class="h">{set_str}{escaped_title}</text>
+"##,
+                        cx = cx,
+                        cy = cy,
+                        title_fs = format_seconds(title_fs),
+                        set_str = set_str,
+                        escaped_title = escaped_title,
+                    ));
+                }
+            }
+        }
+
         // Master timer - rendered directly as an animate element under the svg root
         if !self.is_static {
             s.push_str(&format!(
@@ -2099,7 +2140,6 @@ impl SvgDoc {
         }
 
         // Background rects
-        let total_ms = (self.master_timer_dur * 1000.0).round() as u32;
         for rect in &self.bg_rects {
             let is_bg_static = is_static(rect.start_ms, rect.end_ms, total_ms);
             let fill_attr = if let Some(cls) = color_classes.get(&rect.fill) {
@@ -3084,6 +3124,40 @@ fn render_from_frames(
         }
     }
 
+    let mut title_segments = Vec::new();
+    let total_ms = (total_s * 1000.0).round() as u32;
+    if !frames.is_empty() {
+        let mut current_title = frames[0].title.as_deref().map(|s| s.to_string());
+        let mut start_ms = 0u32;
+        for i in 1..frames.len() {
+            let frame_title = frames[i].title.as_deref().map(|s| s.to_string());
+            if frame_title != current_title {
+                let end_ms = frames[i].t_ms;
+                if let Some(ref title) = current_title {
+                    if !title.is_empty() {
+                        title_segments.push(TitleSegment {
+                            title: title.clone(),
+                            start_ms,
+                            end_ms,
+                        });
+                    }
+                }
+                current_title = frame_title;
+                start_ms = end_ms;
+            }
+        }
+        let end_ms = total_ms;
+        if let Some(ref title) = current_title {
+            if !title.is_empty() {
+                title_segments.push(TitleSegment {
+                    title: title.clone(),
+                    start_ms,
+                    end_ms,
+                });
+            }
+        }
+    }
+
     let doc = SvgDoc {
         canvas_w,
         canvas_h,
@@ -3118,6 +3192,8 @@ fn render_from_frames(
         cursor_rects,
         mouse_spans,
         is_static: opts.is_screenshot,
+        bar_h: cfg.bar_h,
+        title_segments,
     };
 
     Ok(doc.to_svg())
@@ -3245,6 +3321,7 @@ mod tests {
                 cursor_color: None,
                 cursor_accent: None,
                 mouse_cursor: None,
+                title: None,
                 cells,
             }],
         }

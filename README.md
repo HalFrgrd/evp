@@ -177,6 +177,28 @@ Wait+Screen@1s /regex/              # Wait scanning full screen with 1s timeout 
 ```
 <!-- END_REF_SCRIPT -->
 
+## Examples
+
+Here is a showcase of features and examples built with `evp`.
+
+### Dynamic Window Title Bar
+
+You can enable a window bar styled with macOS-like window controls and dynamically update the title displayed at the center of the bar.
+Your program will need to use [OSC 2 or OSC 0](https://man7.org/linux/man-pages/man4/console_codes.4.html) to set the title.
+
+#### Script (`window_title.tape`)
+
+```elixir
+# Enable window bar styling
+Set WindowBar Rings
+
+# Set a dynamic terminal title via ANSI OSC sequence
+Type "printf '\033]2;My Dynamic Terminal Title\007'"
+Enter
+```
+
+![Dynamic Window Title Bar Demo](https://github.com/HalFrgrd/evp/releases/download/assets/window_title.svg)
+
 ## Acknowledgments
 
 ### VHS

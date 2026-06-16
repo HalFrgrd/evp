@@ -746,6 +746,43 @@ Sleep 200ms
     );
 }
 
+#[test]
+fn window_title_is_recorded_and_rendered() {
+    let tape = r#"
+Output out.gif
+Set Width 800
+Set Height 300
+Set FontSize 20
+Set Framerate 30
+Set Shell /bin/sh
+Set WindowBar Rings
+Sleep 200ms
+Type "printf '\033]2;My Test Title\007'"
+Enter
+Sleep 1s
+"#;
+    let rec = record(tape);
+
+    let mut found_title = false;
+    for frame in &rec.frames {
+        if let Some(t) = frame.title() {
+            if t == "My Test Title" {
+                found_title = true;
+                break;
+            }
+        }
+    }
+    assert!(found_title, "Expected to find a frame with the title 'My Test Title'");
+
+    let opts = evp::SvgOptions::default();
+    let svg = evp::render_svg::render_svg_to_string(&rec, &opts).expect("render svg to string");
+    assert!(
+        svg.contains("My Test Title"),
+        "SVG rendering should contain 'My Test Title'"
+    );
+}
+
+
 
 
 
