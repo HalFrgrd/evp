@@ -199,6 +199,11 @@ Enter
 
 ![Dynamic Window Title Bar Demo](https://github.com/HalFrgrd/evp/releases/download/assets/window_title.svg)
 
+## Serving SVGs / SVGZs
+
+Unfortunately, GitHub doesn't support embeddable SVGs in such a way that you can select text from the SVG.
+
+
 ## Acknowledgments
 
 ### VHS
