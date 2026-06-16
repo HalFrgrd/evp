@@ -78,7 +78,8 @@ group "examples" {
     "example-padding",
     "example-progress",
     "example-shell-tour",
-    "example-test"
+    "example-test",
+    "example-window_title"
   ]
 }
 
@@ -182,6 +183,12 @@ target "example-mouse_small" {
 target "example-cols_rows" {
   inherits = ["example-base"]
   args     = { EXAMPLE_NAME = "cols_rows" }
+  output   = ["type=local,dest=${EXTRACT_EXAMPLES_DEST}"]
+}
+
+target "example-window_title" {
+  inherits = ["example-base"]
+  args     = { EXAMPLE_NAME = "window_title" }
   output   = ["type=local,dest=${EXTRACT_EXAMPLES_DEST}"]
 }
 
