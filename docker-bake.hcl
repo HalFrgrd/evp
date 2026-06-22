@@ -6,6 +6,11 @@ group "default" {
 
 variable "EXTRACT_LIBGHOSTTY_DEST" { default = "assets/libghostty" }
 
+variable "REGISTRY" { default = "ghcr.io" }
+variable "IMAGE_NAME" { default = "halfrgrd/evp" }
+variable "IMAGE_TAG" { default = "latest" }
+variable "IMAGE_EXTRA_TAG" { default = "" }
+
 target "extract-libghostty" {
   context    = "."
   dockerfile = "ci/libghostty-pkgconfig.Dockerfile"
@@ -21,7 +26,7 @@ variable "VERGEN_GIT_DIRTY" { default = "" }
 
 target "evp" {
   context    = "."
-  dockerfile = "ci/evp.Dockerfile"
+  dockerfile = "ci/evp_builder.Dockerfile"
   target     = "export"
   contexts = {
     libghostty = "target:extract-libghostty"
@@ -37,7 +42,7 @@ target "evp" {
 
 target "test" {
   context    = "."
-  dockerfile = "ci/evp.Dockerfile"
+  dockerfile = "ci/evp_builder.Dockerfile"
   target     = "tester"
   contexts = {
     libghostty = "target:extract-libghostty"
@@ -190,6 +195,27 @@ target "example-window_title" {
   inherits = ["example-base"]
   args     = { EXAMPLE_NAME = "window_title" }
   output   = ["type=local,dest=${EXTRACT_EXAMPLES_DEST}"]
+}
+
+target "demo" {
+  context    = "."
+  dockerfile = "Dockerfile"
+  contexts = {
+    evp-binary = "target:evp"
+  }
+  tags = compact([
+    "${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}",
+    IMAGE_EXTRA_TAG != "" ? "${REGISTRY}/${IMAGE_NAME}:${IMAGE_EXTRA_TAG}" : ""
+  ])
+}
+
+target "validate-demo" {
+  context    = "."
+  dockerfile = "ci/example_evp_use.Dockerfile"
+  args = {
+    BASE_IMAGE = "${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+  }
+  output = ["type=local,dest=ci/build/validation"]
 }
 
 

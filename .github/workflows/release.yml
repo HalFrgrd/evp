@@ -110,3 +110,79 @@ jobs:
             ${{ steps.pkg.outputs.checksum }}
           fail_on_unmatched_files: true
           generate_release_notes: true
+
+  publish-docker:
+    name: Build and Publish Demo Docker Image
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lowercase image name
+        run: |
+          echo "IMAGE_NAME=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Build and Push Demo Image
+        uses: docker/bake-action@v7
+        with:
+          files: docker-bake.hcl
+          targets: demo
+          push: true
+          set: |
+            *.cache-from=type=gha
+            *.cache-to=type=gha,mode=min
+        env:
+          REGISTRY: ghcr.io
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          IMAGE_TAG: ${{ steps.tag.outputs.name }}
+          IMAGE_EXTRA_TAG: latest
+          VERGEN_GIT_SHA: ${{ github.sha }}
+          VERGEN_GIT_BRANCH: ${{ github.ref_name }}
+          VERGEN_GIT_COMMIT_DATE: ${{ github.event.head_commit.timestamp }}
+          VERGEN_GIT_DIRTY: "false"
+
+      - name: Validate Demo Image
+        uses: docker/bake-action@v7
+        with:
+          files: docker-bake.hcl
+          targets: validate-demo
+          set: |
+            *.cache-from=type=gha
+            *.cache-to=type=gha,mode=min
+        env:
+          REGISTRY: ghcr.io
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          IMAGE_TAG: ${{ steps.tag.outputs.name }}
+          VERGEN_GIT_SHA: ${{ github.sha }}
+          VERGEN_GIT_BRANCH: ${{ github.ref_name }}
+          VERGEN_GIT_COMMIT_DATE: ${{ github.event.head_commit.timestamp }}
+          VERGEN_GIT_DIRTY: "false"
+
+      - name: Upload validation GIF artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: validation-gif
+          path: ci/build/validation/test_run.gif
+          if-no-files-found: error
