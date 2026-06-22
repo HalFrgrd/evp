@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/github/license/HalFrgrd/evp)](https://github.com/HalFrgrd/evp/blob/master/LICENSE)
 [![Latest Release](https://img.shields.io/github/v/release/HalFrgrd/evp)](https://github.com/HalFrgrd/evp/releases)
 
-**EVP is a Rust CLI tool to make beautiful terminal recordings from a list of input events.**
+**EVP is a Rust CLI tool to make beautiful terminal recordings.**
 
 </div>
 
@@ -20,7 +20,7 @@ See it in action at [flyline](https://github.com/HalFrgrd/flyline) or below:
 
 ## VHS comparison
 EVP is extends [VHS](https://github.com/charmbracelet/vhs) in these ways:
-- Significantly faster. No more skipped frames when creating demos in GHA!
+- Significantly faster. No more skipped frames when creating demos in GitHub Actions!
 - Animated SVGs:
     - Super crisp demos
     - You can select and copy text from the SVG as it is playing!
@@ -36,7 +36,7 @@ EVP is extends [VHS](https://github.com/charmbracelet/vhs) in these ways:
 - EVP has no runtime dependencies
     - It is a statically linked [musl binary](https://www.musl-libc.org/)
     - A collection of useful fonts are embedded into EVP
-- Mouse support: you can script mouse input (clicking, dragging, mouse moving) <img src="https://github.com/HalFrgrd/evp/releases/download/assets/mouse_small.gif" alt="mouse_small" width="500" />
+- Mouse support: you can script mouse clicks, dragging, movement <img src="https://github.com/HalFrgrd/evp/releases/download/assets/mouse_small.gif" alt="mouse_small" width="500" />
 - Set the terminal size by number of rows / cols or by number of pixels.
 - Coming soon: resize support
 - Coming soon: snapshot process metrics to help debug interactive use
@@ -179,14 +179,11 @@ Wait+Screen@1s /regex/              # Wait scanning full screen with 1s timeout 
 
 ## Examples
 
-Here is a showcase of features and examples built with `evp`.
-
 ### Dynamic Window Title Bar
 
 You can enable a window bar styled with macOS-like window controls and dynamically update the title displayed at the center of the bar.
 Your program will need to use [OSC 2 or OSC 0](https://man7.org/linux/man-pages/man4/console_codes.4.html) to set the title.
-
-#### Script (`window_title.tape`)
+For instance:
 
 ```elixir
 # Enable window bar styling
@@ -197,7 +194,7 @@ Type "printf '\033]2;My Dynamic Terminal Title\007'"
 Enter
 ```
 
-![Dynamic Window Title Bar Demo](https://github.com/HalFrgrd/evp/releases/download/assets/window_title.svg)
+![Dynamic Window Title Bar Demo](https://github.com/HalFrgrd/evp/releases/download/assets/window_title.gif)
 
 ## Serving SVGs / SVGZs
 
