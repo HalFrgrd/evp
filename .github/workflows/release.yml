@@ -186,3 +186,54 @@ jobs:
           name: validation-gif
           path: ci/build/validation/test_run.gif
           if-no-files-found: error
+
+  test-action:
+    name: Test GitHub Action
+    needs: build-linux-amd64
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Wait for Release API replication
+        run: |
+          tag="${{ steps.tag.outputs.name }}"
+          api="https://api.github.com/repos/${{ github.repository }}/releases/tags/${tag}"
+          echo "Checking release availability: ${api}"
+          for i in {1..12}; do
+            if curl -fsSL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "$api" > /dev/null; then
+              echo "Release is available!"
+              exit 0
+            fi
+            echo "Release not available yet, retrying in 5 seconds..."
+            sleep 5
+          done
+          echo "Warning: Release API check timed out, proceeding anyway..."
+
+      - name: Test local action using the new release
+        uses: ./
+        with:
+          script: examples/hello.tape
+          output: /tmp/action-test.gif
+          version: ${{ steps.tag.outputs.name }}
+
+      - name: Verify generated GIF
+        run: |
+          ls -lh /tmp/action-test.gif
+          file /tmp/action-test.gif
+
+      - name: Upload action test GIF artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: action-test-gif
+          path: /tmp/action-test.gif
+          if-no-files-found: error

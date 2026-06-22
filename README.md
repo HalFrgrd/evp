@@ -89,11 +89,36 @@ The script should have a the refernece at the top.
 
 #### GitHub Actions
 
-TODO
+You can run `evp` directly in your GitHub Actions workflows to automate rendering your terminal recordings. Since the action downloads a prebuilt static binary, no Rust toolchain or Docker setup is required:
+
+```yaml
+- name: Render tape script
+  uses: HalFrgrd/evp@v0.2.0 # Replace with the desired release tag
+  with:
+    script: demo.tape
+    output: demo.gif
+```
 
 #### Docker
 
-TODO
+EVP publishes a pre-configured Docker image containing the statically linked `evp` binary on a modern Ubuntu base. 
+
+##### Interactive Demo Environment
+To play around in the sandbox with a customized purple shell prompt and preloaded samples:
+```bash
+docker run -it ghcr.io/halfrgrd/evp:latest
+```
+Inside the container, you will find demo folders and a sample script ready to run:
+```bash
+cd ~/demos
+evp demo.tape --output demo.gif
+```
+
+##### Rendering Local Scripts
+To render your local `.tape` scripts without installing `evp` on your host system, mount your directory:
+```bash
+docker run --rm -v "$(pwd)":/work -w /work ghcr.io/halfrgrd/evp:latest evp my_script.tape
+```
 
 
 
