@@ -89,9 +89,33 @@ runs:
         fi
         echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
-        # Tarball name layout matches .github/workflows/release.yml.
+        # Resolve target platform
+        os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+        arch="$(uname -m)"
+
+        case "${os}" in
+          linux)
+            case "${arch}" in
+              x86_64)  target="x86_64-unknown-linux-musl" ;;
+              aarch64) target="aarch64-unknown-linux-musl" ;;
+              *) echo "::error ::Unsupported Linux architecture: ${arch}"; exit 1 ;;
+            esac
+            ;;
+          darwin)
+            case "${arch}" in
+              x86_64)  target="x86_64-apple-darwin" ;;
+              aarch64) target="aarch64-apple-darwin" ;;
+              *) echo "::error ::Unsupported macOS architecture: ${arch}"; exit 1 ;;
+            esac
+            ;;
+          *)
+            echo "::error ::Unsupported OS: ${os}"
+            exit 1
+            ;;
+        esac
+
         version_no_v="${tag#v}"
-        stage="evp-${version_no_v}-x86_64-unknown-linux-musl"
+        stage="evp-${version_no_v}-${target}"
         url="https://github.com/${repo}/releases/download/${tag}/${stage}.tar.gz"
         sha_url="${url}.sha256"
 
@@ -99,13 +123,18 @@ runs:
         echo "downloading ${url}"
         curl -fsSL "${auth[@]}" -o "${tmpdir}/evp.tar.gz" "${url}"
         if curl -fsSL "${auth[@]}" -o "${tmpdir}/evp.tar.gz.sha256" "${sha_url}" 2>/dev/null; then
-          (cd "${tmpdir}" && sha256sum -c evp.tar.gz.sha256)
+          if command -v sha256sum >/dev/null 2>&1; then
+            (cd "${tmpdir}" && sha256sum -c evp.tar.gz.sha256)
+          else
+            (cd "${tmpdir}" && shasum -a 256 -c evp.tar.gz.sha256)
+          fi
         else
           echo "::warning ::no .sha256 checksum published for ${tag}; skipping verification"
         fi
 
         tar -xzf "${tmpdir}/evp.tar.gz" -C "${tmpdir}"
-        sudo install -Dm755 "${tmpdir}/${stage}/evp" "${install_dir}/evp"
+        mkdir -p "${install_dir}"
+        sudo install -m755 "${tmpdir}/${stage}/evp" "${install_dir}/evp"
         echo "${install_dir}" >> "$GITHUB_PATH"
 
         "${install_dir}/evp" --version

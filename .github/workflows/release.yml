@@ -27,11 +27,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-linux-amd64:
-    name: build evp-x86_64-unknown-linux-musl
-    runs-on: ubuntu-26.04
-    env:
-      TARGET: x86_64-unknown-linux-musl
+  build-release:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux targets (built via cross/docker buildx)
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-24.04
+            build_tool: cargo
+            docker_platform: linux/amd64
+            zig_target: x86_64-linux-musl
+
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04
+            build_tool: cross
+            docker_platform: linux/arm64
+            zig_target: aarch64-linux-musl
+
+          # macOS targets (built natively)
+          - target: x86_64-apple-darwin
+            os: macos-14
+            build_tool: cargo
+            zig_target: x86_64-macos
+
+          - target: aarch64-apple-darwin
+            os: macos-14
+            build_tool: cargo
+            zig_target: aarch64-macos
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -47,7 +73,8 @@ jobs:
             echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Install system dependencies
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang musl-dev musl-tools
@@ -56,33 +83,79 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.95"
-          targets: x86_64-unknown-linux-musl
+          targets: ${{ matrix.target }}
 
-      - name: Set up Buildx
+      - name: Install cross
+        if: matrix.build_tool == 'cross'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Set up QEMU (Linux aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx (Linux)
+        if: runner.os == 'Linux'
         uses: docker/setup-buildx-action@v4
 
-      - name: Prebuild libghostty pkg-config artifacts
+      - name: Prebuild libghostty pkg-config artifacts (Linux)
+        if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           rm -rf assets/libghostty
           docker buildx bake \
-            --set extract-libghostty.cache-from=type=gha,scope=libghostty-pkgconfig-${{ runner.os }}-${{ runner.arch }} \
-            --set extract-libghostty.cache-to=type=gha,scope=libghostty-pkgconfig-${{ runner.os }}-${{ runner.arch }},mode=min \
+            --set extract-libghostty.platform=${{ matrix.docker_platform }} \
+            --set extract-libghostty.cache-from=type=gha,scope=libghostty-pkgconfig-${{ matrix.target }} \
+            --set extract-libghostty.cache-to=type=gha,scope=libghostty-pkgconfig-${{ matrix.target }},mode=min \
             extract-libghostty
+
+      - name: Set up Zig (macOS)
+        if: runner.os == 'macOS'
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Prebuild libghostty pkg-config artifacts (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/ghostty-org/ghostty.git ghostty-src
+          cd ghostty-src
+          git checkout 6590196661f769dd8f2b3e85d6c98262c4ec5b3b
+          zig build \
+              -Demit-lib-vt \
+              -Doptimize=ReleaseFast \
+              -Demit-xcframework=false \
+              -Dapp-runtime=none \
+              -Dtarget=${{ matrix.zig_target }} \
+              -Dcpu=baseline \
+              --prefix ../ghostty-install
+          cd ..
+          mkdir -p assets/libghostty/lib assets/libghostty/include/ghostty assets/libghostty/share/pkgconfig
+          cp ghostty-install/lib/libghostty-vt.a assets/libghostty/lib/
+          cp -r ghostty-install/include/ghostty assets/libghostty/include/
+          cp ghostty-install/share/pkgconfig/libghostty-vt-static.pc assets/libghostty/share/pkgconfig/
+          sed -i '' 's|^prefix=.*|prefix=${pcfiledir}/../..|' assets/libghostty/share/pkgconfig/libghostty-vt-static.pc
 
       - name: Build static evp binary
         run: |
           set -eux
-          cargo build --release --bin evp
+          ${{ matrix.build_tool }} build --release --target ${{ matrix.target }} --bin evp
           mkdir -p /tmp/evp-build
-          cp "target/${TARGET}/release/evp" /tmp/evp-build/evp
+          cp "target/${{ matrix.target }}/release/evp" /tmp/evp-build/evp
 
       - name: Sanity check extracted binary
+        if: matrix.target == 'x86_64-unknown-linux-musl' || matrix.target == 'aarch64-apple-darwin'
         run: |
           set -eux
           chmod +x /tmp/evp-build/evp
           file /tmp/evp-build/evp
-          (ldd /tmp/evp-build/evp 2>&1 || true)
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            (ldd /tmp/evp-build/evp 2>&1 || true)
+          else
+            (otool -L /tmp/evp-build/evp 2>&1 || true)
+          fi
           /tmp/evp-build/evp --version
 
       - name: Package tarball
@@ -91,12 +164,16 @@ jobs:
           set -eux
           tag="${{ steps.tag.outputs.name }}"
           version="${tag#v}"
-          stage="evp-${version}-${TARGET}"
+          stage="evp-${version}-${{ matrix.target }}"
           mkdir -p "dist/${stage}"
           cp /tmp/evp-build/evp "dist/${stage}/"
           cp README.md LICENSE "dist/${stage}/" 2>/dev/null || true
           tar -C dist -czf "dist/${stage}.tar.gz" "${stage}"
-          (cd dist && sha256sum "${stage}.tar.gz" > "${stage}.tar.gz.sha256")
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            (cd dist && shasum -a 256 "${stage}.tar.gz" > "${stage}.tar.gz.sha256")
+          else
+            (cd dist && sha256sum "${stage}.tar.gz" > "${stage}.tar.gz.sha256")
+          fi
           ls -lh dist
           echo "tarball=dist/${stage}.tar.gz" >> "$GITHUB_OUTPUT"
           echo "checksum=dist/${stage}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
@@ -189,7 +266,7 @@ jobs:
 
   test-action:
     name: Test GitHub Action
-    needs: build-linux-amd64
+    needs: build-release
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout
