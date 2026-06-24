@@ -32,7 +32,7 @@ EVP is extends [VHS](https://github.com/charmbracelet/vhs) in these ways:
     - `Command+Alt+PageUp`
 - Specify full shell path with arguments. e.g.:
     - `Set Shell bash --init-file test.rc`
-    - `Set Shell yazi` you can specify and program, not just a shell!
+    - `Set Shell yazi` you can specify any program, not just a shell!
 - EVP has no runtime dependencies
     - It is a statically linked [musl binary](https://www.musl-libc.org/)
     - A collection of useful fonts are embedded into EVP
@@ -119,6 +119,8 @@ To render your local `.tape` scripts without installing `evp` on your host syste
 ```bash
 docker run --rm -v "$(pwd)":/work -w /work ghcr.io/halfrgrd/evp:latest evp my_script.tape
 ```
+
+#### Custom docker
 
 
 
@@ -230,10 +232,10 @@ Unfortunately, GitHub doesn't support embeddable SVGs in such a way that you can
 
 ### VHS
 
-EVP is based on the vhs project.
+EVP is based on the [VHS](https://github.com/charmbracelet/vhs) project.
 They share little code but EVP does try use the same `.tape` file format.
 
-The colour themes in [`assets/vhs-themes.json`](assets/vhs-themes.json) are taken from the [VHS](https://github.com/charmbracelet/vhs) project and are licensed under the MIT License. See [licenses/VHS-MIT.txt](licenses/VHS-MIT.txt) for the full license text.
+The colour themes in [`assets/vhs-themes.json`](assets/vhs-themes.json) are taken from the [VHS](https://github.com/charmbracelet/vhs) project and are licensed under the MIT License. See [licenses/VHS-MIT.txt](licenses/VHS-MIT.txt) for the full license.
 
 ### Font providers
 
