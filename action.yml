@@ -121,18 +121,18 @@ runs:
 
         tmpdir="$(mktemp -d)"
         echo "downloading ${url}"
-        curl -fsSL "${auth[@]}" -o "${tmpdir}/evp.tar.gz" "${url}"
-        if curl -fsSL "${auth[@]}" -o "${tmpdir}/evp.tar.gz.sha256" "${sha_url}" 2>/dev/null; then
+        curl -fsSL "${auth[@]}" -o "${tmpdir}/${stage}.tar.gz" "${url}"
+        if curl -fsSL "${auth[@]}" -o "${tmpdir}/${stage}.tar.gz.sha256" "${sha_url}" 2>/dev/null; then
           if command -v sha256sum >/dev/null 2>&1; then
-            (cd "${tmpdir}" && sha256sum -c evp.tar.gz.sha256)
+            (cd "${tmpdir}" && sha256sum -c "${stage}.tar.gz.sha256")
           else
-            (cd "${tmpdir}" && shasum -a 256 -c evp.tar.gz.sha256)
+            (cd "${tmpdir}" && shasum -a 256 -c "${stage}.tar.gz.sha256")
           fi
         else
           echo "::warning ::no .sha256 checksum published for ${tag}; skipping verification"
         fi
 
-        tar -xzf "${tmpdir}/evp.tar.gz" -C "${tmpdir}"
+        tar -xzf "${tmpdir}/${stage}.tar.gz" -C "${tmpdir}"
         mkdir -p "${install_dir}"
         sudo install -m755 "${tmpdir}/${stage}/evp" "${install_dir}/evp"
         echo "${install_dir}" >> "$GITHUB_PATH"
