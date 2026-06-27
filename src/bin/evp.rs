@@ -125,6 +125,24 @@ enum Commands {
     /// Print the reference tape from README.md commented out, followed by the test script.
     #[command(name = "print-ref-script")]
     PrintRefScript,
+    /// Record an interactive terminal session to a tape and a GIF.
+    Record {
+        /// Output path for the tape script (defaults to `demo.tape`).
+        #[arg(default_value = "demo.tape")]
+        tape: PathBuf,
+        /// Override the columns width of the terminal.
+        #[arg(long)]
+        cols: Option<u16>,
+        /// Override the rows height of the terminal.
+        #[arg(long)]
+        rows: Option<u16>,
+        /// Shell program to start (e.g. bash, zsh, fish).
+        #[arg(long)]
+        shell: Option<String>,
+        /// Predefined color theme to apply (e.g. "Catppuccin Mocha").
+        #[arg(long)]
+        theme: Option<String>,
+    },
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -383,6 +401,12 @@ fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()
             println!("\n{}", EMBEDDED_TEST_TAPE);
             Ok(())
         }
+        Commands::Record { tape, cols, rows, shell, theme } => {
+            init_tracing(cli, evp_start);
+            log_build_info_debug();
+            evp::record(tape, shell, cols, rows, theme)?;
+            Ok(())
+        }
     }
 }
 
@@ -507,6 +531,41 @@ mod tests {
             cli.command,
             Some(Commands::PrintRefScript)
         ));
+    }
+
+    #[test]
+    fn parses_record_subcommand() {
+        let cli = Cli::try_parse_from([
+            "evp",
+            "record",
+            "my_demo.tape",
+            "--cols",
+            "100",
+            "--rows",
+            "40",
+            "--shell",
+            "zsh",
+            "--theme",
+            "Catppuccin Mocha",
+        ])
+        .unwrap();
+
+        match &cli.command {
+            Some(Commands::Record {
+                tape,
+                cols,
+                rows,
+                shell,
+                theme,
+            }) => {
+                assert_eq!(tape, &PathBuf::from("my_demo.tape"));
+                assert_eq!(cols, &Some(100));
+                assert_eq!(rows, &Some(40));
+                assert_eq!(shell, &Some("zsh".to_string()));
+                assert_eq!(theme, &Some("Catppuccin Mocha".to_string()));
+            }
+            _ => panic!("Expected Commands::Record, got {:?}", cli.command),
+        }
     }
 
     #[test]

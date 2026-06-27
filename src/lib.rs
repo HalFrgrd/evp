@@ -37,6 +37,7 @@ pub mod render_json;
 pub mod render_svg;
 pub mod renderer;
 pub mod runner;
+pub mod record;
 pub mod script;
 pub mod style;
 
@@ -47,6 +48,7 @@ use tracing::info;
 
 pub use full_recording::{FullRecording, FullRecordingConfig};
 pub use recording::{CellChange, CellSnap, Frame, RawFrame, Recording};
+pub use record::record;
 pub use render_common::{RenderOptions, ViewportConfig};
 pub use render_svg::SvgOptions;
 pub use runner::{RunOutput, RunStats};

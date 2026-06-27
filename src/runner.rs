@@ -584,7 +584,7 @@ fn is_program_on_path(prog: &str, dirs: &[std::path::PathBuf]) -> bool {
     false
 }
 
-fn apply_theme(terminal: &mut Terminal<'_, '_>, theme: &crate::Theme) -> Result<()> {
+pub fn apply_theme(terminal: &mut Terminal<'_, '_>, theme: &crate::Theme) -> Result<()> {
     // OSC 4 controls indexed palette entries, OSC 10/11/12 control
     // foreground/background/cursor color. Using ST terminator keeps the
     // sequences unambiguous for the VT parser.
@@ -1308,7 +1308,7 @@ fn read_screen_text(term: &Terminal<'_, '_>, scope: WaitScope) -> Result<String>
 // Frame capture
 // ---------------------------------------------------------------------------
 
-fn capture<'a>(
+pub fn capture<'a>(
     render_state: &mut RenderState<'a>,
     row_it: &mut RowIterator<'a>,
     cell_it: &mut CellIterator<'a>,
