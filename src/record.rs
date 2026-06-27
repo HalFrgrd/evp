@@ -1,13 +1,21 @@
-use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use libghostty_vt::{
     Terminal, TerminalOptions,
     render::{CellIterator, RenderState, RowIterator},
 };
+use ratatui::{
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::Paragraph,
+    Terminal as RatatuiTerminal,
+};
 use tracing::info;
+use unicode_width::UnicodeWidthChar;
 
 use crate::keys::KeyTranslator;
 use crate::pty::{Pty, PtySize};
@@ -217,6 +225,106 @@ fn flush_char_buffer(
     }
 }
 
+/// Renders the host terminal state utilizing Ratatui's canvas drawing and text formatting backend
+fn draw_terminal_state(
+    ratatui_term: &mut RatatuiTerminal<CrosstermBackend<std::io::Stdout>>,
+    frame: &crate::recording::RawFrame,
+    elapsed: Duration,
+) -> Result<()> {
+    ratatui_term.draw(|f| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // Header
+                Constraint::Length(1), // Divider
+                Constraint::Min(0),    // Terminal body
+            ])
+            .split(f.area());
+
+        // 1. Header widget with blinking green dot (500ms on, 500ms off)
+        let show_dot = (elapsed.as_millis() % 1000) < 500;
+        let blink_dot = if show_dot {
+            Span::styled("●", Style::default().fg(Color::Green))
+        } else {
+            Span::raw(" ")
+        };
+        let info_text = Span::raw(format!(
+            " EVP recording active ({}s), exit the program to stop recording.",
+            elapsed.as_secs()
+        ));
+        f.render_widget(Paragraph::new(Line::from(vec![blink_dot, info_text])), chunks[0]);
+
+        // 2. Divider widget
+        let divider_line = "─".repeat(chunks[1].width as usize);
+        f.render_widget(Paragraph::new(divider_line), chunks[1]);
+
+        // 3. Render terminal rows from grid cells
+        let mut lines = Vec::with_capacity(frame.rows as usize);
+        let cols = frame.cols as usize;
+
+        for r in 0..(frame.rows as usize) {
+            let mut spans = Vec::with_capacity(cols);
+            let mut prev_is_wide = false;
+
+            for c in 0..cols {
+                let idx = r * cols + c;
+                if idx >= frame.cells.len() {
+                    break;
+                }
+                let cell = &frame.cells[idx];
+
+                if prev_is_wide {
+                    prev_is_wide = false;
+                    continue;
+                }
+
+                prev_is_wide = cell
+                    .text
+                    .chars()
+                    .next()
+                    .map(|ch| ch.width() == Some(2))
+                    .unwrap_or(false);
+
+                let mut style = Style::default()
+                    .fg(Color::Rgb(cell.fg[0], cell.fg[1], cell.fg[2]))
+                    .bg(Color::Rgb(cell.bg[0], cell.bg[1], cell.bg[2]));
+
+                if cell.flags & 1 != 0 {
+                    style = style.add_modifier(Modifier::BOLD);
+                }
+                if cell.flags & 2 != 0 {
+                    style = style.add_modifier(Modifier::ITALIC);
+                }
+                if cell.flags & 4 != 0 {
+                    style = style.add_modifier(Modifier::UNDERLINED);
+                }
+                if cell.flags & 8 != 0 {
+                    style = style.add_modifier(Modifier::REVERSED);
+                }
+                if cell.flags & 16 != 0 {
+                    style = style.add_modifier(Modifier::CROSSED_OUT);
+                }
+                if cell.flags & 32 != 0 {
+                    style = style.add_modifier(Modifier::DIM);
+                }
+
+                let text = if cell.text.is_empty() { " " } else { &cell.text };
+                spans.push(Span::styled(text.to_string(), style));
+            }
+            lines.push(Line::from(spans));
+        }
+        f.render_widget(Paragraph::new(lines), chunks[2]);
+
+        // 4. Update hardware cursor coordinate
+        if let Some((ccol, crow)) = frame.cursor {
+            if ccol < frame.cols && crow < frame.rows {
+                f.set_cursor_position((ccol, crow + 2));
+            }
+        }
+    })?;
+    Ok(())
+}
+
 /// Interactive PTY multiplexer that records keystrokes to a `.tape` file and encodes raw frames
 /// in real-time to a background GIF compiler.
 pub fn record(
@@ -227,10 +335,15 @@ pub fn record(
     theme_name: Option<String>,
 ) -> Result<()> {
     // 1. Resolve geometry
-    let (host_cols, host_rows) = crossterm::terminal::size()
+    let (actual_host_cols, actual_host_rows) = crossterm::terminal::size()
         .context("getting host terminal size")?;
-    let cols = override_cols.unwrap_or(host_cols);
-    let rows = override_rows.unwrap_or(host_rows);
+
+    let cols = override_cols.unwrap_or(actual_host_cols);
+    let rows = override_rows.unwrap_or(actual_host_rows.saturating_sub(2));
+
+    if rows == 0 {
+        bail!("terminal height is too small for EVP recording");
+    }
 
     let mut settings = Settings::default();
     settings.cols = Some(cols);
@@ -341,8 +454,14 @@ pub fn record(
 
     let ticker = crossbeam_channel::tick(Duration::from_millis(1000 / settings.framerate as u64));
 
-    // 6. Enter raw mode
+    // 6. Enter alternate screen buffer and raw mode
+    crossterm::execute!(std::io::stdout(), crossterm::terminal::EnterAlternateScreen)
+        .context("entering alternate screen")?;
     crossterm::terminal::enable_raw_mode().context("enabling terminal raw mode")?;
+
+    let backend = CrosstermBackend::new(std::io::stdout());
+    let mut ratatui_term = RatatuiTerminal::new(backend)?;
+    ratatui_term.clear()?;
 
     // 7. Interactive Loop
     let mut recorded_events = Vec::new();
@@ -371,13 +490,26 @@ pub fn record(
                         if data.is_empty() {
                             break; // EOF
                         }
-                        // Forward output to user's host terminal
-                        let mut stdout = std::io::stdout();
-                        let _ = stdout.write_all(&data);
-                        let _ = stdout.flush();
 
                         // Feed output to libghostty VT parser
                         terminal.vt_write(&data);
+
+                        // Capture and redraw host terminal screen
+                        let elapsed = start_time.elapsed();
+                        if let Ok((frame, _)) = capture(
+                            &mut render_state,
+                            &mut row_it,
+                            &mut cell_it,
+                            &mut terminal,
+                            elapsed,
+                            cols,
+                            rows,
+                            true,
+                            None,
+                            None,
+                        ) {
+                            let _ = draw_terminal_state(&mut ratatui_term, &frame, elapsed);
+                        }
 
                         // Scan for mouse mode updates
                         if let Some(enable) = scanner.scan(&data) {
@@ -444,6 +576,16 @@ pub fn record(
                                     if let Some((action, button)) = map_crossterm_mouse(mouse_event.kind) {
                                         let col = mouse_event.column;
                                         let row = mouse_event.row;
+
+                                        // Translate row coordinate: subtract 2 header rows
+                                        if row < 2 {
+                                            continue; // ignore clicks on header
+                                        }
+                                        let row = row - 2;
+
+                                        if col >= cols || row >= rows {
+                                            continue; // ignore out-of-bounds clicks
+                                        }
 
                                         let now = Instant::now();
                                         flush_char_buffer(&mut char_buffer, &mut recorded_events, &mut last_event_time);
@@ -560,21 +702,26 @@ pub fn record(
                     elapsed,
                     cols,
                     rows,
-                    true, // cursor_blink
+                    true,
                     None,
                     None,
-                ) {
+                        ) {
+                    // Update host screen via Ratatui
+                    let _ = draw_terminal_state(&mut ratatui_term, &frame, elapsed);
+
+                    // Send to background renderer
                     let _ = renderer_tx.try_send(frame);
                 }
             }
         }
     }
 
-    // 8. Restore terminal raw mode and mouse state
+    // 8. Restore terminal raw mode and leave alternate screen
     if mouse_capture_active {
         let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);
     }
     let _ = crossterm::terminal::disable_raw_mode();
+    let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
 
     // Flush any remaining buffered characters
     flush_char_buffer(&mut char_buffer, &mut recorded_events, &mut last_event_time);
