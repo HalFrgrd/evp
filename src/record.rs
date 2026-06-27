@@ -19,6 +19,7 @@ use unicode_width::UnicodeWidthChar;
 
 use crate::keys::KeyTranslator;
 use crate::pty::{Pty, PtySize};
+use crate::recording::MouseState;
 use crate::render_common::RenderOptions;
 use crate::renderer;
 use crate::runner::{apply_theme, capture, derive_options};
@@ -225,6 +226,7 @@ fn flush_char_buffer(
     }
 }
 
+
 /// Renders the host terminal state utilizing Ratatui's canvas drawing and text formatting backend
 fn draw_terminal_state(
     ratatui_term: &mut RatatuiTerminal<CrosstermBackend<std::io::Stdout>>,
@@ -323,6 +325,118 @@ fn draw_terminal_state(
         }
     })?;
     Ok(())
+}
+
+/// Distance from point C to line AB. Collinear if within deviation threshold.
+fn is_collinear(ax: u16, ay: u16, bx: u16, by: u16, cx: u16, cy: u16) -> bool {
+    let dx = bx as f32 - ax as f32;
+    let dy = by as f32 - ay as f32;
+
+    let length_sq = dx * dx + dy * dy;
+    if length_sq < 0.01 {
+        return true;
+    }
+
+    let numerator = ((dy * cx as f32) - (dx * cy as f32) + (bx as f32 * ay as f32) - (by as f32 * ax as f32)).abs();
+    let distance = numerator / length_sq.sqrt();
+
+    distance <= 1.5
+}
+
+/// Accumulates a continuous sequence of mouse movements and flushes a single simplified
+/// MouseMove or MouseDrag event when collinearity is broken or a pause of >1s occurs.
+struct MouseSegmentTracker {
+    points: Vec<(u16, u16, Instant)>,
+    is_drag: bool,
+}
+
+impl MouseSegmentTracker {
+    fn new(is_drag: bool) -> Self {
+        Self {
+            points: Vec::new(),
+            is_drag,
+        }
+    }
+
+    fn add_point(&mut self, col: u16, row: u16, now: Instant) -> Option<Event> {
+        if self.points.is_empty() {
+            self.points.push((col, row, now));
+            return None;
+        }
+
+        let last_point = *self.points.last().unwrap();
+
+        // 1. If paused for more than 1s, break to a new segment
+        if now.duration_since(last_point.2) > Duration::from_secs(1) {
+            let ev = self.flush();
+            self.points.push((col, row, now));
+            return ev;
+        }
+
+        // 2. Ignore duplicate points
+        if last_point.0 == col && last_point.1 == row {
+            self.points.pop();
+            self.points.push((col, row, now));
+            return None;
+        }
+
+        // 3. Collinearity validation
+        if self.points.len() >= 2 {
+            let start = self.points[0];
+            let end = (col, row);
+
+            for &p in &self.points[1..] {
+                if !is_collinear(start.0, start.1, end.0, end.1, p.0, p.1) {
+                    let ev = self.flush();
+                    self.points.push(last_point);
+                    self.points.push((col, row, now));
+                    return ev;
+                }
+            }
+        }
+
+        self.points.push((col, row, now));
+        None
+    }
+
+    fn flush(&mut self) -> Option<Event> {
+        if self.points.len() < 2 {
+            self.points.clear();
+            return None;
+        }
+
+        let start = self.points.first().unwrap();
+        let end = self.points.last().unwrap();
+        let duration = end.2.duration_since(start.2);
+        let delay = if duration < Duration::from_millis(50) {
+            Duration::from_millis(50)
+        } else {
+            duration
+        };
+
+        let ev = if self.is_drag {
+            Some(Event::MouseDrag {
+                start_col: start.0,
+                start_row: start.1,
+                end_col: end.0,
+                end_row: end.1,
+                delay,
+                easing: None,
+            })
+        } else {
+            Some(Event::MouseMove {
+                start_col: start.0,
+                start_row: start.1,
+                end_col: end.0,
+                end_row: end.1,
+                delay,
+                easing: None,
+            })
+        };
+
+        self.points.clear();
+        ev
+    }
 }
 
 /// Interactive PTY multiplexer that records keystrokes to a `.tape` file and encodes raw frames
@@ -477,6 +591,8 @@ pub fn record(
     let mut is_dragging = false;
     let mut drag_start_col = 0u16;
     let mut drag_start_row = 0u16;
+    let mut active_tracker: Option<MouseSegmentTracker> = None;
+    let mut current_mouse_pos: Option<(f32, f32, MouseState)> = None;
 
     let mut render_state = RenderState::new()?;
     let mut row_it = RowIterator::new()?;
@@ -496,7 +612,7 @@ pub fn record(
 
                         // Capture and redraw host terminal screen
                         let elapsed = start_time.elapsed();
-                        if let Ok((frame, _)) = capture(
+                        if let Ok((mut frame, _)) = capture(
                             &mut render_state,
                             &mut row_it,
                             &mut cell_it,
@@ -508,6 +624,8 @@ pub fn record(
                             None,
                             None,
                         ) {
+                            // Inject mouse pointer into the frame so the GIF compiler renders it
+                            frame.mouse_cursor = current_mouse_pos;
                             let _ = draw_terminal_state(&mut ratatui_term, &frame, elapsed);
                         }
 
@@ -533,6 +651,13 @@ pub fn record(
                             crossterm::event::Event::Key(key_event) => {
                                 if key_event.kind == crossterm::event::KeyEventKind::Release {
                                     continue;
+                                }
+
+                                // Interrupt and flush active mouse movement
+                                if let Some(mut tracker) = active_tracker.take() {
+                                    if let Some(ev) = tracker.flush() {
+                                        recorded_events.push(ev);
+                                    }
                                 }
 
                                 let (named_key, mods) = map_crossterm_key(key_event);
@@ -579,97 +704,143 @@ pub fn record(
 
                                         // Translate row coordinate: subtract 2 header rows
                                         if row < 2 {
-                                            continue; // ignore clicks on header
+                                            continue;
                                         }
                                         let row = row - 2;
 
                                         if col >= cols || row >= rows {
-                                            continue; // ignore out-of-bounds clicks
+                                            continue;
                                         }
 
                                         let now = Instant::now();
                                         flush_char_buffer(&mut char_buffer, &mut recorded_events, &mut last_event_time);
 
-                                        // Move first if mouse pointer moved
-                                        if (col != current_mouse_col || row != current_mouse_row) && !is_dragging {
-                                            let move_idle = now.duration_since(last_event_time);
-                                            if move_idle > Duration::from_millis(50) {
-                                                recorded_events.push(Event::Sleep(move_idle));
-                                            }
-                                            recorded_events.push(Event::MouseMove {
-                                                start_col: current_mouse_col,
-                                                start_row: current_mouse_row,
-                                                end_col: col,
-                                                end_row: row,
-                                                delay: Duration::from_millis(50),
-                                                easing: None,
-                                            });
-                                            current_mouse_col = col;
-                                            current_mouse_row = row;
-                                            last_event_time = now;
-                                        }
-
-                                        let current_idle = now.duration_since(last_event_time);
-                                        if current_idle > Duration::from_millis(50) {
-                                            recorded_events.push(Event::Sleep(current_idle));
-                                        }
-
-                                        // Aggregate clicks and drags
+                                        // Update local dragging flag
                                         match action {
                                             MouseAction::Press => {
                                                 if button == Some(MouseButton::Left) {
                                                     is_dragging = true;
-                                                    drag_start_col = col;
-                                                    drag_start_row = row;
                                                 }
                                             }
                                             MouseAction::Release => {
-                                                if button == Some(MouseButton::Left) && is_dragging {
+                                                if button == Some(MouseButton::Left) {
                                                     is_dragging = false;
-                                                    if col == drag_start_col && row == drag_start_row {
-                                                        recorded_events.push(Event::Click {
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+
+                                        // Update pointer coordinates for live rendering
+                                        let mouse_state = if is_dragging {
+                                            MouseState::Dragging
+                                        } else if action == MouseAction::Press {
+                                            MouseState::Clicking
+                                        } else {
+                                            MouseState::Moving
+                                        };
+                                        current_mouse_pos = Some((col as f32, row as f32, mouse_state));
+
+                                        // 1. If it's movement (Motion / Drag), feed to segment tracker
+                                        let is_drag = action == MouseAction::Motion && is_dragging;
+                                        let is_move = action == MouseAction::Motion && !is_dragging;
+
+                                        if is_drag || is_move {
+                                            let mut start_new = false;
+                                            if let Some(ref tracker) = active_tracker {
+                                                if tracker.is_drag != is_drag {
+                                                    if let Some(ev) = active_tracker.as_mut().unwrap().flush() {
+                                                        recorded_events.push(ev);
+                                                    }
+                                                    start_new = true;
+                                                }
+                                            } else {
+                                                start_new = true;
+                                            }
+
+                                            if start_new {
+                                                let mut tracker = MouseSegmentTracker::new(is_drag);
+                                                // Initialize segment starting point at the previous mouse coords
+                                                tracker.points.push((current_mouse_col, current_mouse_row, last_event_time));
+                                                active_tracker = Some(tracker);
+                                            }
+
+                                            if let Some(ref mut tracker) = active_tracker {
+                                                if let Some(ev) = tracker.add_point(col, row, now) {
+                                                    recorded_events.push(ev);
+                                                }
+                                            }
+                                            current_mouse_col = col;
+                                            current_mouse_row = row;
+                                            last_event_time = now;
+                                        } else {
+                                            // 2. Otherwise (Press / Release / Scroll), flush movement segment first
+                                            if let Some(mut tracker) = active_tracker.take() {
+                                                if let Some(ev) = tracker.flush() {
+                                                    recorded_events.push(ev);
+                                                }
+                                            }
+
+                                            let current_idle = now.duration_since(last_event_time);
+                                            if current_idle > Duration::from_millis(50) {
+                                                recorded_events.push(Event::Sleep(current_idle));
+                                            }
+
+                                            // Process instantaneous mouse event
+                                            match action {
+                                                MouseAction::Press => {
+                                                    if button == Some(MouseButton::Left) {
+                                                        drag_start_col = col;
+                                                        drag_start_row = row;
+                                                    }
+                                                }
+                                                MouseAction::Release => {
+                                                    if button == Some(MouseButton::Left) {
+                                                        if col == drag_start_col && row == drag_start_row {
+                                                            recorded_events.push(Event::Click {
+                                                                col,
+                                                                row,
+                                                                delay: Duration::from_millis(50),
+                                                            });
+                                                        } else {
+                                                            recorded_events.push(Event::MouseDrag {
+                                                                start_col: drag_start_col,
+                                                                start_row: drag_start_row,
+                                                                end_col: col,
+                                                                end_row: row,
+                                                                delay: Duration::from_millis(50),
+                                                                easing: None,
+                                                            });
+                                                        }
+                                                    } else if button == Some(MouseButton::Right) {
+                                                        recorded_events.push(Event::RightClick {
                                                             col,
                                                             row,
                                                             delay: Duration::from_millis(50),
                                                         });
-                                                    } else {
-                                                        recorded_events.push(Event::MouseDrag {
-                                                            start_col: drag_start_col,
-                                                            start_row: drag_start_row,
-                                                            end_col: col,
-                                                            end_row: row,
+                                                    } else if button == Some(MouseButton::WheelUp) {
+                                                        recorded_events.push(Event::MouseScroll {
+                                                            col,
+                                                            row,
+                                                            direction: crate::script::ScrollDirection::Up,
                                                             delay: Duration::from_millis(50),
-                                                            easing: None,
+                                                        });
+                                                    } else if button == Some(MouseButton::WheelDown) {
+                                                        recorded_events.push(Event::MouseScroll {
+                                                            col,
+                                                            row,
+                                                            direction: crate::script::ScrollDirection::Down,
+                                                            delay: Duration::from_millis(50),
                                                         });
                                                     }
-                                                } else if button == Some(MouseButton::Right) {
-                                                    recorded_events.push(Event::RightClick {
-                                                        col,
-                                                        row,
-                                                        delay: Duration::from_millis(50),
-                                                    });
-                                                } else if button == Some(MouseButton::WheelUp) {
-                                                    recorded_events.push(Event::MouseScroll {
-                                                        col,
-                                                        row,
-                                                        direction: crate::script::ScrollDirection::Up,
-                                                        delay: Duration::from_millis(50),
-                                                    });
-                                                } else if button == Some(MouseButton::WheelDown) {
-                                                    recorded_events.push(Event::MouseScroll {
-                                                        col,
-                                                        row,
-                                                        direction: crate::script::ScrollDirection::Down,
-                                                        delay: Duration::from_millis(50),
-                                                    });
+                                                    current_mouse_col = col;
+                                                    current_mouse_row = row;
                                                 }
-                                                current_mouse_col = col;
-                                                current_mouse_row = row;
+                                                _ => {}
                                             }
-                                            MouseAction::Motion => {}
+                                            last_event_time = now;
                                         }
-                                        last_event_time = now;
 
+                                        // Encode and transmit mouse coordinates to the PTY
                                         if let Ok(bytes) = encode_mouse_event(
                                             action,
                                             button,
@@ -694,7 +865,7 @@ pub fn record(
             }
             recv(ticker) -> _ => {
                 let elapsed = start_time.elapsed();
-                if let Ok((frame, _)) = capture(
+                if let Ok((mut frame, _)) = capture(
                     &mut render_state,
                     &mut row_it,
                     &mut cell_it,
@@ -705,7 +876,10 @@ pub fn record(
                     true,
                     None,
                     None,
-                        ) {
+                ) {
+                    // Inject mouse pointer into the frame so the GIF compiler renders it
+                    frame.mouse_cursor = current_mouse_pos;
+
                     // Update host screen via Ratatui
                     let _ = draw_terminal_state(&mut ratatui_term, &frame, elapsed);
 
@@ -723,7 +897,12 @@ pub fn record(
     let _ = crossterm::terminal::disable_raw_mode();
     let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
 
-    // Flush any remaining buffered characters
+    // Flush any remaining active movements or buffered characters
+    if let Some(mut tracker) = active_tracker.take() {
+        if let Some(ev) = tracker.flush() {
+            recorded_events.push(ev);
+        }
+    }
     flush_char_buffer(&mut char_buffer, &mut recorded_events, &mut last_event_time);
 
     // 9. Format and write `.tape` file
