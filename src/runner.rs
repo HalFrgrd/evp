@@ -202,10 +202,18 @@ fn resolve_mouse_position(
             .filter(|s| s.end_time <= recorded_at)
             .max_by_key(|s| s.end_time);
         if let Some(s) = last_before {
-            Some((s.end_col, s.end_row, crate::recording::MouseState::Moving))
+            if recorded_at.saturating_sub(s.end_time) > Duration::from_secs(3) {
+                None
+            } else {
+                Some((s.end_col, s.end_row, crate::recording::MouseState::Moving))
+            }
         } else {
             let first = &segments[0];
-            Some((first.start_col, first.start_row, crate::recording::MouseState::Moving))
+            if first.start_time.saturating_sub(recorded_at) > Duration::from_secs(3) {
+                None
+            } else {
+                Some((first.start_col, first.start_row, crate::recording::MouseState::Moving))
+            }
         }
     }
 }

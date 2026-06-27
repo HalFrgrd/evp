@@ -593,6 +593,7 @@ pub fn record(
     let mut drag_start_row = 0u16;
     let mut active_tracker: Option<MouseSegmentTracker> = None;
     let mut current_mouse_pos: Option<(f32, f32, MouseState)> = None;
+    let mut last_mouse_move_time = start_time;
 
     let mut render_state = RenderState::new()?;
     let mut row_it = RowIterator::new()?;
@@ -624,6 +625,9 @@ pub fn record(
                             None,
                             None,
                         ) {
+                            if Instant::now().duration_since(last_mouse_move_time) > Duration::from_secs(3) {
+                                current_mouse_pos = None;
+                            }
                             // Inject mouse pointer into the frame so the GIF compiler renders it
                             frame.mouse_cursor = current_mouse_pos;
                             let _ = draw_terminal_state(&mut ratatui_term, &frame, elapsed);
@@ -678,22 +682,33 @@ pub fn record(
                                     last_event_time = now;
                                 }
 
+                                let mut raw_bytes = None;
                                 if is_simple_char(named_key, mods) {
-                                    if let NamedKey::Char(c) = named_key {
-                                        char_buffer.push(c);
-                                    }
+                                     if let NamedKey::Char(c) = named_key {
+                                         char_buffer.push(c);
+                                         let mut buf = [0u8; 4];
+                                         raw_bytes = Some(c.encode_utf8(&mut buf).as_bytes().to_vec());
+                                     }
                                 } else {
-                                    recorded_events.push(Event::Key {
-                                        key: key_spec.clone(),
-                                        action: KeyAction::Press,
-                                        count: 1,
-                                        delay: Duration::from_millis(50),
-                                    });
-                                    last_event_time = now;
+                                     recorded_events.push(Event::Key {
+                                         key: key_spec.clone(),
+                                         action: KeyAction::Press,
+                                         count: 1,
+                                         delay: Duration::from_millis(50),
+                                     });
+                                     last_event_time = now;
                                 }
 
-                                if let Ok(bytes) = translator.encode(&key_spec, KeyAction::Press, &terminal) {
-                                    pty.write(bytes);
+                                let bytes_to_write = if let Some(ref b) = raw_bytes {
+                                     Some(b.as_slice())
+                                } else if let Ok(bytes) = translator.encode(&key_spec, KeyAction::Press, &terminal) {
+                                     Some(bytes)
+                                } else {
+                                     None
+                                };
+
+                                if let Some(b) = bytes_to_write {
+                                     pty.write(b);
                                 }
                             }
                             crossterm::event::Event::Mouse(mouse_event) => {
@@ -713,6 +728,7 @@ pub fn record(
                                         }
 
                                         let now = Instant::now();
+                                        last_mouse_move_time = now;
                                         flush_char_buffer(&mut char_buffer, &mut recorded_events, &mut last_event_time);
 
                                         // Update local dragging flag
@@ -877,6 +893,9 @@ pub fn record(
                     None,
                     None,
                 ) {
+                    if Instant::now().duration_since(last_mouse_move_time) > Duration::from_secs(3) {
+                        current_mouse_pos = None;
+                    }
                     // Inject mouse pointer into the frame so the GIF compiler renders it
                     frame.mouse_cursor = current_mouse_pos;
 
