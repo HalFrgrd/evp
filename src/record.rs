@@ -177,67 +177,126 @@ fn flush_char_buffer(
 }
 
 /// Renders the host terminal state utilizing Ratatui's canvas drawing and text formatting backend
+struct HeaderLayoutResult {
+    height: u16,
+    click_cells: Vec<(u16, u16)>,
+}
+
+fn layout_header(
+    mut buf: Option<&mut ratatui::buffer::Buffer>,
+    area: ratatui::layout::Rect,
+    elapsed: Duration,
+    show_dot: bool,
+    is_hovered: bool,
+) -> HeaderLayoutResult {
+    let mut click_cells = Vec::new();
+    let mut x = area.x;
+    let mut y = area.y;
+    let width = area.width;
+
+    if width == 0 {
+        return HeaderLayoutResult {
+            height: 0,
+            click_cells,
+        };
+    }
+
+    let dot_style = Style::default().fg(Color::Green);
+    let normal_style = Style::default();
+    let mut click_style = Style::default().add_modifier(Modifier::UNDERLINED);
+    if is_hovered {
+        click_style = click_style.add_modifier(Modifier::REVERSED);
+    }
+
+    let dot_text = if show_dot { "● " } else { "  " };
+    let seconds_str = format!("{}s", elapsed.as_secs());
+    let prefix_text = format!(
+        " EVP recording active ({}). To stop recording, exit the program or ",
+        seconds_str
+    );
+    let click_text = "click here";
+    let suffix_text = ".";
+
+    let parts = vec![
+        (dot_text.to_string(), dot_style, false),
+        (prefix_text, normal_style, false),
+        (click_text.to_string(), click_style, true),
+        (suffix_text.to_string(), normal_style, false),
+    ];
+
+    for (text, style, is_click) in parts {
+        for c in text.chars() {
+            if x >= area.x + width {
+                x = area.x;
+                y += 1;
+            }
+            if let Some(ref mut b) = buf {
+                if y < area.y + area.height {
+                    let cell = &mut b[(x, y)];
+                    cell.set_char(c);
+                    cell.set_style(style);
+                }
+            }
+            if is_click {
+                click_cells.push((x, y));
+            }
+            x += 1;
+        }
+    }
+
+    HeaderLayoutResult {
+        height: (y - area.y) + 1,
+        click_cells,
+    }
+}
+
 fn draw_terminal_state(
     ratatui_term: &mut RatatuiTerminal<CrosstermBackend<std::io::Stdout>>,
     frame: &crate::recording::RawFrame,
     elapsed: Duration,
     host_mouse_pos: Option<(u16, u16)>,
-) -> Result<()> {
+) -> Result<(u16, Vec<(u16, u16)>)> {
+    let mut click_cells = Vec::new();
+    let mut header_height = 1u16;
+
     ratatui_term.draw(|f| {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1), // Header
-                Constraint::Length(1), // Divider
-                Constraint::Min(0),    // Terminal body
-            ])
-            .split(f.area());
-
-        // 1. Header widget with blinking green dot (500ms on, 500ms off)
         let show_dot = (elapsed.as_millis() % 1000) < 500;
-        let blink_dot = if show_dot {
-            Span::styled("●", Style::default().fg(Color::Green))
-        } else {
-            Span::raw(" ")
-        };
 
-        let seconds_str = format!("{}s", elapsed.as_secs());
-        let prefix = format!(
-            " EVP recording active ({}). To stop recording, exit the program or ",
-            seconds_str
-        );
-        let start_col = 1 + prefix.chars().count();
-        let end_col = start_col + 10;
-
-        let is_hovered = if let Some((col, row)) = host_mouse_pos {
-            row == 0 && (col as usize) >= start_col && (col as usize) < end_col
+        // 1. Dry run to calculate header height and hover state
+        let is_hovered = if let Some((m_col, m_row)) = host_mouse_pos {
+            let dry_run = layout_header(None, f.area(), elapsed, show_dot, false);
+            dry_run.click_cells.contains(&(m_col, m_row))
         } else {
             false
         };
 
-        let prefix_span = Span::raw(prefix);
-        let mut click_style = Style::default().add_modifier(Modifier::UNDERLINED);
-        if is_hovered {
-            click_style = click_style.add_modifier(Modifier::REVERSED);
-        }
-        let click_span = Span::styled("click here", click_style);
-        let suffix_span = Span::raw(".");
+        let dry_run = layout_header(None, f.area(), elapsed, show_dot, is_hovered);
+        header_height = dry_run.height;
 
-        f.render_widget(
-            Paragraph::new(Line::from(vec![
-                blink_dot,
-                prefix_span,
-                click_span,
-                suffix_span,
-            ])),
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(header_height), // Dynamic Header
+                Constraint::Length(1),             // Divider
+                Constraint::Min(0),                // Terminal body
+            ])
+            .split(f.area());
+
+        // 2. Real draw run
+        let layout_res = layout_header(
+            Some(f.buffer_mut()),
             chunks[0],
+            elapsed,
+            show_dot,
+            is_hovered,
         );
+        click_cells = layout_res.click_cells;
 
-        // 2. Divider widget
+        // 3. Divider widget
         let divider_line = "─".repeat(chunks[1].width as usize);
         f.render_widget(Paragraph::new(divider_line), chunks[1]);
 
-        // 3. Render terminal rows from grid cells
+        // 4. Render terminal rows from grid cells
         let mut lines = Vec::with_capacity(frame.rows as usize);
         let cols = frame.cols as usize;
 
@@ -298,14 +357,15 @@ fn draw_terminal_state(
         }
         f.render_widget(Paragraph::new(lines), chunks[2]);
 
-        // 4. Update hardware cursor coordinate
+        // 5. Update hardware cursor coordinate
         if let Some((ccol, crow)) = frame.cursor {
             if ccol < frame.cols && crow < frame.rows {
-                f.set_cursor_position((ccol, crow + 2));
+                f.set_cursor_position((ccol, crow + header_height + 1));
             }
         }
     })?;
-    Ok(())
+
+    Ok((header_height, click_cells))
 }
 
 /// Distance from point C to line AB. Collinear if within deviation threshold.
@@ -606,6 +666,8 @@ pub fn record(
         let mut current_mouse_pos: Option<(f32, f32, MouseState)> = None;
         let mut last_mouse_move_time = start_time;
         let mut host_mouse_pos: Option<(u16, u16)> = None;
+        let mut click_here_cells: Vec<(u16, u16)> = Vec::new();
+        let mut header_height = 1u16;
 
         let mut render_state = RenderState::new()?;
         let mut row_it = RowIterator::new()?;
@@ -684,16 +746,7 @@ pub fn record(
                                 crossterm::event::Event::Mouse(mouse_event) => {
                                     host_mouse_pos = Some((mouse_event.column, mouse_event.row));
 
-                                    let seconds_str = format!("{}s", start_time.elapsed().as_secs());
-                                    let prefix = format!(
-                                        " EVP recording active ({}). To stop recording, exit the program or ",
-                                        seconds_str
-                                    );
-                                    let start_col = 1 + prefix.chars().count();
-                                    let end_col = start_col + 10;
-                                    let is_click_here = mouse_event.row == 0
-                                        && (mouse_event.column as usize) >= start_col
-                                        && (mouse_event.column as usize) < end_col;
+                                    let is_click_here = click_here_cells.contains(&(mouse_event.column, mouse_event.row));
 
                                     if is_click_here {
                                         if let crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) = mouse_event.kind {
@@ -722,13 +775,16 @@ pub fn record(
                                             None,
                                         ) {
                                             frame.mouse_cursor = current_mouse_pos;
-                                            let _ = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos);
+                                            if let Ok((height, cells)) = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos) {
+                                                header_height = height;
+                                                click_here_cells = cells;
+                                            }
                                         }
                                         continue;
                                     }
 
                                     // If we moved off "click here" to another part of the header/divider, redraw to clear hover
-                                    if mouse_event.row < 2 {
+                                    if mouse_event.row < header_height + 1 {
                                         let elapsed = start_time.elapsed();
                                         if let Ok((mut frame, _)) = capture(
                                             &mut render_state,
@@ -743,7 +799,10 @@ pub fn record(
                                             None,
                                         ) {
                                             frame.mouse_cursor = current_mouse_pos;
-                                            let _ = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos);
+                                            if let Ok((height, cells)) = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos) {
+                                                header_height = height;
+                                                click_here_cells = cells;
+                                            }
                                         }
                                         continue;
                                     }
@@ -752,8 +811,8 @@ pub fn record(
                                             let col = mouse_event.column;
                                             let row = mouse_event.row;
 
-                                            // Translate row coordinate: subtract 2 header rows
-                                            let row = row - 2;
+                                            // Translate row coordinate: subtract header rows and divider row
+                                            let row = row - (header_height + 1);
 
                                             if col >= cols || row >= rows {
                                                 continue;
@@ -962,7 +1021,10 @@ pub fn record(
                         frame.mouse_cursor = current_mouse_pos;
 
                         // Update host screen via Ratatui
-                        let _ = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos);
+                        if let Ok((height, cells)) = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos) {
+                            header_height = height;
+                            click_here_cells = cells;
+                        }
 
                         // Send to background renderer
                         let _ = renderer_tx.try_send(frame);
