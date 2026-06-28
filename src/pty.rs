@@ -290,14 +290,10 @@ impl Pty {
 fn default_shell_path() -> PathBuf {
     match std::env::var_os("SHELL") {
         Some(s) if !s.is_empty() => PathBuf::from(s),
-        _ => {
-            let bash = PathBuf::from("/bin/bash");
-            if bash.exists() {
-                bash
-            } else {
-                PathBuf::from("/bin/sh")
-            }
-        }
+        _ => match nix::unistd::User::from_uid(nix::unistd::getuid()) {
+            Ok(Some(user)) => user.shell,
+            _ => PathBuf::from("/bin/sh"),
+        },
     }
 }
 

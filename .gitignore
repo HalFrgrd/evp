@@ -2,6 +2,7 @@
 *.gif
 *.svg
 # buildx local-output extraction directory (kept ignored if recreated)
+ci/examples/
 ci/build/
 *.code-workspace
 .vscode/
