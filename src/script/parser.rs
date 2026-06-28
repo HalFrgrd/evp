@@ -225,8 +225,10 @@ fn parse_line(
                 && !path_lower.ends_with(".svg")
                 && !path_lower.ends_with(".svgz")
                 && !path_lower.ends_with(".json")
+                && !path_lower.ends_with(".txt")
+                && !path_lower.ends_with(".ascii")
             {
-                bail!("Screenshot path must end with .png, .svg, .svgz, or .json (got `{path}`)");
+                bail!("Screenshot path must end with .png, .svg, .svgz, .json, .txt, or .ascii (got `{path}`)");
             }
             script.events.push(Event::Screenshot(path));
         }

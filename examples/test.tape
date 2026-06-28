@@ -23,4 +23,14 @@ Enter
 Sleep 800ms
 Type "printf '\033[1;38;5;213m  it works!  \033[0m\n'"
 Enter
-Sleep 1200ms
+Sleep 800ms
+
+# Demonstrate Copy & Paste
+Copy "echo 'Pasted from clipboard!'"
+Paste
+Enter
+Sleep 1000ms
+
+# Demonstrate Screenshot
+Screenshot evp-screenshot.png
+Sleep 1000ms

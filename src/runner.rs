@@ -32,6 +32,8 @@ use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use regex::Regex;
 use tracing::{debug, info, trace, warn};
 
+use unicode_width::UnicodeWidthChar;
+
 use crate::{
     FrameStyle,
     keys::KeyTranslator,
@@ -1261,6 +1263,44 @@ fn write_screenshot(frame: &RawFrame, script: &Script, path: &std::path::Path) -
         let s = serde_json::to_string_pretty(&rec)
             .context("serializing screenshot recording to JSON")?;
         std::fs::write(path, s.as_bytes())
+            .with_context(|| format!("writing screenshot {}", path.display()))?;
+        Ok(())
+    } else if ext.eq_ignore_ascii_case("txt") || ext.eq_ignore_ascii_case("ascii") {
+        let cols = frame.cols as usize;
+        let rows = frame.rows as usize;
+        let mut content = String::new();
+
+        for r in 0..rows {
+            let mut last_active = None;
+            for c in (0..cols).rev() {
+                if !frame.cells[r * cols + c].text.is_empty() {
+                    last_active = Some(c);
+                    break;
+                }
+            }
+
+            if let Some(limit) = last_active {
+                for c in 0..=limit {
+                    let cell = &frame.cells[r * cols + c];
+                    if !cell.text.is_empty() {
+                        content.push_str(&cell.text);
+                    } else {
+                        let prev_is_wide = if c > 0 {
+                            let prev_cell = &frame.cells[r * cols + (c - 1)];
+                            prev_cell.text.chars().next().map(|ch| ch.width() == Some(2)).unwrap_or(false)
+                        } else {
+                            false
+                        };
+                        if !prev_is_wide {
+                            content.push(' ');
+                        }
+                    }
+                }
+            }
+            content.push('\n');
+        }
+
+        std::fs::write(path, content.as_bytes())
             .with_context(|| format!("writing screenshot {}", path.display()))?;
         Ok(())
     } else {
