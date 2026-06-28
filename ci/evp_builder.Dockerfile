@@ -40,7 +40,7 @@ COPY Cargo.toml Cargo.lock build.rs README.md /app/
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     set -eux; \
-    cargo build --release --target x86_64-unknown-linux-musl && \
+    cargo build --workspace --release --target x86_64-unknown-linux-musl && \
     mkdir -p /out && \
     cp target/x86_64-unknown-linux-musl/release/evp /out/evp && \
     cp target/x86_64-unknown-linux-musl/release/evp_helper_tool /out/evp_helper_tool
