@@ -163,7 +163,7 @@ pub fn measure_cell_px(
         .font_set;
     let primary = &font_set.fonts[font_set.regular[0]];
     let (_scale, cell_w, cell_h, _baseline, char_height_px, ascent_px) =
-        css_cell_metrics(&primary.font, font_size, line_height, letter_spacing);
+        css_cell_metrics(primary.get_font(), font_size, line_height, letter_spacing);
     (cell_w, cell_h, char_height_px, ascent_px)
 }
 
@@ -178,7 +178,7 @@ pub fn spawn_gif_stream(
     let font_set = loaded.font_set;
     let primary = &font_set.fonts[font_set.regular[0]];
     let (scale, _, _, baseline, char_height_px, ascent_px) = css_cell_metrics(
-        &primary.font,
+        primary.get_font(),
         opts.font_size,
         opts.line_height,
         opts.letter_spacing,
@@ -236,7 +236,7 @@ pub fn render_png_frame(frame: &RawFrame, opts: &RenderOptions, out: &Path) -> R
     let font_set = loaded.font_set;
     let primary = &font_set.fonts[font_set.regular[0]];
     let (scale, cell_w, cell_h, baseline, char_height_px, ascent_px) = css_cell_metrics(
-        &primary.font,
+        primary.get_font(),
         opts.font_size,
         opts.line_height,
         opts.letter_spacing,
