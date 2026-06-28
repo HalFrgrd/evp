@@ -213,7 +213,8 @@ impl FontInfo {
     }
 
     pub fn svg_embedding_policy(&self) -> Result<SvgFontEmbeddingPolicy> {
-        let reader = font_subset::FontReader::new(self.get_ttf_bytes()).map_err(|e| anyhow!("{e:?}"))?;
+        let reader =
+            font_subset::FontReader::new(self.get_ttf_bytes()).map_err(|e| anyhow!("{e:?}"))?;
         let font = reader.read().map_err(|e| anyhow!("{e:?}"))?;
         let permissions = font.permissions();
 
@@ -231,7 +232,8 @@ impl FontInfo {
             return Err(anyhow!("no characters to subset"));
         }
 
-        let reader = font_subset::FontReader::new(self.get_ttf_bytes()).map_err(|e| anyhow!("{e:?}"))?;
+        let reader =
+            font_subset::FontReader::new(self.get_ttf_bytes()).map_err(|e| anyhow!("{e:?}"))?;
         let font = reader.read().map_err(|e| anyhow!("{e:?}"))?;
         let subset = font.subset(chars).map_err(|e| anyhow!("{e:?}"))?;
         Ok(subset.to_woff2())

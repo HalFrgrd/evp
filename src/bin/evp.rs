@@ -176,6 +176,7 @@ fn real_main() -> Result<()> {
 }
 
 fn run_cli(cli: Cli) -> Result<()> {
+    evp::telemetry::clear_timings();
     let evp_start = Instant::now();
 
     if let Some(command) = cli.command.clone() {

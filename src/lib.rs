@@ -38,9 +38,9 @@ pub mod render_json;
 pub mod render_svg;
 pub mod renderer;
 pub mod runner;
-pub mod telemetry;
 pub mod script;
 pub mod style;
+pub mod telemetry;
 
 use std::path::{Path, PathBuf};
 
@@ -68,6 +68,7 @@ pub fn parse_script(source: &str) -> Result<Script> {
 /// Parse a `.tape` file from disk. `Source` directives inside the file
 /// are resolved relative to the file's parent directory.
 pub fn parse_script_file(path: &Path) -> Result<Script> {
+    let _timer = telemetry::ScopeTimer::new("parse_script_file");
     script::parse_path(path)
 }
 
@@ -132,7 +133,6 @@ pub fn run_and_render(
     script: &Script,
     renderers: Vec<(renderer::RendererBackend, PathBuf)>,
 ) -> Result<RunStats> {
-    telemetry::clear_timings();
     let cfg = {
         let _timer = telemetry::ScopeTimer::new("derive_options_cfg");
         runner::derive_options(&script.settings)
