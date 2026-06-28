@@ -127,9 +127,6 @@ enum Commands {
     PrintRefScript,
     /// Record an interactive terminal session to a tape and a GIF.
     Record {
-        /// Output path for the tape script (defaults to `demo.tape`).
-        #[arg(default_value = "demo.tape")]
-        tape: PathBuf,
         /// Override the columns width of the terminal.
         #[arg(long)]
         cols: Option<u16>,
@@ -404,7 +401,6 @@ fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()
             Ok(())
         }
         Commands::Record {
-            mut tape,
             cols,
             rows,
             shell,
@@ -413,6 +409,7 @@ fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()
             init_tracing(cli, evp_start);
             log_build_info_debug();
 
+            let mut tape = PathBuf::from("demo.tape");
             let mut output_override = None;
             for out in &cli.output {
                 if out.extension().map_or(false, |ext| ext == "tape") {
@@ -550,6 +547,7 @@ mod tests {
         let cli = Cli::try_parse_from([
             "evp",
             "record",
+            "--output",
             "my_demo.tape",
             "--cols",
             "100",
@@ -564,13 +562,12 @@ mod tests {
 
         match &cli.command {
             Some(Commands::Record {
-                tape,
                 cols,
                 rows,
                 shell,
                 theme,
             }) => {
-                assert_eq!(tape, &PathBuf::from("my_demo.tape"));
+                assert_eq!(cli.output, vec![PathBuf::from("my_demo.tape")]);
                 assert_eq!(cols, &Some(100));
                 assert_eq!(rows, &Some(40));
                 assert_eq!(shell, &Some("zsh".to_string()));
