@@ -891,6 +891,8 @@ pub fn record(
         }
     }
 
+    info!("interactive session finished; compiling recording in background...");
+
     // Flush any remaining active movements or buffered characters
     if let Some(mut tracker) = active_tracker.take() {
         if let Some(ev) = tracker.flush() {
