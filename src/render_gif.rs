@@ -309,7 +309,7 @@ fn run_gif_stream_worker(
         width: Some(cfg.canvas_w),
         height: Some(cfg.canvas_h),
         quality: 100,
-        fast: false,
+        fast: true,
         repeat: gifski::Repeat::Infinite,
     })
     .context("initialize gifski encoder")?;
