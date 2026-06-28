@@ -28,8 +28,6 @@ use crate::script::{
 };
 use crate::style::Theme;
 
-
-
 /// Dynamic mouse coordinate encoder using libghostty's mouse event protocol
 fn encode_mouse_event(
     action: MouseAction,
@@ -637,13 +635,8 @@ pub fn record(
                             if data.is_empty() {
                                 break; // EOF
                             }
-
                             // Feed output to libghostty VT parser
                             terminal.vt_write(&data);
-
-
-
-
                         }
                         Err(_) => break,
                     }

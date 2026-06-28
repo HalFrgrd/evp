@@ -18,8 +18,6 @@ use tracing_subscriber::EnvFilter;
 /// `examples/test.tape` so it stays in sync with the rest of the demos.
 const EMBEDDED_TEST_TAPE: &str = include_str!("../../examples/test.tape");
 
-
-
 const VERSION_LONG: &str = concat!(
     "version: ",
     env!("CARGO_PKG_VERSION"),
