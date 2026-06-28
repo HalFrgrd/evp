@@ -518,19 +518,36 @@ pub fn record(
 
     let mut translator = KeyTranslator::new()?;
 
-    // 4. Initialize background GIF/SVG renderer
-    let gif_path = output_override.unwrap_or_else(|| tape_path.with_extension("gif"));
-    let render_opts = RenderOptions {
-        font_path: settings.font_family.clone(),
-        font_size: settings.font_size,
-        line_height: settings.line_height,
-        letter_spacing: settings.letter_spacing,
-        frame_style: cfg.frame_style.clone(),
-        no_system_fonts: false,
+    // 4. Initialize background GIF/SVG/JSON renderer
+    let out_path = output_override.unwrap_or_else(|| tape_path.with_extension("gif"));
+    let ext = out_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("gif");
+
+    let backend = if ext.eq_ignore_ascii_case("svg") || ext.eq_ignore_ascii_case("svgz") {
+        let svg_opts = crate::render_svg::SvgOptions {
+            font_path: settings.font_family.clone(),
+            font_size: settings.font_size,
+            ..Default::default()
+        };
+        renderer::RendererBackend::Svg(svg_opts)
+    } else if ext.eq_ignore_ascii_case("json") {
+        renderer::RendererBackend::Json
+    } else {
+        let render_opts = RenderOptions {
+            font_path: settings.font_family.clone(),
+            font_size: settings.font_size,
+            line_height: settings.line_height,
+            letter_spacing: settings.letter_spacing,
+            frame_style: cfg.frame_style.clone(),
+            no_system_fonts: false,
+        };
+        renderer::RendererBackend::Gif(render_opts)
     };
-    let backend = renderer::RendererBackend::Gif(render_opts.clone());
-    let renderer_handle = renderer::spawn_renderer(cfg, backend, gif_path.clone())
-        .context("spawning background GIF renderer")?;
+
+    let renderer_handle = renderer::spawn_renderer(cfg, backend, out_path.clone())
+        .context("spawning background renderer")?;
     let renderer_tx = renderer_handle.tx.clone();
 
     // 5. Setup channels and multi-threaded event polling
@@ -1001,7 +1018,7 @@ pub fn record(
     tape_content.push_str("\n");
 
     // Output and configurations
-    tape_content.push_str(&format!("Output {}\n", gif_path.display()));
+    tape_content.push_str(&format!("Output {}\n", out_path.display()));
     if let Some(sh) = &shell {
         tape_content.push_str(&format!("Set Shell {}\n", sh));
     }
@@ -1149,7 +1166,7 @@ pub fn record(
     let _ = child;
     info!(
         tape = %tape_path.display(),
-        gif = %gif_path.display(),
+        output = %out_path.display(),
         "recording completed successfully"
     );
     Ok(())

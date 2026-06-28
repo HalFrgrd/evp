@@ -93,7 +93,7 @@ EVP turns your terminal into raw mode and captures all keystrokes, mouse clicks,
 > evp record
 
 # Customize the outputs, shell, theme, and geometry:
-> evp record my_demo.tape --shell zsh --theme "Catppuccin Mocha" --cols 100 --rows 40
+> evp record --output my_demo.tape --output demo.svg --shell zsh --theme "Catppuccin Mocha" --cols 100 --rows 40
 ```
 
 When you are done, simply exit the subshell (e.g. type `exit` or press `Ctrl+D`). EVP will instantly write the formatted `.tape` script to disk and compile the `.gif` in the background!
