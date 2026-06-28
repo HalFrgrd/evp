@@ -501,7 +501,31 @@ fn parse_wait(tokens: &[String], settings: &Settings) -> Result<Event> {
     let mut scope = WaitScope::Line;
     let mut timeout = settings.wait_timeout;
     let mut pattern = settings.wait_pattern.clone();
+
+    // Reassemble regex tokens that were split by spaces (e.g., ["/evp:", "evp", "finished/"])
+    let mut processed_tokens = Vec::new();
+    let mut in_regex: Option<String> = None;
     for tok in tokens {
+        if let Some(ref mut current) = in_regex {
+            current.push(' ');
+            current.push_str(tok);
+            if tok.ends_with('/') && !tok.ends_with("\\/") {
+                processed_tokens.push(current.clone());
+                in_regex = None;
+            }
+        } else if tok.starts_with('/')
+            && (!tok.ends_with('/') || tok.len() < 2 || tok.ends_with("\\/"))
+        {
+            in_regex = Some(tok.clone());
+        } else {
+            processed_tokens.push(tok.clone());
+        }
+    }
+    if let Some(unclosed) = in_regex {
+        processed_tokens.push(unclosed);
+    }
+
+    for tok in &processed_tokens {
         match tok.as_str() {
             "Line" => scope = WaitScope::Line,
             "Screen" => scope = WaitScope::Screen,
@@ -1186,6 +1210,18 @@ mod tests {
                 timeout,
                 pattern
             } if pattern == "regex" && *timeout == Duration::from_millis(10)
+        ));
+
+        // Wait Screen with spaces /regex with spaces/
+        let s = parse("Output out.gif\nWait+Screen /evp: evp finished/\n").unwrap();
+        assert_eq!(s.events.len(), 1);
+        assert!(matches!(
+            &s.events[0],
+            Event::Wait {
+                scope: WaitScope::Screen,
+                pattern,
+                ..
+            } if pattern == "evp: evp finished"
         ));
 
         // Wait+Invalid should fail

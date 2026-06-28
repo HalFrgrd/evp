@@ -14,7 +14,8 @@ Set Framerate 30
 Set WaitTimeout 120s
 
 Sleep 500ms
-Type "evp --no-system-fonts examples/my_program_demo.tape --output my_program_demo.gif --output my_program_demo.stats"
+Type "evp examples/my_program_demo.tape --output my_program_demo.stats"
+Sleep 500ms
 Enter
-Wait Screen /evp.*finished/
+Wait Screen "evp: evp finished"
 Sleep 1s

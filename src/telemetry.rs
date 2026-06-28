@@ -24,7 +24,7 @@ impl ScopeTimer {
 impl Drop for ScopeTimer {
     fn drop(&mut self) {
         let elapsed = self.start.elapsed();
-        tracing::info!(
+        tracing::debug!(
             scope = self.name,
             elapsed_ms = elapsed.as_millis(),
             "scope finished"

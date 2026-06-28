@@ -14,6 +14,7 @@ Set WaitTimeout 60s
 
 Sleep 500ms
 Type "evp record --theme 'Snazzy'"
+Sleep 1s
 Enter
 Sleep 2s
 Type `echo "Welcome to EVP interactive recording!"`
