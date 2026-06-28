@@ -59,10 +59,14 @@ impl<'a> KeyTranslator<'a> {
         // sequence from the logical key. We also drop the text when Ctrl is
         // held so libghostty can produce the correct C0 control byte
         // (e.g. Ctrl+C => 0x03) instead of the raw character.
-        if let Some(text) = utf8
-            && !spec.mods.ctrl
-        {
-            event.set_utf8(Some(text.to_string()));
+        if let Some(text) = utf8 {
+            if !spec.mods.ctrl {
+                event.set_utf8(Some(text.to_string()));
+            }
+        } else if let NamedKey::Char(c) = spec.key {
+            if !spec.mods.ctrl {
+                event.set_utf8(Some(c.to_string()));
+            }
         }
         if let NamedKey::Char(c) = spec.key {
             event.set_unshifted_codepoint(c.to_ascii_lowercase());

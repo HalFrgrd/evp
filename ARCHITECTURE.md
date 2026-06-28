@@ -158,10 +158,8 @@ To avoid writing thousands of individual high-frequency coordinates to the final
 * **Collinearity validation:** Consecutive movements (`MouseMove`/`MouseDrag` actions) are buffered in a segment. For each new point, a distance formula checks if it lies within a `1.5` cell tolerance of the straight line segment between the start and end coordinates.
 * **Segment breaking:** A segment is flushed as a single tape event when collinearity is broken, when a pause of `> 1s` is detected, or when mouse button states change (e.g. click/release). This dramatically simplifies the output script.
 
-### 5. Keyboard Forwarding & Nested Compatibility
-* **Simple characters:** Simple printable keystrokes (alphanumeric/spaces with no `Ctrl`, `Alt`, or `Super` modifiers) bypass `libghostty`'s keyboard encoder and are forwarded directly to the PTY as raw UTF-8 bytes.
-* **Control/Special keys:** Modifiers and navigation keys (like `Enter`, `Tab`, `Esc`, or `Ctrl+C`) are translated using the `KeyTranslator`.
-* This hybrid forwarding model ensures that nested `evp record` instances (or traditional shells) can cleanly read simple character bytes without getting confused by modern Kitty Keyboard Protocol sequences.
+### 5. Keyboard Forwarding
+* Keyboard inputs captured during the recording session are translated into logical keys and routed through the `KeyTranslator` (which uses `libghostty`'s key encoder) to generate the appropriate byte sequences before writing them to the PTY.
 
 ## Streaming pipeline
 

@@ -683,33 +683,22 @@ pub fn record(
                                     last_event_time = now;
                                 }
 
-                                let mut raw_bytes = None;
                                 if is_simple_char(named_key, mods) {
-                                     if let NamedKey::Char(c) = named_key {
-                                         char_buffer.push(c);
-                                         let mut buf = [0u8; 4];
-                                         raw_bytes = Some(c.encode_utf8(&mut buf).as_bytes().to_vec());
-                                     }
+                                    if let NamedKey::Char(c) = named_key {
+                                        char_buffer.push(c);
+                                    }
                                 } else {
-                                     recorded_events.push(Event::Key {
-                                         key: key_spec.clone(),
-                                         action: KeyAction::Press,
-                                         count: 1,
-                                         delay: Duration::from_millis(50),
-                                     });
-                                     last_event_time = now;
+                                    recorded_events.push(Event::Key {
+                                        key: key_spec.clone(),
+                                        action: KeyAction::Press,
+                                        count: 1,
+                                        delay: Duration::from_millis(50),
+                                    });
+                                    last_event_time = now;
                                 }
 
-                                let bytes_to_write = if let Some(ref b) = raw_bytes {
-                                     Some(b.as_slice())
-                                } else if let Ok(bytes) = translator.encode(&key_spec, KeyAction::Press, &terminal) {
-                                     Some(bytes)
-                                } else {
-                                     None
-                                };
-
-                                if let Some(b) = bytes_to_write {
-                                     pty.write(b);
+                                if let Ok(bytes) = translator.encode(&key_spec, KeyAction::Press, &terminal) {
+                                    pty.write(bytes);
                                 }
                             }
                             crossterm::event::Event::Mouse(mouse_event) => {
