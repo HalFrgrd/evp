@@ -158,8 +158,12 @@ To avoid writing thousands of individual high-frequency coordinates to the final
 * **Collinearity validation:** Consecutive movements (`MouseMove`/`MouseDrag` actions) are buffered in a segment. For each new point, a distance formula checks if it lies within a `1.5` cell tolerance of the straight line segment between the start and end coordinates.
 * **Segment breaking:** A segment is flushed as a single tape event when collinearity is broken, when a pause of `> 1s` is detected, or when mouse button states change (e.g. click/release). This dramatically simplifies the output script.
 
-### 5. Keyboard Forwarding
-* Keyboard inputs captured during the recording session are translated into logical keys and routed through the `KeyTranslator` (which uses `libghostty`'s key encoder) to generate the appropriate byte sequences before writing them to the PTY.
+### 5. Host Terminal Integration & Advanced Protocols
+To act as a standard multiplexer during interactive `evp record` sessions, `evp` manages the host terminal state and implements high-level terminal protocol integrations:
+* **RAII Capability Management (`TerminalCapabilityGuard`):** At startup, `evp` enables raw mode, alternate screen buffer, Kitty Keyboard enhancement flags (all progressive key flags), host mouse tracking capture, and bracketed paste mode. On program exit or panic, the guard automatically restores the host terminal to its previous state.
+* **Keyboard Forwarding:** All keystrokes (both press and release events) are parsed from the host terminal and routed through `libghostty`'s key encoder. `libghostty` filters out events that the inner PTY application did not explicitly request (e.g. release events). Only press events are buffered/recorded into the final `.tape` file.
+* **Bracketed Paste Mode:** Pasted text from the host terminal is intercepted via `crossterm` paste events, recorded as a single `Type` statement in the `.tape` file, and written directly to the PTY.
+* **Dynamic Resizing:** Resize events from the host terminal are matched dynamically, propagating the dimension changes to the virtual `Terminal`, the underlying PTY child process, and the Ratatui renderer viewport.
 
 ## Streaming pipeline
 
