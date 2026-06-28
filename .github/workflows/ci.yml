@@ -36,7 +36,7 @@ jobs:
             test
             evp
           set: |
-            evp.output=type=local,dest=${{ runner.temp }}/docker/build
+            evp.output=type=local,dest=docker/build
             *.cache-from=type=gha
             *.cache-to=type=gha,mode=min
         env:
@@ -49,14 +49,14 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: evp-release-bin
-          path: ${{ runner.temp }}/docker/build/
+          path: docker/build/
           if-no-files-found: error
 
       - name: Test subcommands on runner
         run: |
-          chmod +x ${{ runner.temp }}/docker/build/evp
-          ${{ runner.temp }}/docker/build/evp print-ref-script > /dev/null
-          ${{ runner.temp }}/docker/build/evp run-sample-script --output ${{ runner.temp }}/test-ci.gif
+          chmod +x docker/build/evp
+          docker/build/evp print-ref-script > /dev/null
+          docker/build/evp run-sample-script --output test-ci.gif
 
   render-examples-matrix:
     name: Render Example (${{ matrix.example }})
@@ -94,7 +94,7 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: evp-release-bin
-          path: ${{ runner.temp }}/evp-bin
+          path: evp-bin
 
       - name: Build example in Docker
         uses: docker/bake-action@v7
@@ -105,7 +105,7 @@ jobs:
             *.output=type=local,dest=${{ runner.temp }}/docker/examples
             *.cache-from=type=gha
             *.cache-to=type=gha,mode=min
-            example-base.contexts.evp-binary=${{ runner.temp }}/evp-bin
+            example-base.contexts.evp-binary=evp-bin
         env:
           VERGEN_GIT_SHA: ${{ github.sha }}
           VERGEN_GIT_BRANCH: ${{ github.ref_name }}
