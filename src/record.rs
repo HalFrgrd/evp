@@ -748,8 +748,7 @@ pub fn record(
                                         continue;
                                     }
 
-                                    if true {
-                                        if let Some((action, button)) = map_crossterm_mouse(mouse_event.kind) {
+                                    if let Some((action, button)) = map_crossterm_mouse(mouse_event.kind) {
                                             let col = mouse_event.column;
                                             let row = mouse_event.row;
 
@@ -905,7 +904,6 @@ pub fn record(
                                             }
                                         }
                                     }
-                                }
                                 crossterm::event::Event::Paste(text) => {
                                     flush_char_buffer(&mut char_buffer, &mut recorded_events, &mut last_event_time);
                                     let now = Instant::now();
