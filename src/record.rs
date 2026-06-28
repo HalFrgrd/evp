@@ -31,51 +31,7 @@ use crate::style::Theme;
 
 const REF_SCRIPT: &str = include_str!(concat!(env!("OUT_DIR"), "/ref_script.tape"));
 
-/// Helper class to scan PTY output buffer for mouse mode transitions
-struct MouseModeScanner {
-    history: Vec<u8>,
-}
 
-impl MouseModeScanner {
-    fn new() -> Self {
-        Self {
-            history: Vec::with_capacity(128),
-        }
-    }
-
-    fn scan(&mut self, data: &[u8]) -> Option<bool> {
-        self.history.extend_from_slice(data);
-        if self.history.len() > 128 {
-            let start = self.history.len() - 128;
-            self.history.drain(..start);
-        }
-        let s = String::from_utf8_lossy(&self.history);
-
-        let mut enabled = None;
-        let mut max_idx = 0;
-
-        let patterns = [
-            ("?1000h", true),
-            ("?1002h", true),
-            ("?1003h", true),
-            ("?1006h", true),
-            ("?1000l", false),
-            ("?1002l", false),
-            ("?1003l", false),
-            ("?1006l", false),
-        ];
-
-        for (pattern, val) in patterns {
-            if let Some(idx) = s.rfind(pattern) {
-                if idx >= max_idx {
-                    max_idx = idx;
-                    enabled = Some(val);
-                }
-            }
-        }
-        enabled
-    }
-}
 
 /// Dynamic mouse coordinate encoder using libghostty's mouse event protocol
 fn encode_mouse_event(
@@ -439,6 +395,40 @@ impl MouseSegmentTracker {
     }
 }
 
+struct TerminalCapabilityGuard;
+
+impl TerminalCapabilityGuard {
+    fn new() -> Result<Self> {
+        crossterm::terminal::enable_raw_mode().context("enabling terminal raw mode")?;
+        crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::EnterAlternateScreen,
+            crossterm::event::EnableMouseCapture,
+            crossterm::event::EnableBracketedPaste,
+            crossterm::event::PushKeyboardEnhancementFlags(
+                crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | crossterm::event::KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                    | crossterm::event::KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+                    | crossterm::event::KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+            )
+        ).context("initializing host terminal capabilities")?;
+        Ok(Self)
+    }
+}
+
+impl Drop for TerminalCapabilityGuard {
+    fn drop(&mut self) {
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::event::PopKeyboardEnhancementFlags,
+            crossterm::event::DisableBracketedPaste,
+            crossterm::event::DisableMouseCapture,
+            crossterm::terminal::LeaveAlternateScreen
+        );
+        let _ = crossterm::terminal::disable_raw_mode();
+    }
+}
+
 /// Interactive PTY multiplexer that records keystrokes to a `.tape` file and encodes raw frames
 /// in real-time to a background GIF compiler.
 pub fn record(
@@ -453,8 +443,8 @@ pub fn record(
     let (actual_host_cols, actual_host_rows) = crossterm::terminal::size()
         .context("getting host terminal size")?;
 
-    let cols = override_cols.unwrap_or(actual_host_cols);
-    let rows = override_rows.unwrap_or(actual_host_rows.saturating_sub(2));
+    let mut cols = override_cols.unwrap_or(actual_host_cols);
+    let mut rows = override_rows.unwrap_or(actual_host_rows.saturating_sub(2));
 
     if rows == 0 {
         bail!("terminal height is too small for EVP recording");
@@ -569,10 +559,8 @@ pub fn record(
 
     let ticker = crossbeam_channel::tick(Duration::from_millis(1000 / settings.framerate as u64));
 
-    // 6. Enter alternate screen buffer and raw mode
-    crossterm::execute!(std::io::stdout(), crossterm::terminal::EnterAlternateScreen)
-        .context("entering alternate screen")?;
-    crossterm::terminal::enable_raw_mode().context("enabling terminal raw mode")?;
+    // 6. Enter alternate screen buffer, raw mode, and enable host terminal capabilities
+    let _guard = TerminalCapabilityGuard::new()?;
 
     let backend = CrosstermBackend::new(std::io::stdout());
     let mut ratatui_term = RatatuiTerminal::new(backend)?;
@@ -583,8 +571,6 @@ pub fn record(
     let start_time = Instant::now();
     let mut last_event_time = start_time;
     let mut char_buffer = String::new();
-    let mut mouse_capture_active = false;
-    let mut scanner = MouseModeScanner::new();
 
     // Mouse tracking variables
     let mut current_mouse_col = 0u16;
@@ -634,17 +620,7 @@ pub fn record(
                             let _ = draw_terminal_state(&mut ratatui_term, &frame, elapsed);
                         }
 
-                        // Scan for mouse mode updates
-                        if let Some(enable) = scanner.scan(&data) {
-                            if enable != mouse_capture_active {
-                                mouse_capture_active = enable;
-                                if enable {
-                                    let _ = crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture);
-                                } else {
-                                    let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);
-                                }
-                            }
-                        }
+
                     }
                     Err(_) => break,
                 }
@@ -654,10 +630,6 @@ pub fn record(
                     Ok(event) => {
                         match event {
                             crossterm::event::Event::Key(key_event) => {
-                                if key_event.kind == crossterm::event::KeyEventKind::Release {
-                                    continue;
-                                }
-
                                 // Interrupt and flush active mouse movement
                                 if let Some(mut tracker) = active_tracker.take() {
                                     if let Some(ev) = tracker.flush() {
@@ -667,42 +639,50 @@ pub fn record(
 
                                 let (named_key, mods) = map_crossterm_key(key_event);
                                 let key_spec = KeySpec { key: named_key, mods };
+                                let action = if key_event.kind == crossterm::event::KeyEventKind::Release {
+                                    KeyAction::Release
+                                } else {
+                                    KeyAction::Press
+                                };
 
                                 let now = Instant::now();
-                                let idle_duration = now.duration_since(last_event_time);
 
-                                // Flush buffer on significant idle or special keys
-                                if idle_duration > Duration::from_secs(1) || !is_simple_char(named_key, mods) {
-                                    flush_char_buffer(&mut char_buffer, &mut recorded_events, &mut last_event_time);
-                                }
+                                if action == KeyAction::Press {
+                                    let idle_duration = now.duration_since(last_event_time);
 
-                                // Output sleep if we flushed/idle
-                                let current_idle = now.duration_since(last_event_time);
-                                if current_idle > Duration::from_millis(50) && char_buffer.is_empty() {
-                                    recorded_events.push(Event::Sleep(current_idle));
-                                    last_event_time = now;
-                                }
-
-                                if is_simple_char(named_key, mods) {
-                                    if let NamedKey::Char(c) = named_key {
-                                        char_buffer.push(c);
+                                    // Flush buffer on significant idle or special keys
+                                    if idle_duration > Duration::from_secs(1) || !is_simple_char(named_key, mods) {
+                                        flush_char_buffer(&mut char_buffer, &mut recorded_events, &mut last_event_time);
                                     }
-                                } else {
-                                    recorded_events.push(Event::Key {
-                                        key: key_spec.clone(),
-                                        action: KeyAction::Press,
-                                        count: 1,
-                                        delay: Duration::from_millis(50),
-                                    });
-                                    last_event_time = now;
+
+                                    // Output sleep if we flushed/idle
+                                    let current_idle = now.duration_since(last_event_time);
+                                    if current_idle > Duration::from_millis(50) && char_buffer.is_empty() {
+                                        recorded_events.push(Event::Sleep(current_idle));
+                                        last_event_time = now;
+                                    }
+
+                                    if is_simple_char(named_key, mods) {
+                                        if let NamedKey::Char(c) = named_key {
+                                            char_buffer.push(c);
+                                        }
+                                    } else {
+                                        recorded_events.push(Event::Key {
+                                            key: key_spec.clone(),
+                                            action: KeyAction::Press,
+                                            count: 1,
+                                            delay: Duration::from_millis(50),
+                                        });
+                                        last_event_time = now;
+                                    }
                                 }
 
-                                if let Ok(bytes) = translator.encode(&key_spec, KeyAction::Press, &terminal) {
+                                if let Ok(bytes) = translator.encode(&key_spec, action, &terminal) {
                                     pty.write(bytes);
                                 }
                             }
                             crossterm::event::Event::Mouse(mouse_event) => {
-                                if mouse_capture_active {
+                                if true {
                                     if let Some((action, button)) = map_crossterm_mouse(mouse_event.kind) {
                                         let col = mouse_event.column;
                                         let row = mouse_event.row;
@@ -863,6 +843,37 @@ pub fn record(
                                     }
                                 }
                             }
+                            crossterm::event::Event::Paste(text) => {
+                                flush_char_buffer(&mut char_buffer, &mut recorded_events, &mut last_event_time);
+                                let now = Instant::now();
+                                let idle_duration = now.duration_since(last_event_time);
+                                if idle_duration > Duration::from_millis(50) {
+                                    recorded_events.push(Event::Sleep(idle_duration));
+                                }
+                                recorded_events.push(Event::Type {
+                                    text: text.clone(),
+                                    delay: Duration::from_millis(50),
+                                });
+                                last_event_time = now;
+                                pty.write(text.as_bytes());
+                            }
+                            crossterm::event::Event::Resize(new_host_cols, new_host_rows) => {
+                                let new_cols = new_host_cols;
+                                let new_rows = new_host_rows.saturating_sub(2);
+                                if new_rows > 0 {
+                                    cols = new_cols;
+                                    rows = new_rows;
+                                    let _ = terminal.resize(new_cols, new_rows, cfg.cell_width_px, cfg.cell_height_px);
+                                    let pty_size = PtySize {
+                                        cols: new_cols,
+                                        rows: new_rows,
+                                        px_w: new_cols * cfg.cell_width_px as u16,
+                                        px_h: new_rows * cfg.cell_height_px as u16,
+                                    };
+                                    pty.resize(pty_size);
+                                    let _ = ratatui_term.resize(ratatui::prelude::Rect::new(0, 0, new_host_cols, new_host_rows));
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -899,12 +910,7 @@ pub fn record(
         }
     }
 
-    // 8. Restore terminal raw mode and leave alternate screen
-    if mouse_capture_active {
-        let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);
-    }
-    let _ = crossterm::terminal::disable_raw_mode();
-    let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+
 
     // Flush any remaining active movements or buffered characters
     if let Some(mut tracker) = active_tracker.take() {
