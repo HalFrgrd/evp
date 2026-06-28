@@ -208,7 +208,7 @@ fn layout_header(
         click_style = click_style.add_modifier(Modifier::REVERSED);
     }
 
-    let dot_text = if show_dot { "● " } else { "  " };
+    let dot_text = if show_dot { "●" } else { " " };
     let seconds_str = format!("{}s", elapsed.as_secs());
     let prefix_text = format!(
         " EVP recording active ({}). To stop recording, exit the program or ",
