@@ -94,7 +94,14 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: evp-release-bin
-          path: ${{ github.workspace }}/evp-bin
+          path: temp-evp-bin
+
+      - name: Prepare evp-bin directory
+        run: |
+          mkdir -p ${{ github.workspace }}/evp-bin
+          find temp-evp-bin -type f -name "evp" -exec cp {} ${{ github.workspace }}/evp-bin/ \;
+          find temp-evp-bin -type f -name "evp_helper_tool" -exec cp {} ${{ github.workspace }}/evp-bin/ \;
+          ls -la ${{ github.workspace }}/evp-bin/
 
       - name: Build example in Docker
         uses: docker/bake-action@v7
