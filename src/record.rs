@@ -518,31 +518,15 @@ pub fn record(
 
     // 4. Initialize background GIF/SVG/JSON renderer
     let out_path = output_override.unwrap_or_else(|| tape_path.with_extension("gif"));
-    let ext = out_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("gif");
-
-    let backend = if ext.eq_ignore_ascii_case("svg") || ext.eq_ignore_ascii_case("svgz") {
-        let svg_opts = crate::render_svg::SvgOptions {
-            font_path: settings.font_family.clone(),
-            font_size: settings.font_size,
-            ..Default::default()
-        };
-        renderer::RendererBackend::Svg(svg_opts)
-    } else if ext.eq_ignore_ascii_case("json") {
-        renderer::RendererBackend::Json
-    } else {
-        let render_opts = RenderOptions {
-            font_path: settings.font_family.clone(),
-            font_size: settings.font_size,
-            line_height: settings.line_height,
-            letter_spacing: settings.letter_spacing,
-            frame_style: cfg.frame_style.clone(),
-            no_system_fonts: false,
-        };
-        renderer::RendererBackend::Gif(render_opts)
+    let render_opts = RenderOptions {
+        font_path: settings.font_family.clone(),
+        font_size: settings.font_size,
+        line_height: settings.line_height,
+        letter_spacing: settings.letter_spacing,
+        frame_style: cfg.frame_style.clone(),
+        no_system_fonts: false,
     };
+    let backend = renderer::RendererBackend::for_path(&out_path, &render_opts, true, false)?;
 
     let renderer_handle = renderer::spawn_renderer(cfg, backend, out_path.clone())
         .context("spawning background renderer")?;

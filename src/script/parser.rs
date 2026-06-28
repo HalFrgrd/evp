@@ -1304,7 +1304,9 @@ mod tests {
 
     #[test]
     fn test_write_tape_script_round_trips_correctly() {
-        use crate::script::{write_tape_script, KeySpec, NamedKey, KeyAction, ScrollDirection, ModSet};
+        use crate::script::{
+            KeyAction, KeySpec, ModSet, NamedKey, ScrollDirection, write_tape_script,
+        };
         use std::path::PathBuf;
 
         let events = vec![
@@ -1393,7 +1395,10 @@ mod tests {
         assert_eq!(parsed.settings.shell, Some("bash".to_string()));
         assert_eq!(parsed.settings.cols, Some(80));
         assert_eq!(parsed.settings.rows, Some(24));
-        assert_eq!(parsed.settings.theme.name, Some("Catppuccin Mocha".to_string()));
+        assert_eq!(
+            parsed.settings.theme.name,
+            Some("Catppuccin Mocha".to_string())
+        );
 
         // Verify events matches
         assert_eq!(parsed.events.len(), 8);
@@ -1419,11 +1424,23 @@ mod tests {
         ));
         assert!(matches!(
             &parsed.events[5],
-            Event::MouseDrag { start_col: 1, start_row: 2, end_col: 3, end_row: 4, .. }
+            Event::MouseDrag {
+                start_col: 1,
+                start_row: 2,
+                end_col: 3,
+                end_row: 4,
+                ..
+            }
         ));
         assert!(matches!(
             &parsed.events[6],
-            Event::MouseMove { start_col: 5, start_row: 6, end_col: 7, end_row: 8, .. }
+            Event::MouseMove {
+                start_col: 5,
+                start_row: 6,
+                end_col: 7,
+                end_row: 8,
+                ..
+            }
         ));
         assert!(matches!(
             &parsed.events[7],
