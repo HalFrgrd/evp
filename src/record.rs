@@ -559,34 +559,35 @@ pub fn record(
 
     let ticker = crossbeam_channel::tick(Duration::from_millis(1000 / settings.framerate as u64));
 
-    // 6. Enter alternate screen buffer, raw mode, and enable host terminal capabilities
-    let _guard = TerminalCapabilityGuard::new()?;
-
-    let backend = CrosstermBackend::new(std::io::stdout());
-    let mut ratatui_term = RatatuiTerminal::new(backend)?;
-    ratatui_term.clear()?;
-
     // 7. Interactive Loop
     let mut recorded_events = Vec::new();
     let start_time = Instant::now();
     let mut last_event_time = start_time;
     let mut char_buffer = String::new();
-
-    // Mouse tracking variables
-    let mut current_mouse_col = 0u16;
-    let mut current_mouse_row = 0u16;
-    let mut is_dragging = false;
-    let mut drag_start_col = 0u16;
-    let mut drag_start_row = 0u16;
     let mut active_tracker: Option<MouseSegmentTracker> = None;
-    let mut current_mouse_pos: Option<(f32, f32, MouseState)> = None;
-    let mut last_mouse_move_time = start_time;
 
-    let mut render_state = RenderState::new()?;
-    let mut row_it = RowIterator::new()?;
-    let mut cell_it = CellIterator::new()?;
+    {
+        // 6. Enter alternate screen buffer, raw mode, and enable host terminal capabilities
+        let _guard = TerminalCapabilityGuard::new()?;
 
-    loop {
+        let backend = CrosstermBackend::new(std::io::stdout());
+        let mut ratatui_term = RatatuiTerminal::new(backend)?;
+        ratatui_term.clear()?;
+
+        // Mouse tracking variables
+        let mut current_mouse_col = 0u16;
+        let mut current_mouse_row = 0u16;
+        let mut is_dragging = false;
+        let mut drag_start_col = 0u16;
+        let mut drag_start_row = 0u16;
+        let mut current_mouse_pos: Option<(f32, f32, MouseState)> = None;
+        let mut last_mouse_move_time = start_time;
+
+        let mut render_state = RenderState::new()?;
+        let mut row_it = RowIterator::new()?;
+        let mut cell_it = CellIterator::new()?;
+
+        loop {
         crossbeam_channel::select! {
             recv(pty_rx) -> res => {
                 match res {
@@ -888,6 +889,7 @@ pub fn record(
                 }
             }
         }
+    }
     }
 
 
