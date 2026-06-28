@@ -375,6 +375,7 @@ pub fn load_font_family(path: Option<&str>) -> Result<LoadedFontFamily> {
 }
 
 fn load_default_font_family_internal() -> Result<LoadedFontFamily> {
+    let _timer = crate::telemetry::ScopeTimer::new("font_init");
     // Default embedded fonts.
     let mut fonts = Vec::new();
     // Regular, Bold, Italic, BoldItalic variants of JetBrains Mono.

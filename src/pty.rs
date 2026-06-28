@@ -73,6 +73,7 @@ impl Pty {
         size: PtySize,
         mimic_vhs: bool,
     ) -> Result<(Self, Child)> {
+        let _timer = crate::telemetry::ScopeTimer::new("pty_spawn");
         // Resolved command list and environment variables
         let mut shell_cmd = Vec::new();
         let mut extra_envs = Vec::new();

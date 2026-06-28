@@ -83,6 +83,17 @@ jobs:
           VERGEN_GIT_BRANCH: ${{ github.ref_name }}
           VERGEN_GIT_COMMIT_DATE: ${{ github.event.head_commit.timestamp }}
           VERGEN_GIT_DIRTY: "false"
+      - name: Generate performance stats summary
+        run: ./scripts/generate_stats_summary.py
+        env:
+          STATS_DIR: ${{ runner.temp }}/docker/examples
+
+      - name: Upload examples performance stats
+        uses: actions/upload-artifact@v7
+        with:
+          name: examples-performance-stats
+          path: ${{ runner.temp }}/docker/examples/*.stats
+          if-no-files-found: warn
 
       - name: Upload to the `assets` release
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'

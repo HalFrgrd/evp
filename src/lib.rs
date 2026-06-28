@@ -38,6 +38,7 @@ pub mod render_json;
 pub mod render_svg;
 pub mod renderer;
 pub mod runner;
+pub mod telemetry;
 pub mod script;
 pub mod style;
 
@@ -131,6 +132,7 @@ pub fn run_and_render(
     script: &Script,
     renderers: Vec<(renderer::RendererBackend, PathBuf)>,
 ) -> Result<RunStats> {
+    telemetry::clear_timings();
     let cfg = runner::derive_options(&script.settings);
     let mut streams: Vec<(renderer::RendererHandle, PathBuf)> = Vec::with_capacity(renderers.len());
     for (backend, output) in renderers {

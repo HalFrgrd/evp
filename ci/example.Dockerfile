@@ -30,10 +30,11 @@ ARG EXAMPLE_NAME
 
 # Run evp to build the specific example (outputting both gif and svg)
 # We override the tape output files using --output to output both gif and svg!
-RUN evp --no-system-fonts examples/${EXAMPLE_NAME}.tape --output /workspace/${EXAMPLE_NAME}.gif --output /workspace/${EXAMPLE_NAME}.svg
+RUN evp --no-system-fonts examples/${EXAMPLE_NAME}.tape --output /workspace/${EXAMPLE_NAME}.gif --output /workspace/${EXAMPLE_NAME}.svg --output /workspace/${EXAMPLE_NAME}.stats
 
 # Export stage
 FROM scratch
 ARG EXAMPLE_NAME
 COPY --from=0 /workspace/${EXAMPLE_NAME}.gif /
 COPY --from=0 /workspace/${EXAMPLE_NAME}.svg /
+COPY --from=0 /workspace/${EXAMPLE_NAME}.stats /

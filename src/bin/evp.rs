@@ -309,6 +309,7 @@ fn run_script(cli: &Cli, script: &evp::Script, evp_start: Instant) -> Result<()>
             wall_ms: evp_start.elapsed().as_millis(),
             total_events: script.events.len(),
             cpu_affinity: cpu_set,
+            telemetry: evp::telemetry::get_timings(),
         };
         let json_str =
             serde_json::to_string_pretty(&stats_out).context("serializing run stats to JSON")?;
@@ -461,6 +462,7 @@ struct StatsOutput {
     wall_ms: u128,
     total_events: usize,
     cpu_affinity: String,
+    telemetry: std::collections::HashMap<String, u128>,
 }
 
 #[cfg(target_os = "linux")]
