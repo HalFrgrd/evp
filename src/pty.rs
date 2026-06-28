@@ -9,7 +9,7 @@
 use std::{
     ffi::OsString,
     os::{
-        fd::{AsRawFd, OwnedFd, RawFd},
+        fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd},
         unix::process::CommandExt,
     },
     path::PathBuf,
@@ -238,6 +238,18 @@ impl Pty {
 
     pub fn fd(&self) -> RawFd {
         self.0.as_raw_fd()
+    }
+
+    pub fn as_fd(&self) -> BorrowedFd<'_> {
+        self.0.as_fd()
+    }
+
+    pub fn try_clone(&self) -> Result<Self> {
+        let fd = self
+            .0
+            .try_clone()
+            .context("failed to clone PTY master fd")?;
+        Ok(Self(fd))
     }
 
     /// Drain all currently available output into the terminal's VT parser.

@@ -935,9 +935,12 @@ fn draw_string(
                         let i = ((dest_y as u32 * w + dest_x as u32) * 3) as usize;
                         if i + 2 < buf.len() {
                             let alpha = coverage;
-                            buf[i] = ((1.0 - alpha) * buf[i] as f32 + alpha * fg[0] as f32).round() as u8;
-                            buf[i + 1] = ((1.0 - alpha) * buf[i + 1] as f32 + alpha * fg[1] as f32).round() as u8;
-                            buf[i + 2] = ((1.0 - alpha) * buf[i + 2] as f32 + alpha * fg[2] as f32).round() as u8;
+                            buf[i] = ((1.0 - alpha) * buf[i] as f32 + alpha * fg[0] as f32).round()
+                                as u8;
+                            buf[i + 1] = ((1.0 - alpha) * buf[i + 1] as f32 + alpha * fg[1] as f32)
+                                .round() as u8;
+                            buf[i + 2] = ((1.0 - alpha) * buf[i + 2] as f32 + alpha * fg[2] as f32)
+                                .round() as u8;
                         }
                     }
                 }
@@ -946,4 +949,3 @@ fn draw_string(
         pen_x += scaled.h_advance(glyph_id);
     }
 }
-

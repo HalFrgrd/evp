@@ -109,6 +109,62 @@ The loop in [src/runner.rs](src/runner.rs) is deadline-driven rather than
    - Compute the next deadline (next event / frame / wait timeout) and
      `poll(2)` the PTY fd until then so shell output wakes us early.
 
+## Interactive Recording (`evp record`)
+
+The `evp record` subcommand launches an interactive single-paned terminal multiplexer. It lets users run terminal sessions inside a PTY, record their keystrokes/mouse actions directly to a `.tape` file, and simultaneously stream frames to compile a `demo.gif` in real-time.
+
+```
+       Crossterm Events
+     (Keyboard, Mouse)
+            │
+            ▼
+     +─────────────+              PTY writes (raw chars/translated codes)
+     │ evp record  │ ────────────────────────────────────────────────────────► +───────────+
+     │             │ ◄──────────────────────────────────────────────────────── |   shell   |
+     +─────────────+             PTY reads (stdout/stderr bytes)               +───────────+
+        │       │
+        │       │  Sends dense RawFrames (with mouse coords)
+        │       ▼
+        │    +─────────────────────+
+        │    │ background renderer │ ────► demo.gif
+        │    +─────────────────────+
+        ▼
+     Ratatui Drawing
+   (Status Bar + Grid)
+        │
+        ▼
+     host stdout
+```
+
+### 1. Dual Polling Loop
+`evp record` drives two concurrent input channels inside its central event loop using `crossbeam_channel::select!`:
+* **PTY stdout receiver:** Read bytes coming from the running shell, feed them into `libghostty_vt::Terminal`'s parser to maintain the screen grid state, and trigger a Ratatui host screen redraw.
+* **Crossterm event receiver:** Capture keyboard and mouse inputs from the user's host terminal standard input.
+
+### 2. Status Bar and Software Blinking
+The host terminal alternates into a full-screen application layout managed by **Ratatui**. The layout is divided into:
+* **Header Line:** Displays `"EVP recording active (X seconds), exit the program to stop recording."` prefixed with a green blinking dot `●`. The blinking is driven via software calculations (`elapsed.as_millis() % 1000 < 500`) to guarantee a consistent visual blink across all terminal emulators.
+* **Divider:** A horizontal border line built using box-drawing characters.
+* **Terminal Body:** Renders the actual cells of the `libghostty-vt` terminal grid using custom Ratatui paragraph styling.
+
+### 3. Mouse Coordinate Translation
+Because the status bar and divider shrink the vertical height of the terminal viewport by `2` rows:
+* When Crossterm intercepts mouse click/motion coordinates from the host terminal, `evp record` automatically subtracts `2` from the `row` coordinate before encoding and forwarding the event to the PTY.
+* For live rendering, the translated mouse coordinate is attached to the captured `RawFrame::mouse_cursor` structure so the background GIF/SVG renderer draws the pointer at the correct cell.
+* If no mouse movement or click events occur for `> 3s`, the mouse cursor is automatically set to `None` to hide it from all outputs.
+
+### 4. Mouse Movement Simplification (`MouseSegmentTracker`)
+To avoid writing thousands of individual high-frequency coordinates to the final `.tape` script, mouse movements are simplified geometrically:
+* **Collinearity validation:** Consecutive movements (`MouseMove`/`MouseDrag` actions) are buffered in a segment. For each new point, a distance formula checks if it lies within a `1.5` cell tolerance of the straight line segment between the start and end coordinates.
+* **Segment breaking:** A segment is flushed as a single tape event when collinearity is broken, when a pause of `> 1s` is detected, or when mouse button states change (e.g. click/release). This dramatically simplifies the output script.
+
+### 5. Host Terminal Integration & Advanced Protocols
+To act as a standard multiplexer during interactive `evp record` sessions, `evp` manages the host terminal state and implements high-level terminal protocol integrations:
+* **RAII Capability Management (`TerminalCapabilityGuard`):** At startup, `evp` enables raw mode, alternate screen buffer, Kitty Keyboard enhancement flags (all progressive key flags), host mouse tracking capture, and bracketed paste mode. On program exit or panic, the guard automatically restores the host terminal to its previous state.
+* **Keyboard Forwarding:** All keystrokes (both press and release events) are parsed from the host terminal and routed through `libghostty`'s key encoder. `libghostty` filters out events that the inner PTY application did not explicitly request (e.g. release events). Only press events are buffered/recorded into the final `.tape` file.
+* **Bracketed Paste Mode:** Pasted text from the host terminal is intercepted via `crossterm` paste events, recorded as a single `Type` statement in the `.tape` file, and written directly to the PTY.
+* **Dynamic Resizing:** Resize events from the host terminal are matched dynamically, propagating the dimension changes to the virtual `Terminal`, the underlying PTY child process, and the Ratatui renderer viewport.
+
 ## Streaming pipeline
 
 | Thread        | Owns                                                         | Responsibility                                                                |

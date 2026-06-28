@@ -18,8 +18,6 @@ use tracing_subscriber::EnvFilter;
 /// `examples/test.tape` so it stays in sync with the rest of the demos.
 const EMBEDDED_TEST_TAPE: &str = include_str!("../../examples/test.tape");
 
-const REF_SCRIPT: &str = include_str!(concat!(env!("OUT_DIR"), "/ref_script.tape"));
-
 const VERSION_LONG: &str = concat!(
     "version: ",
     env!("CARGO_PKG_VERSION"),
@@ -125,6 +123,21 @@ enum Commands {
     /// Print the reference tape from README.md commented out, followed by the test script.
     #[command(name = "print-ref-script")]
     PrintRefScript,
+    /// Record an interactive terminal session to a tape and a GIF.
+    Record {
+        /// Override the columns width of the terminal.
+        #[arg(long)]
+        cols: Option<u16>,
+        /// Override the rows height of the terminal.
+        #[arg(long)]
+        rows: Option<u16>,
+        /// Shell program to start (e.g. bash, zsh, fish).
+        #[arg(long)]
+        shell: Option<String>,
+        /// Predefined color theme to apply (e.g. "Catppuccin Mocha").
+        #[arg(long)]
+        theme: Option<String>,
+    },
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -320,30 +333,18 @@ fn backend_for_output(
     no_system_fonts: bool,
 ) -> Result<evp::renderer::RendererBackend> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    if ext.eq_ignore_ascii_case("gif") {
-        let mut r_opts = render_opts.clone();
-        r_opts.no_system_fonts = no_system_fonts;
-        Ok(evp::renderer::RendererBackend::Gif(r_opts))
-    } else if ext.eq_ignore_ascii_case("svg") || ext.eq_ignore_ascii_case("svgz") {
-        Ok(evp::renderer::RendererBackend::Svg(evp::SvgOptions {
-            font_path: render_opts.font_path.clone(),
-            font_size: render_opts.font_size,
-            embed_fonts,
-            no_system_fonts,
-            ..Default::default()
-        }))
-    } else if ext.eq_ignore_ascii_case("json") {
-        Ok(evp::renderer::RendererBackend::Json)
-    } else if ext.eq_ignore_ascii_case("stats") {
+    if ext.eq_ignore_ascii_case("stats") {
         bail!(
             "rendering `.stats` files from intermediate JSON recordings is not supported; `.stats` can only be generated when running a `.tape` script."
         );
-    } else {
-        bail!(
-            "only .gif, .svg, .json, and .stats outputs are supported (got `{}`)",
-            path.display()
-        );
     }
+    evp::renderer::RendererBackend::for_path(path, render_opts, embed_fonts, no_system_fonts)
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "only .gif, .svg, .json, and .stats outputs are supported (got `{}`)",
+                path.display()
+            )
+        })
 }
 
 fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()> {
@@ -355,8 +356,7 @@ fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()
             Ok(())
         }
         Commands::Validate { tape } => {
-            evp::parse_script_file(&tape)
-                .with_context(|| format!("parsing {}", tape.display()))?;
+            evp::parse_script_file(&tape).with_context(|| format!("parsing {}", tape.display()))?;
             println!("{}: ok", tape.display());
             Ok(())
         }
@@ -369,18 +369,36 @@ fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()
             init_tracing(cli, evp_start);
             log_build_info_debug();
             info!("running embedded test tape (run-sample-script)");
-            let script = evp::parse_script(EMBEDDED_TEST_TAPE).context("parsing embedded test tape")?;
+            let script =
+                evp::parse_script(EMBEDDED_TEST_TAPE).context("parsing embedded test tape")?;
             run_script(cli, &script, evp_start)?;
             Ok(())
         }
         Commands::PrintRefScript => {
-            println!("# This is a reference tape to help you write your tape files.");
-            println!("# We recommend viewing this tape using the Elixir language type for syntax highlighting.");
-            println!("#");
-            for line in REF_SCRIPT.lines() {
-                println!("# {}", line);
-            }
+            println!("{}", evp::script::write_reference_header().trim_end());
             println!("\n{}", EMBEDDED_TEST_TAPE);
+            Ok(())
+        }
+        Commands::Record {
+            cols,
+            rows,
+            shell,
+            theme,
+        } => {
+            init_tracing(cli, evp_start);
+            log_build_info_debug();
+
+            let mut tape = PathBuf::from("demo.tape");
+            let mut output_override = None;
+            for out in &cli.output {
+                if out.extension().map_or(false, |ext| ext == "tape") {
+                    tape = out.clone();
+                } else {
+                    output_override = Some(out.clone());
+                }
+            }
+
+            evp::record(tape, shell, cols, rows, theme, output_override)?;
             Ok(())
         }
     }
@@ -494,19 +512,48 @@ mod tests {
     #[test]
     fn parses_run_sample_script_subcommand() {
         let cli = Cli::try_parse_from(["evp", "run-sample-script"]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Some(Commands::RunSampleScript)
-        ));
+        assert!(matches!(cli.command, Some(Commands::RunSampleScript)));
     }
 
     #[test]
     fn parses_print_ref_script_subcommand() {
         let cli = Cli::try_parse_from(["evp", "print-ref-script"]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Some(Commands::PrintRefScript)
-        ));
+        assert!(matches!(cli.command, Some(Commands::PrintRefScript)));
+    }
+
+    #[test]
+    fn parses_record_subcommand() {
+        let cli = Cli::try_parse_from([
+            "evp",
+            "record",
+            "--output",
+            "my_demo.tape",
+            "--cols",
+            "100",
+            "--rows",
+            "40",
+            "--shell",
+            "zsh",
+            "--theme",
+            "Catppuccin Mocha",
+        ])
+        .unwrap();
+
+        match &cli.command {
+            Some(Commands::Record {
+                cols,
+                rows,
+                shell,
+                theme,
+            }) => {
+                assert_eq!(cli.output, vec![PathBuf::from("my_demo.tape")]);
+                assert_eq!(cols, &Some(100));
+                assert_eq!(rows, &Some(40));
+                assert_eq!(shell, &Some("zsh".to_string()));
+                assert_eq!(theme, &Some("Catppuccin Mocha".to_string()));
+            }
+            _ => panic!("Expected Commands::Record, got {:?}", cli.command),
+        }
     }
 
     #[test]

@@ -13,6 +13,7 @@ Notes for coding agents (and humans) working in `evp`. Keep this short — it sh
   - Release: ~14ms/frame
 - **Smoke test**: `./target/x86_64-unknown-linux-musl/release/evp ./examples/hello.tape --output /tmp/x.gif`
 - **Trace logs**: Append `--log-level trace` (very chatty).
+- **Code Formatting**: Remember to run `cargo fmt` after making any edits to Rust code files.
 
 ## Unified Font Architecture (`src/font.rs`)
 

@@ -12,8 +12,8 @@
 
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
 use easing_function::easings::StandardEasing;
+use serde::{Deserialize, Serialize};
 
 use crate::{FrameStyle, Theme, WindowBarStyle};
 
@@ -39,10 +39,10 @@ pub struct Settings {
     pub shell: Option<String>,
     pub font_family: Option<String>,
     pub font_size: f32,
-    pub width: Option<u32>,        // pixels
-    pub height: Option<u32>,       // pixels
-    pub cols: Option<u16>, // explicit override
-    pub rows: Option<u16>, // explicit override
+    pub width: Option<u32>,  // pixels
+    pub height: Option<u32>, // pixels
+    pub cols: Option<u16>,   // explicit override
+    pub rows: Option<u16>,   // explicit override
     pub padding: u32,
     pub margin: u32,
     pub margin_fill: [u8; 3],

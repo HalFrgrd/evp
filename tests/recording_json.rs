@@ -540,7 +540,7 @@ Sleep 200ms
 }
 
 #[test]
-fn svg_svgz_and_json_screenshots_render_successfully() {
+fn screenshots_render_successfully() {
     let temp_dir = std::env::temp_dir();
     let unique_id = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -549,6 +549,8 @@ fn svg_svgz_and_json_screenshots_render_successfully() {
     let svg_path = temp_dir.join(format!("test-shot-{unique_id}.svg"));
     let svgz_path = temp_dir.join(format!("test-shot-{unique_id}.svgz"));
     let json_path = temp_dir.join(format!("test-shot-{unique_id}.json"));
+    let txt_path = temp_dir.join(format!("test-shot-{unique_id}.txt"));
+    let ascii_path = temp_dir.join(format!("test-shot-{unique_id}.ascii"));
 
     let tape = format!(
         r#"
@@ -561,10 +563,14 @@ Sleep 200ms
 Screenshot {svg}
 Screenshot {svgz}
 Screenshot {json}
+Screenshot {txt}
+Screenshot {ascii}
 "#,
         svg = svg_path.to_str().unwrap(),
         svgz = svgz_path.to_str().unwrap(),
         json = json_path.to_str().unwrap(),
+        txt = txt_path.to_str().unwrap(),
+        ascii = ascii_path.to_str().unwrap(),
     );
 
     let _rec = record(&tape);
@@ -572,6 +578,8 @@ Screenshot {json}
     assert!(svg_path.exists(), "SVG screenshot file does not exist");
     assert!(svgz_path.exists(), "SVGZ screenshot file does not exist");
     assert!(json_path.exists(), "JSON screenshot file does not exist");
+    assert!(txt_path.exists(), "TXT screenshot file does not exist");
+    assert!(ascii_path.exists(), "ASCII screenshot file does not exist");
 
     // Verify SVG content
     let svg_content = std::fs::read_to_string(&svg_path).unwrap();
@@ -604,10 +612,19 @@ Screenshot {json}
     assert_eq!(parsed.frames.len(), 1);
     assert_eq!(parsed.frames[0].t_ms(), 0);
 
+    // Verify text content (should be a string with rows and newlines)
+    let txt_content = std::fs::read_to_string(&txt_path).unwrap();
+    assert!(txt_content.contains('\n'));
+
+    let ascii_content = std::fs::read_to_string(&ascii_path).unwrap();
+    assert!(ascii_content.contains('\n'));
+
     // Clean up
     let _ = std::fs::remove_file(svg_path);
     let _ = std::fs::remove_file(svgz_path);
     let _ = std::fs::remove_file(json_path);
+    let _ = std::fs::remove_file(txt_path);
+    let _ = std::fs::remove_file(ascii_path);
 }
 
 #[test]
@@ -647,9 +664,18 @@ Sleep 200ms
         }
     }
 
-    assert!(saw_x_only, "should have captured intermediate frame with only 'X' during the wait");
-    assert!(saw_xy_only, "should have captured intermediate frame with 'XY' during the wait");
-    assert!(saw_xyz, "should have captured final frame with 'XYZ' after wait resolved");
+    assert!(
+        saw_x_only,
+        "should have captured intermediate frame with only 'X' during the wait"
+    );
+    assert!(
+        saw_xy_only,
+        "should have captured intermediate frame with 'XY' during the wait"
+    );
+    assert!(
+        saw_xyz,
+        "should have captured final frame with 'XYZ' after wait resolved"
+    );
 }
 
 #[test]
@@ -708,8 +734,14 @@ Sleep 200ms
         );
     }
 
-    assert!(saw_first_hidden, "should have captured frames containing 'first-hidden'");
-    assert!(saw_second_hidden, "should have captured frames containing 'second-hidden'");
+    assert!(
+        saw_first_hidden,
+        "should have captured frames containing 'first-hidden'"
+    );
+    assert!(
+        saw_second_hidden,
+        "should have captured frames containing 'second-hidden'"
+    );
 }
 
 #[test]
@@ -772,7 +804,10 @@ Sleep 1s
             }
         }
     }
-    assert!(found_title, "Expected to find a frame with the title 'My Test Title'");
+    assert!(
+        found_title,
+        "Expected to find a frame with the title 'My Test Title'"
+    );
 
     let opts = evp::SvgOptions::default();
     let svg = evp::render_svg::render_svg_to_string(&rec, &opts).expect("render svg to string");
@@ -781,8 +816,3 @@ Sleep 1s
         "SVG rendering should contain 'My Test Title'"
     );
 }
-
-
-
-
-

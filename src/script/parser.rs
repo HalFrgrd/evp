@@ -5,10 +5,10 @@
 //! line into tokens (whitespace separated, with `"…"` / `'…'` / `` `…` ``
 //! quoted strings preserved verbatim) then dispatch on the first token.
 
+use easing_function::easings::StandardEasing;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use easing_function::easings::StandardEasing;
 
 use anyhow::{Context, Result, anyhow, bail};
 
@@ -225,8 +225,12 @@ fn parse_line(
                 && !path_lower.ends_with(".svg")
                 && !path_lower.ends_with(".svgz")
                 && !path_lower.ends_with(".json")
+                && !path_lower.ends_with(".txt")
+                && !path_lower.ends_with(".ascii")
             {
-                bail!("Screenshot path must end with .png, .svg, .svgz, or .json (got `{path}`)");
+                bail!(
+                    "Screenshot path must end with .png, .svg, .svgz, .json, .txt, or .ascii (got `{path}`)"
+                );
             }
             script.events.push(Event::Screenshot(path));
         }
@@ -707,7 +711,12 @@ fn parse_explicit_key_action(tokens: &[String], action: KeyAction) -> Result<Eve
 }
 
 fn parse_easing(name: &str) -> Result<StandardEasing> {
-    match name.to_ascii_lowercase().replace("-", "").replace("_", "").as_str() {
+    match name
+        .to_ascii_lowercase()
+        .replace("-", "")
+        .replace("_", "")
+        .as_str()
+    {
         "linear" => Ok(StandardEasing::Linear),
         "easeinsine" => Ok(StandardEasing::InSine),
         "easeoutsine" => Ok(StandardEasing::OutSine),
@@ -748,13 +757,14 @@ fn parse_mouse_config(
     prefix: &str,
     default_delay: Duration,
 ) -> Result<(Duration, Option<StandardEasing>)> {
-    let parts = head.strip_prefix(prefix)
+    let parts = head
+        .strip_prefix(prefix)
         .and_then(|s| s.strip_prefix('@'))
         .unwrap_or("");
     if parts.is_empty() {
         return Ok((default_delay, None));
     }
-    
+
     // Split by '@'
     let sub_parts: Vec<&str> = parts.split('@').collect();
     match sub_parts.len() {
@@ -1183,7 +1193,6 @@ mod tests {
         assert!(format!("{err:#}").contains("unknown command `Wait+Invalid`"));
     }
 
-
     #[test]
     fn theme_json_parses() {
         let s = parse(
@@ -1290,6 +1299,152 @@ mod tests {
         assert!(matches!(
             &s_easing.events[1],
             Event::MouseDrag { start_col: 30, start_row: 30, end_col: 40, end_row: 40, delay, easing: Some(StandardEasing::InOutQuadradic) } if *delay == Duration::from_millis(50)
+        ));
+    }
+
+    #[test]
+    fn test_write_tape_script_round_trips_correctly() {
+        use crate::script::{
+            KeyAction, KeySpec, ModSet, NamedKey, ScrollDirection, write_tape_script,
+        };
+        use std::path::PathBuf;
+
+        let events = vec![
+            Event::Type {
+                text: "echo \"hello\"".to_string(),
+                delay: Duration::from_millis(100),
+            },
+            Event::Sleep(Duration::from_millis(500)),
+            Event::Key {
+                key: KeySpec {
+                    key: NamedKey::Char('c'),
+                    mods: ModSet {
+                        ctrl: true,
+                        alt: false,
+                        shift: false,
+                        super_key: false,
+                    },
+                },
+                action: KeyAction::Press,
+                count: 1,
+                delay: Duration::from_millis(50),
+            },
+            Event::Click {
+                col: 12,
+                row: 34,
+                delay: Duration::from_millis(50),
+            },
+            Event::RightClick {
+                col: 56,
+                row: 78,
+                delay: Duration::from_millis(50),
+            },
+            Event::MouseDrag {
+                start_col: 1,
+                start_row: 2,
+                end_col: 3,
+                end_row: 4,
+                delay: Duration::from_millis(50),
+                easing: None,
+            },
+            Event::MouseMove {
+                start_col: 5,
+                start_row: 6,
+                end_col: 7,
+                end_row: 8,
+                delay: Duration::from_millis(50),
+                easing: None,
+            },
+            Event::MouseScroll {
+                col: 9,
+                row: 10,
+                direction: ScrollDirection::Up,
+                delay: Duration::from_millis(50),
+            },
+        ];
+
+        let serialized = write_tape_script(
+            &events,
+            &PathBuf::from("output.gif"),
+            Some("bash"),
+            80,
+            24,
+            Some("Catppuccin Mocha"),
+        );
+
+        // Verify the configurations are in the generated text
+        assert!(serialized.contains("Output output.gif"));
+        assert!(serialized.contains("Set Shell bash"));
+        assert!(serialized.contains("Set Cols 80"));
+        assert!(serialized.contains("Set Rows 24"));
+        assert!(serialized.contains("Set Theme \"Catppuccin Mocha\""));
+
+        // Verify events are in the generated text
+        assert!(serialized.contains("Type@100ms \"echo \\\"hello\\\"\""));
+        assert!(serialized.contains("Sleep 500ms"));
+        assert!(serialized.contains("Ctrl+C"));
+        assert!(serialized.contains("Click 12 34"));
+        assert!(serialized.contains("RightClick 56 78"));
+        assert!(serialized.contains("MouseDrag 1 2 3 4"));
+        assert!(serialized.contains("MouseMove 5 6 7 8"));
+        assert!(serialized.contains("MouseScroll 9 10 Up"));
+
+        // Round-trip parse check!
+        let parsed = parse(&serialized).unwrap();
+        assert_eq!(parsed.outputs, vec![PathBuf::from("output.gif")]);
+        assert_eq!(parsed.settings.shell, Some("bash".to_string()));
+        assert_eq!(parsed.settings.cols, Some(80));
+        assert_eq!(parsed.settings.rows, Some(24));
+        assert_eq!(
+            parsed.settings.theme.name,
+            Some("Catppuccin Mocha".to_string())
+        );
+
+        // Verify events matches
+        assert_eq!(parsed.events.len(), 8);
+        assert!(matches!(
+            &parsed.events[0],
+            Event::Type { text, delay } if text == "echo \\\"hello\\\"" && *delay == Duration::from_millis(100)
+        ));
+        assert!(matches!(
+            &parsed.events[1],
+            Event::Sleep(duration) if *duration == Duration::from_millis(500)
+        ));
+        assert!(matches!(
+            &parsed.events[2],
+            Event::Key { key, action: KeyAction::Press, count: 1, .. } if key.key == NamedKey::Char('C') && key.mods.ctrl
+        ));
+        assert!(matches!(
+            &parsed.events[3],
+            Event::Click { col: 12, row: 34, delay } if *delay == Duration::from_millis(50)
+        ));
+        assert!(matches!(
+            &parsed.events[4],
+            Event::RightClick { col: 56, row: 78, delay } if *delay == Duration::from_millis(50)
+        ));
+        assert!(matches!(
+            &parsed.events[5],
+            Event::MouseDrag {
+                start_col: 1,
+                start_row: 2,
+                end_col: 3,
+                end_row: 4,
+                ..
+            }
+        ));
+        assert!(matches!(
+            &parsed.events[6],
+            Event::MouseMove {
+                start_col: 5,
+                start_row: 6,
+                end_col: 7,
+                end_row: 8,
+                ..
+            }
+        ));
+        assert!(matches!(
+            &parsed.events[7],
+            Event::MouseScroll { col: 9, row: 10, direction: ScrollDirection::Up, delay } if *delay == Duration::from_millis(50)
         ));
     }
 }

@@ -18,6 +18,32 @@ pub enum RendererBackend {
     Json,
 }
 
+impl RendererBackend {
+    pub fn for_path(
+        path: &std::path::Path,
+        render_opts: &RenderOptions,
+        embed_fonts: bool,
+        no_system_fonts: bool,
+    ) -> Result<Self> {
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if ext.eq_ignore_ascii_case("svg") || ext.eq_ignore_ascii_case("svgz") {
+            Ok(RendererBackend::Svg(SvgOptions {
+                font_path: render_opts.font_path.clone(),
+                font_size: render_opts.font_size,
+                embed_fonts,
+                no_system_fonts,
+                ..Default::default()
+            }))
+        } else if ext.eq_ignore_ascii_case("json") {
+            Ok(RendererBackend::Json)
+        } else {
+            let mut r_opts = render_opts.clone();
+            r_opts.no_system_fonts = no_system_fonts;
+            Ok(RendererBackend::Gif(r_opts))
+        }
+    }
+}
+
 enum RendererJoin {
     Gif(GifStreamHandle),
     Svg(SvgStreamHandle),
