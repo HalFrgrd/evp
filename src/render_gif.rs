@@ -158,9 +158,13 @@ pub fn measure_cell_px(
     line_height: f32,
     letter_spacing: f32,
 ) -> (u32, u32, u32, u32) {
-    let font_set = load_font_family(font_path)
-        .expect("font metrics are always required but font failed to load")
-        .font_set;
+    let font_set = {
+        let _timer = crate::telemetry::ScopeTimer::new("measure_cell_px_font_load");
+        load_font_family(font_path)
+            .expect("font metrics are always required but font failed to load")
+            .font_set
+    };
+    let _timer_metrics = crate::telemetry::ScopeTimer::new("measure_cell_px_metrics");
     let primary = &font_set.fonts[font_set.regular[0]];
     let (_scale, cell_w, cell_h, _baseline, char_height_px, ascent_px) =
         css_cell_metrics(primary.get_font(), font_size, line_height, letter_spacing);
@@ -172,9 +176,13 @@ pub fn spawn_gif_stream(
     opts: RenderOptions,
     output: PathBuf,
 ) -> Result<GifStreamHandle> {
-    let loaded = load_font_family(opts.font_path.as_deref())?;
+    let loaded = {
+        let _timer = crate::telemetry::ScopeTimer::new("spawn_gif_stream_font_load");
+        load_font_family(opts.font_path.as_deref())?
+    };
     debug!(font = %loaded.description, "using font for gif streaming");
 
+    let _timer_setup = crate::telemetry::ScopeTimer::new("spawn_gif_stream_setup");
     let font_set = loaded.font_set;
     let primary = &font_set.fonts[font_set.regular[0]];
     let (scale, _, _, baseline, char_height_px, ascent_px) = css_cell_metrics(

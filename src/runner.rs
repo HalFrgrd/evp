@@ -252,8 +252,14 @@ pub fn run_with_raw_frame_consumers(
     raw_frame_consumers: Vec<Sender<RawFrame>>,
 ) -> Result<RunStats> {
     let _timer = crate::telemetry::ScopeTimer::new("runner_execution");
-    enforce_require(&script.require)?;
-    let opts = derive_options(&script.settings);
+    {
+        let _timer_req = crate::telemetry::ScopeTimer::new("enforce_require");
+        enforce_require(&script.require)?;
+    }
+    let opts = {
+        let _timer_derive = crate::telemetry::ScopeTimer::new("derive_options_runner");
+        derive_options(&script.settings)
+    };
     let pty_size = PtySize {
         cols: opts.cols,
         rows: opts.rows,

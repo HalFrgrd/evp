@@ -137,13 +137,13 @@ fn generate_style_block(frames: &[RawFrame], opts: &SvgOptions) -> Result<String
                     if let Some(ref woff2) = info.woff2_bytes {
                         (woff2.clone(), "woff2", "font/woff2")
                     } else {
-                        let is_otf = info.ttf_bytes.starts_with(b"OTTO");
+                        let is_otf = info.get_ttf_bytes().starts_with(b"OTTO");
                         let (fmt, mime) = if is_otf {
                             ("opentype", "font/opentype")
                         } else {
                             ("truetype", "font/truetype")
                         };
-                        (info.ttf_bytes.clone(), fmt, mime)
+                        (info.get_ttf_bytes().to_vec(), fmt, mime)
                     }
                 }
             },
@@ -152,13 +152,13 @@ fn generate_style_block(frames: &[RawFrame], opts: &SvgOptions) -> Result<String
                 if let Some(ref woff2) = info.woff2_bytes {
                     (woff2.clone(), "woff2", "font/woff2")
                 } else {
-                    let is_otf = info.ttf_bytes.starts_with(b"OTTO");
+                    let is_otf = info.get_ttf_bytes().starts_with(b"OTTO");
                     let (fmt, mime) = if is_otf {
                         ("opentype", "font/opentype")
                     } else {
                         ("truetype", "font/truetype")
                     };
-                    (info.ttf_bytes.clone(), fmt, mime)
+                    (info.get_ttf_bytes().to_vec(), fmt, mime)
                 }
             }
             Ok(SvgFontEmbeddingPolicy::OmitFont { reason }) => {
@@ -179,13 +179,13 @@ fn generate_style_block(frames: &[RawFrame], opts: &SvgOptions) -> Result<String
                 if let Some(ref woff2) = info.woff2_bytes {
                     (woff2.clone(), "woff2", "font/woff2")
                 } else {
-                    let is_otf = info.ttf_bytes.starts_with(b"OTTO");
+                    let is_otf = info.get_ttf_bytes().starts_with(b"OTTO");
                     let (fmt, mime) = if is_otf {
                         ("opentype", "font/opentype")
                     } else {
                         ("truetype", "font/truetype")
                     };
-                    (info.ttf_bytes.clone(), fmt, mime)
+                    (info.get_ttf_bytes().to_vec(), fmt, mime)
                 }
             }
         };
@@ -247,6 +247,7 @@ pub fn spawn_svg_stream(
     opts: SvgOptions,
     output: PathBuf,
 ) -> Result<SvgStreamHandle> {
+    let _timer = crate::telemetry::ScopeTimer::new("spawn_svg_stream_setup");
     let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) =
         bounded(RAW_FRAME_CONSUMER_CHANNEL_CAPACITY);
     let join = thread::Builder::new()

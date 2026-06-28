@@ -34,7 +34,6 @@ RUN evp --no-system-fonts examples/${EXAMPLE_NAME}.tape --output /workspace/${EX
 
 # Export stage
 FROM scratch
-ARG EXAMPLE_NAME
-COPY --from=0 /workspace/${EXAMPLE_NAME}.gif /
-COPY --from=0 /workspace/${EXAMPLE_NAME}.svg /
-COPY --from=0 /workspace/${EXAMPLE_NAME}.stats /
+COPY --from=0 /workspace/*.gif /
+COPY --from=0 /workspace/*.svg /
+COPY --from=0 /workspace/*.stats /

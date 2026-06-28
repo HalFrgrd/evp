@@ -133,12 +133,18 @@ pub fn run_and_render(
     renderers: Vec<(renderer::RendererBackend, PathBuf)>,
 ) -> Result<RunStats> {
     telemetry::clear_timings();
-    let cfg = runner::derive_options(&script.settings);
+    let cfg = {
+        let _timer = telemetry::ScopeTimer::new("derive_options_cfg");
+        runner::derive_options(&script.settings)
+    };
     let mut streams: Vec<(renderer::RendererHandle, PathBuf)> = Vec::with_capacity(renderers.len());
-    for (backend, output) in renderers {
-        let stream = renderer::spawn_renderer(cfg, backend, output.clone())
-            .context("spawning renderer stream")?;
-        streams.push((stream, output));
+    {
+        let _timer = telemetry::ScopeTimer::new("spawn_renderers");
+        for (backend, output) in renderers {
+            let stream = renderer::spawn_renderer(cfg, backend, output.clone())
+                .context("spawning renderer stream")?;
+            streams.push((stream, output));
+        }
     }
 
     let raw_frame_consumers = streams

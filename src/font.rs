@@ -138,11 +138,17 @@ static EMBEDDED_FONTS: [EmbeddedFont; 10] = [
 
 /// Detailed metadata and raw assets for a loaded font face.
 #[derive(Debug, Clone)]
+pub enum FontSource {
+    Embedded { index: usize },
+    Custom { bytes: Vec<u8> },
+}
+
+#[derive(Debug, Clone)]
 pub struct FontInfo {
     /// ab_glyph FontArc for rasterization (lazily parsed).
     pub font: OnceLock<FontArc>,
-    /// Raw TTF bytes (needed for SVG subsetting).
-    pub ttf_bytes: Vec<u8>,
+    /// Source from which TTF bytes are fetched/decompressed on demand.
+    pub source: FontSource,
     /// Original WOFF2 bytes if available (for efficient SVG embedding).
     pub woff2_bytes: Option<Vec<u8>>,
     /// CSS font family name.
@@ -156,9 +162,16 @@ pub struct FontInfo {
 }
 
 impl FontInfo {
+    pub fn get_ttf_bytes(&self) -> &[u8] {
+        match &self.source {
+            FontSource::Custom { bytes } => bytes,
+            FontSource::Embedded { index } => EMBEDDED_FONTS[*index].get_ttf(),
+        }
+    }
+
     pub fn get_font(&self) -> &FontArc {
         self.font.get_or_init(|| {
-            FontArc::try_from_vec(self.ttf_bytes.clone()).expect("invalid font face bytes")
+            FontArc::try_from_vec(self.get_ttf_bytes().to_vec()).expect("invalid font face bytes")
         })
     }
 
@@ -200,7 +213,7 @@ impl FontInfo {
     }
 
     pub fn svg_embedding_policy(&self) -> Result<SvgFontEmbeddingPolicy> {
-        let reader = font_subset::FontReader::new(&self.ttf_bytes).map_err(|e| anyhow!("{e:?}"))?;
+        let reader = font_subset::FontReader::new(self.get_ttf_bytes()).map_err(|e| anyhow!("{e:?}"))?;
         let font = reader.read().map_err(|e| anyhow!("{e:?}"))?;
         let permissions = font.permissions();
 
@@ -218,7 +231,7 @@ impl FontInfo {
             return Err(anyhow!("no characters to subset"));
         }
 
-        let reader = font_subset::FontReader::new(&self.ttf_bytes).map_err(|e| anyhow!("{e:?}"))?;
+        let reader = font_subset::FontReader::new(self.get_ttf_bytes()).map_err(|e| anyhow!("{e:?}"))?;
         let font = reader.read().map_err(|e| anyhow!("{e:?}"))?;
         let subset = font.subset(chars).map_err(|e| anyhow!("{e:?}"))?;
         Ok(subset.to_woff2())
@@ -342,7 +355,7 @@ pub fn load_font_family(path: Option<&str>) -> Result<LoadedFontFamily> {
 
         let info = FontInfo {
             font: OnceLock::from(face),
-            ttf_bytes: bytes,
+            source: FontSource::Custom { bytes },
             woff2_bytes: None,
             family_name,
             weight: "normal".to_string(),
@@ -379,10 +392,9 @@ fn load_default_font_family_internal() -> Result<LoadedFontFamily> {
     // Default embedded fonts.
     let mut fonts = Vec::new();
     // Regular, Bold, Italic, BoldItalic variants of JetBrains Mono.
-    let jb_reg_ttf = EMBEDDED_FONTS[0].get_ttf();
     fonts.push(FontInfo {
         font: OnceLock::new(),
-        ttf_bytes: jb_reg_ttf.to_vec(),
+        source: FontSource::Embedded { index: 0 },
         woff2_bytes: Some(EMBEDDED_FONTS[0].bytes.to_vec()),
         family_name: EMBEDDED_FONTS[0].family_name.to_string(),
         weight: EMBEDDED_FONTS[0].weight.to_string(),
@@ -390,12 +402,11 @@ fn load_default_font_family_internal() -> Result<LoadedFontFamily> {
         is_custom: false,
     });
 
-    let jb_bold_ttf = EMBEDDED_FONTS[1].get_ttf();
     let idx_bold = {
         let i = fonts.len();
         fonts.push(FontInfo {
             font: OnceLock::new(),
-            ttf_bytes: jb_bold_ttf.to_vec(),
+            source: FontSource::Embedded { index: 1 },
             woff2_bytes: Some(EMBEDDED_FONTS[1].bytes.to_vec()),
             family_name: EMBEDDED_FONTS[1].family_name.to_string(),
             weight: EMBEDDED_FONTS[1].weight.to_string(),
@@ -405,12 +416,11 @@ fn load_default_font_family_internal() -> Result<LoadedFontFamily> {
         Some(i)
     };
 
-    let jb_italic_ttf = EMBEDDED_FONTS[2].get_ttf();
     let idx_italic = {
         let i = fonts.len();
         fonts.push(FontInfo {
             font: OnceLock::new(),
-            ttf_bytes: jb_italic_ttf.to_vec(),
+            source: FontSource::Embedded { index: 2 },
             woff2_bytes: Some(EMBEDDED_FONTS[2].bytes.to_vec()),
             family_name: EMBEDDED_FONTS[2].family_name.to_string(),
             weight: EMBEDDED_FONTS[2].weight.to_string(),
@@ -420,12 +430,11 @@ fn load_default_font_family_internal() -> Result<LoadedFontFamily> {
         Some(i)
     };
 
-    let jb_bi_ttf = EMBEDDED_FONTS[3].get_ttf();
     let idx_bold_italic = {
         let i = fonts.len();
         fonts.push(FontInfo {
             font: OnceLock::new(),
-            ttf_bytes: jb_bi_ttf.to_vec(),
+            source: FontSource::Embedded { index: 3 },
             woff2_bytes: Some(EMBEDDED_FONTS[3].bytes.to_vec()),
             family_name: EMBEDDED_FONTS[3].family_name.to_string(),
             weight: EMBEDDED_FONTS[3].weight.to_string(),
@@ -441,10 +450,9 @@ fn load_default_font_family_internal() -> Result<LoadedFontFamily> {
 
     for i in 4..10 {
         let emb = &EMBEDDED_FONTS[i];
-        let ttf = emb.get_ttf();
         fonts.push(FontInfo {
             font: OnceLock::new(),
-            ttf_bytes: ttf.to_vec(),
+            source: FontSource::Embedded { index: i },
             woff2_bytes: Some(emb.bytes.to_vec()),
             family_name: emb.family_name.to_string(),
             weight: emb.weight.to_string(),
