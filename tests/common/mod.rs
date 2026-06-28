@@ -63,3 +63,21 @@ pub fn temp_json_path(prefix: &str) -> std::path::PathBuf {
             .as_nanos()
     ))
 }
+
+/// Locate the compiled evp_helper_tool binary in the target directories.
+pub fn get_helper_bin_path() -> String {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let candidates = [
+        manifest_dir.join("target/x86_64-unknown-linux-musl/debug/evp_helper_tool"),
+        manifest_dir.join("target/x86_64-unknown-linux-musl/release/evp_helper_tool"),
+        manifest_dir.join("target/debug/evp_helper_tool"),
+        manifest_dir.join("target/release/evp_helper_tool"),
+    ];
+    for candidate in &candidates {
+        if candidate.exists() {
+            return candidate.to_string_lossy().into_owned();
+        }
+    }
+    // Fallback
+    "evp_helper_tool".to_string()
+}

@@ -4,7 +4,7 @@ use common::record;
 
 #[test]
 fn test_mouse_events_in_helper_tool() {
-    let helper_bin = env!("CARGO_BIN_EXE_evp_helper_tool");
+    let helper_bin = common::get_helper_bin_path();
     let tape = format!(
         r#"
 Output out.gif

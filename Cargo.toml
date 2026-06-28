@@ -1,3 +1,9 @@
+[workspace]
+members = [
+    ".",
+    "evp_helper_tool",
+]
+
 [package]
 name = "evp"
 version = "0.14.0"

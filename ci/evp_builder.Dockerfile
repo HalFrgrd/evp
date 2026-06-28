@@ -33,6 +33,7 @@ COPY assets/ /app/assets/
 COPY --from=libghostty / /app/assets/libghostty/
 COPY examples/ /app/examples/
 COPY src/ /app/src/
+COPY evp_helper_tool/ /app/evp_helper_tool/
 COPY Cargo.toml Cargo.lock build.rs README.md /app/
 
 # Build release binaries (using cache mounts for cargo registries and build directories to speed up compiles)

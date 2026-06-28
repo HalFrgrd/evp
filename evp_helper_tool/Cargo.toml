@@ -1,0 +1,7 @@
+[package]
+name = "evp_helper_tool"
+version = "0.14.0"
+edition = "2024"
+
+[dependencies]
+crossterm = "0.29.0"

@@ -573,6 +573,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "evp_helper_tool"
+version = "0.14.0"
+dependencies = [
+ "crossterm 0.29.0",
+]
+
+[[package]]
 name = "flate2"
 version = "1.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
