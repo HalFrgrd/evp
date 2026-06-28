@@ -18,7 +18,7 @@ use tracing_subscriber::EnvFilter;
 /// `examples/test.tape` so it stays in sync with the rest of the demos.
 const EMBEDDED_TEST_TAPE: &str = include_str!("../../examples/test.tape");
 
-const REF_SCRIPT: &str = include_str!(concat!(env!("OUT_DIR"), "/ref_script.tape"));
+
 
 const VERSION_LONG: &str = concat!(
     "version: ",
@@ -389,14 +389,7 @@ fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()
             Ok(())
         }
         Commands::PrintRefScript => {
-            println!("# This is a reference tape to help you write your tape files.");
-            println!(
-                "# We recommend viewing this tape using the Elixir language type for syntax highlighting."
-            );
-            println!("#");
-            for line in REF_SCRIPT.lines() {
-                println!("# {}", line);
-            }
+            println!("{}", evp::script::write_reference_header().trim_end());
             println!("\n{}", EMBEDDED_TEST_TAPE);
             Ok(())
         }
