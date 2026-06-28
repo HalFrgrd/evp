@@ -498,7 +498,7 @@ fn set_value(rest: &[String], key: &str) -> Result<String> {
 // ---------------------------------------------------------------------------
 
 fn parse_wait(tokens: &[String], settings: &Settings) -> Result<Event> {
-    let mut scope = WaitScope::Line;
+    let scope = WaitScope::Line;
     let mut timeout = settings.wait_timeout;
     let mut pattern = settings.wait_pattern.clone();
 
@@ -527,8 +527,6 @@ fn parse_wait(tokens: &[String], settings: &Settings) -> Result<Event> {
 
     for tok in &processed_tokens {
         match tok.as_str() {
-            "Line" => scope = WaitScope::Line,
-            "Screen" => scope = WaitScope::Screen,
             t => {
                 if let Some(d) = t.strip_prefix('@') {
                     timeout = parse_duration(d)?;

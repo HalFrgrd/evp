@@ -330,7 +330,7 @@ Set WaitTimeout 2s
 Sleep 200ms
 Type "printf sum+one; sleep 1"
 Enter
-Wait Screen /sum\+one/
+Wait+Screen /sum\+one/
 Type "echo after-wait-screen"
 Enter
 Sleep 300ms
@@ -448,7 +448,7 @@ Set WaitTimeout 5s
 Sleep 50ms
 Type "M=SCR; sleep 0.4; echo ${M}DONE"
 Enter
-Wait Screen /SCRDONE/
+Wait+Screen /SCRDONE/
 Sleep 200ms
 "#;
 

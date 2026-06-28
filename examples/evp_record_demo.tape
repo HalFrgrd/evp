@@ -26,5 +26,5 @@ Sleep 1s
 Type "exit"
 Enter
 # Wait for evp record to compile and exit back to standard shell
-Wait Screen /successfully/
+Wait+Screen /successfully/
 Sleep 2s

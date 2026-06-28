@@ -207,7 +207,7 @@ MouseDrag@EaseInOutQuad 0 0 10 10   # Left click and drag with EaseInOutQuad eas
 MouseScroll 10 20 Up                # Scroll mouse wheel Up or Down at column 10, row 20
 
 # --- Wait / Synchronization ---
-Wait "Ready"                        # Wait for output matching text pattern
+Wait /Ready/                        # Wait for output matching text pattern
 Wait /regex/                        # Wait for output matching regular expression
 Wait+Screen /regex/                 # Wait scanning full screen instead of only the last line
 Wait+Line /regex/                   # Explicitly wait scanning last line only (default)
