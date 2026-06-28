@@ -5,3 +5,5 @@ target/
 *.svg
 *.json
 .dockerignore
+docker/
+ci/build/
