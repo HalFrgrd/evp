@@ -1,4 +1,5 @@
 Output my_program_demo.svg
+Output my_program_demo.gif
 
 Set Shell bash --norc
 Set Width 900

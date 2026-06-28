@@ -220,7 +220,7 @@ Wait+Screen@1s /regex/              # Wait scanning full screen with 1s timeout 
 
 ## Examples
 
-### Dynamic Window Title Bar
+### Dynamic window title bar
 
 You can enable a window bar styled with macOS-like window controls and dynamically update the title displayed at the center of the bar.
 Your program will need to use [OSC 2 or OSC 0](https://man7.org/linux/man-pages/man4/console_codes.4.html) to set the title.

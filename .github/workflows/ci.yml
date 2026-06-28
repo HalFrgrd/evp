@@ -49,9 +49,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: evp-release-bin
-          path: |
-            ${{ runner.temp }}/docker/build/evp
-            ${{ runner.temp }}/docker/build/evp_helper_tool
+          path: ${{ runner.temp }}/docker/build/
           if-no-files-found: error
 
       - name: Test subcommands on runner
