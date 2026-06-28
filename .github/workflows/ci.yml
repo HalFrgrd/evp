@@ -94,7 +94,7 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: evp-release-bin
-          path: evp-bin
+          path: ${{ github.workspace }}/evp-bin
 
       - name: Build example in Docker
         uses: docker/bake-action@v7
@@ -105,7 +105,7 @@ jobs:
             *.output=type=local,dest=${{ runner.temp }}/docker/examples
             *.cache-from=type=gha
             *.cache-to=type=gha,mode=min
-            example-base.contexts.evp-binary=evp-bin
+            example-base.contexts.evp-binary=${{ github.workspace }}/evp-bin
         env:
           VERGEN_GIT_SHA: ${{ github.sha }}
           VERGEN_GIT_BRANCH: ${{ github.ref_name }}
