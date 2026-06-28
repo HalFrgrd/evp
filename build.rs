@@ -10,6 +10,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     verify_prebuilt_libghostty()?;
     compress_embedded_fonts()?;
     extract_ref_script()?;
+    update_readme_version()?;
 
     // Emit build/cargo/git/rustc metadata as VERGEN_* env vars for runtime
     // logging and rich --version output.
@@ -145,4 +146,44 @@ fn in_git_worktree() -> bool {
         .filter(|out| out.status.success())
         .and_then(|out| String::from_utf8(out.stdout).ok())
         .is_some_and(|stdout| stdout.trim() == "true")
+}
+
+fn update_readme_version() -> Result<(), Box<dyn Error>> {
+    let readme_path = Path::new("README.md");
+    if !readme_path.exists() {
+        return Ok(());
+    }
+    let readme = fs::read_to_string(readme_path)?;
+    let version = env::var("CARGO_PKG_VERSION")?;
+
+    let mut updated = false;
+    let mut lines = Vec::new();
+    for line in readme.lines() {
+        if line.contains("uses: HalFrgrd/evp@v") && line.contains(" # Replace with the desired release tag") {
+            let prefix = "uses: HalFrgrd/evp@v";
+            let suffix = " # Replace with the desired release tag";
+            if let Some(start) = line.find(prefix) {
+                if let Some(end) = line.find(suffix) {
+                    let old_version_part = &line[start + prefix.len()..end];
+                    if old_version_part != version {
+                        let mut new_line = String::new();
+                        new_line.push_str(&line[..start]);
+                        new_line.push_str(prefix);
+                        new_line.push_str(&version);
+                        new_line.push_str(suffix);
+                        lines.push(new_line);
+                        updated = true;
+                        continue;
+                    }
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if updated {
+        let content = lines.join("\n") + "\n";
+        fs::write(readme_path, content)?;
+    }
+    Ok(())
 }

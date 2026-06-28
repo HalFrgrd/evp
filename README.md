@@ -85,7 +85,8 @@ Or if you already have a VHS script:
 
 #### Record Interactive Sessions
 
-You can record your live terminal sessions directly to a `.tape` file and a corresponding `.gif`! EVP turns your terminal into raw mode and captures all keystrokes, mouse clicks, drags, movements, and scrolling:
+You can record your live terminal sessions directly to a `.tape` file and a corresponding `.gif`!
+EVP turns your terminal into raw mode and captures all keystrokes, mouse clicks, drags, movements, and scrolling:
 
 ```bash
 # Record your session (saves to demo.tape and demo.gif by default)
@@ -103,7 +104,7 @@ You can run `evp` directly in your GitHub Actions workflows to automate renderin
 
 ```yaml
 - name: Render tape script
-  uses: HalFrgrd/evp@v0.2.0 # Replace with the desired release tag
+  uses: HalFrgrd/evp@v0.14.0 # Replace with the desired release tag
   with:
     script: demo.tape
     output: demo.gif
