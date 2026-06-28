@@ -2104,12 +2104,12 @@ impl SvgDoc {
         if !self.window_bar_circles.is_empty() && self.bar_h > 0 {
             let cx = self.frame_bg_x + self.frame_bg_w / 2;
             let cy = self.frame_bg_y + self.bar_h / 2;
-            let title_fs = (self.bar_h as f32 * 0.45).max(10.0);
+            let title_fs = (self.bar_h as f32 * 0.535).max(12.0);
             for segment in &self.title_segments {
                 let escaped_title = escape_text(&segment.title);
                 if self.is_static {
                     s.push_str(&format!(
-                        r##"<text x="{cx}" y="{cy}" fill="#8e8e93" text-anchor="middle" dominant-baseline="central" font-size="{title_fs}" font-weight="bold">{escaped_title}</text>
+                        r##"<text x="{cx}" y="{cy}" fill="#626268" text-anchor="middle" dominant-baseline="central" font-size="{title_fs}" font-weight="normal">{escaped_title}</text>
 "##,
                         cx = cx,
                         cy = cy,
@@ -2119,7 +2119,7 @@ impl SvgDoc {
                 } else {
                     let set_str = visibility_set(segment.start_ms, segment.end_ms, total_ms);
                     s.push_str(&format!(
-                        r##"<text x="{cx}" y="{cy}" fill="#8e8e93" text-anchor="middle" dominant-baseline="central" font-size="{title_fs}" font-weight="bold" class="h">{set_str}{escaped_title}</text>
+                        r##"<text x="{cx}" y="{cy}" fill="#626268" text-anchor="middle" dominant-baseline="central" font-size="{title_fs}" font-weight="normal" class="h">{set_str}{escaped_title}</text>
 "##,
                         cx = cx,
                         cy = cy,
@@ -3105,23 +3105,13 @@ fn render_from_frames(
             .enumerate()
         {
             let cx = start_x + idx as u32 * (radius * 2 + gap) + radius;
-            if style.outlined() {
-                window_bar_circles.push(WindowBarCircle {
-                    cx,
-                    cy,
-                    r: radius,
-                    fill: None,
-                    stroke: Some(*color),
-                });
-            } else {
-                window_bar_circles.push(WindowBarCircle {
-                    cx,
-                    cy,
-                    r: radius,
-                    fill: Some(*color),
-                    stroke: None,
-                });
-            }
+            window_bar_circles.push(WindowBarCircle {
+                cx,
+                cy,
+                r: radius,
+                fill: Some(*color),
+                stroke: None,
+            });
         }
     }
 

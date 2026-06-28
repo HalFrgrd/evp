@@ -441,7 +441,7 @@ fn rasterize_raw_frame(
         draw_window_bar(&mut buf, cfg.canvas_w, cfg);
         if let Some(ref title) = frame.title {
             if !title.is_empty() {
-                let title_fs = (cfg.bar_h as f32 * 0.45).max(10.0);
+                let title_fs = (cfg.bar_h as f32 * 0.765).max(17.0);
                 let title_scale = PxScale::from(title_fs);
                 let text_w = string_width(title, font_set, title_scale);
 
@@ -689,11 +689,7 @@ fn draw_window_bar(buf: &mut [u8], w: u32, cfg: ViewportConfig) {
         .enumerate()
     {
         let cx = start_x + idx as u32 * (radius * 2 + gap) + radius;
-        if style.outlined() {
-            draw_circle_outline(buf, w, cx, cy, radius, *color, 2);
-        } else {
-            fill_circle(buf, w, cx, cy, radius, *color);
-        }
+        fill_circle(buf, w, cx, cy, radius, *color);
     }
 }
 
@@ -704,35 +700,6 @@ fn fill_circle(buf: &mut [u8], w: u32, cx: u32, cy: u32, radius: u32, color: [u8
             let dx = x as i64 - cx as i64;
             let dy = y as i64 - cy as i64;
             if dx * dx + dy * dy <= r2 {
-                let i = ((y * w + x) * 3) as usize;
-                if i + 2 < buf.len() {
-                    buf[i] = color[0];
-                    buf[i + 1] = color[1];
-                    buf[i + 2] = color[2];
-                }
-            }
-        }
-    }
-}
-
-fn draw_circle_outline(
-    buf: &mut [u8],
-    w: u32,
-    cx: u32,
-    cy: u32,
-    radius: u32,
-    color: [u8; 3],
-    thickness: u32,
-) {
-    let outer = (radius * radius) as i64;
-    let inner_radius = radius.saturating_sub(thickness);
-    let inner = (inner_radius * inner_radius) as i64;
-    for y in cy.saturating_sub(radius)..=cy + radius {
-        for x in cx.saturating_sub(radius)..=cx + radius {
-            let dx = x as i64 - cx as i64;
-            let dy = y as i64 - cy as i64;
-            let d2 = dx * dx + dy * dy;
-            if d2 <= outer && d2 >= inner {
                 let i = ((y * w + x) * 3) as usize;
                 if i + 2 < buf.len() {
                     buf[i] = color[0];

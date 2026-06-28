@@ -189,10 +189,6 @@ impl WindowBarStyle {
     pub fn align_right(self) -> bool {
         matches!(self, Self::ColorfulRight | Self::RingsRight)
     }
-
-    pub fn outlined(self) -> bool {
-        matches!(self, Self::Rings | Self::RingsRight)
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
