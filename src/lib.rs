@@ -30,6 +30,7 @@ pub mod font;
 pub mod full_recording;
 pub mod keys;
 pub mod pty;
+pub mod record;
 pub mod recording;
 pub mod render_common;
 pub mod render_gif;
@@ -37,7 +38,6 @@ pub mod render_json;
 pub mod render_svg;
 pub mod renderer;
 pub mod runner;
-pub mod record;
 pub mod script;
 pub mod style;
 
@@ -47,8 +47,8 @@ use anyhow::{Context, Result};
 use tracing::info;
 
 pub use full_recording::{FullRecording, FullRecordingConfig};
-pub use recording::{CellChange, CellSnap, Frame, RawFrame, Recording};
 pub use record::record;
+pub use recording::{CellChange, CellSnap, Frame, RawFrame, Recording};
 pub use render_common::{RenderOptions, ViewportConfig};
 pub use render_svg::SvgOptions;
 pub use runner::{RunOutput, RunStats};

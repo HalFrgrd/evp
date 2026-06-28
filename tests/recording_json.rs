@@ -664,9 +664,18 @@ Sleep 200ms
         }
     }
 
-    assert!(saw_x_only, "should have captured intermediate frame with only 'X' during the wait");
-    assert!(saw_xy_only, "should have captured intermediate frame with 'XY' during the wait");
-    assert!(saw_xyz, "should have captured final frame with 'XYZ' after wait resolved");
+    assert!(
+        saw_x_only,
+        "should have captured intermediate frame with only 'X' during the wait"
+    );
+    assert!(
+        saw_xy_only,
+        "should have captured intermediate frame with 'XY' during the wait"
+    );
+    assert!(
+        saw_xyz,
+        "should have captured final frame with 'XYZ' after wait resolved"
+    );
 }
 
 #[test]
@@ -725,8 +734,14 @@ Sleep 200ms
         );
     }
 
-    assert!(saw_first_hidden, "should have captured frames containing 'first-hidden'");
-    assert!(saw_second_hidden, "should have captured frames containing 'second-hidden'");
+    assert!(
+        saw_first_hidden,
+        "should have captured frames containing 'first-hidden'"
+    );
+    assert!(
+        saw_second_hidden,
+        "should have captured frames containing 'second-hidden'"
+    );
 }
 
 #[test]
@@ -789,7 +804,10 @@ Sleep 1s
             }
         }
     }
-    assert!(found_title, "Expected to find a frame with the title 'My Test Title'");
+    assert!(
+        found_title,
+        "Expected to find a frame with the title 'My Test Title'"
+    );
 
     let opts = evp::SvgOptions::default();
     let svg = evp::render_svg::render_svg_to_string(&rec, &opts).expect("render svg to string");
@@ -798,8 +816,3 @@ Sleep 1s
         "SVG rendering should contain 'My Test Title'"
     );
 }
-
-
-
-
-

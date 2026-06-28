@@ -7,12 +7,12 @@ use libghostty_vt::{
     render::{CellIterator, RenderState, RowIterator},
 };
 use ratatui::{
+    Terminal as RatatuiTerminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
-    Terminal as RatatuiTerminal,
 };
 use tracing::info;
 use unicode_width::UnicodeWidthChar;
@@ -24,14 +24,11 @@ use crate::render_common::RenderOptions;
 use crate::renderer;
 use crate::runner::{apply_theme, capture, derive_options};
 use crate::script::{
-    Event, KeyAction, KeySpec, ModSet, MouseAction, MouseButton, NamedKey,
-    Settings,
+    Event, KeyAction, KeySpec, ModSet, MouseAction, MouseButton, NamedKey, Settings,
 };
 use crate::style::Theme;
 
 const REF_SCRIPT: &str = include_str!(concat!(env!("OUT_DIR"), "/ref_script.tape"));
-
-
 
 /// Dynamic mouse coordinate encoder using libghostty's mouse event protocol
 fn encode_mouse_event(
@@ -115,7 +112,9 @@ fn map_crossterm_key(event: crossterm::event::KeyEvent) -> (NamedKey, ModSet) {
         ctrl: event
             .modifiers
             .contains(crossterm::event::KeyModifiers::CONTROL),
-        alt: event.modifiers.contains(crossterm::event::KeyModifiers::ALT),
+        alt: event
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::ALT),
         shift: event
             .modifiers
             .contains(crossterm::event::KeyModifiers::SHIFT),
@@ -161,10 +160,7 @@ fn map_mouse_button(btn: crossterm::event::MouseButton) -> Option<MouseButton> {
 }
 
 fn is_simple_char(key: NamedKey, mods: ModSet) -> bool {
-    matches!(key, NamedKey::Char(_))
-        && !mods.ctrl
-        && !mods.alt
-        && !mods.super_key
+    matches!(key, NamedKey::Char(_)) && !mods.ctrl && !mods.alt && !mods.super_key
 }
 
 fn flush_char_buffer(
@@ -181,7 +177,6 @@ fn flush_char_buffer(
         *last_event_time = Instant::now();
     }
 }
-
 
 /// Renders the host terminal state utilizing Ratatui's canvas drawing and text formatting backend
 fn draw_terminal_state(
@@ -210,7 +205,10 @@ fn draw_terminal_state(
             " EVP recording active ({}s), exit the program to stop recording.",
             elapsed.as_secs()
         ));
-        f.render_widget(Paragraph::new(Line::from(vec![blink_dot, info_text])), chunks[0]);
+        f.render_widget(
+            Paragraph::new(Line::from(vec![blink_dot, info_text])),
+            chunks[0],
+        );
 
         // 2. Divider widget
         let divider_line = "─".repeat(chunks[1].width as usize);
@@ -266,7 +264,11 @@ fn draw_terminal_state(
                     style = style.add_modifier(Modifier::DIM);
                 }
 
-                let text = if cell.text.is_empty() { " " } else { &cell.text };
+                let text = if cell.text.is_empty() {
+                    " "
+                } else {
+                    &cell.text
+                };
                 spans.push(Span::styled(text.to_string(), style));
             }
             lines.push(Line::from(spans));
@@ -293,7 +295,9 @@ fn is_collinear(ax: u16, ay: u16, bx: u16, by: u16, cx: u16, cy: u16) -> bool {
         return true;
     }
 
-    let numerator = ((dy * cx as f32) - (dx * cy as f32) + (bx as f32 * ay as f32) - (by as f32 * ax as f32)).abs();
+    let numerator = ((dy * cx as f32) - (dx * cy as f32) + (bx as f32 * ay as f32)
+        - (by as f32 * ax as f32))
+        .abs();
     let distance = numerator / length_sq.sqrt();
 
     distance <= 1.5
@@ -411,7 +415,8 @@ impl TerminalCapabilityGuard {
                     | crossterm::event::KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
                     | crossterm::event::KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
             )
-        ).context("initializing host terminal capabilities")?;
+        )
+        .context("initializing host terminal capabilities")?;
         Ok(Self)
     }
 }
@@ -440,8 +445,8 @@ pub fn record(
     output_override: Option<PathBuf>,
 ) -> Result<()> {
     // 1. Resolve geometry
-    let (actual_host_cols, actual_host_rows) = crossterm::terminal::size()
-        .context("getting host terminal size")?;
+    let (actual_host_cols, actual_host_rows) =
+        crossterm::terminal::size().context("getting host terminal size")?;
 
     let mut cols = override_cols.unwrap_or(actual_host_cols);
     let mut rows = override_rows.unwrap_or(actual_host_rows.saturating_sub(2));
@@ -472,13 +477,8 @@ pub fn record(
 
     // 2. Spawn PTY and child process shell
     info!(cols, rows, ?shell, "starting interactive recording");
-    let (pty, _child) = Pty::spawn(
-        shell.as_deref(),
-        &[],
-        pty_size,
-        false,
-    )
-    .context("spawning PTY for record session")?;
+    let (pty, _child) = Pty::spawn(shell.as_deref(), &[], pty_size, false)
+        .context("spawning PTY for record session")?;
 
     // 3. Initialize libghostty VT
     let mut terminal = Terminal::new(TerminalOptions {
@@ -542,8 +542,7 @@ pub fn record(
                             break;
                         }
                     }
-                    Err(nix::errno::Errno::EAGAIN)
-                    | Err(nix::errno::Errno::EINTR) => continue,
+                    Err(nix::errno::Errno::EAGAIN) | Err(nix::errno::Errno::EINTR) => continue,
                     Err(_) => {
                         let _ = pty_tx.send(vec![]);
                         break;
@@ -588,311 +587,309 @@ pub fn record(
         let mut cell_it = CellIterator::new()?;
 
         loop {
-        crossbeam_channel::select! {
-            recv(pty_rx) -> res => {
-                match res {
-                    Ok(data) => {
-                        if data.is_empty() {
-                            break; // EOF
-                        }
-
-                        // Feed output to libghostty VT parser
-                        terminal.vt_write(&data);
-
-
-
-
-                    }
-                    Err(_) => break,
-                }
-            }
-            recv(event_rx) -> res => {
-                match res {
-                    Ok(event) => {
-                        match event {
-                            crossterm::event::Event::Key(key_event) => {
-                                // Interrupt and flush active mouse movement
-                                if let Some(mut tracker) = active_tracker.take() {
-                                    if let Some(ev) = tracker.flush() {
-                                        recorded_events.push(ev);
-                                    }
-                                }
-
-                                let (named_key, mods) = map_crossterm_key(key_event);
-                                let key_spec = KeySpec { key: named_key, mods };
-                                let action = if key_event.kind == crossterm::event::KeyEventKind::Release {
-                                    KeyAction::Release
-                                } else {
-                                    KeyAction::Press
-                                };
-
-                                let now = Instant::now();
-
-                                if action == KeyAction::Press {
-                                    let idle_duration = now.duration_since(last_event_time);
-
-                                    // Flush buffer on significant idle or special keys
-                                    if idle_duration > Duration::from_secs(1) || !is_simple_char(named_key, mods) {
-                                        flush_char_buffer(&mut char_buffer, &mut recorded_events, &mut last_event_time);
-                                    }
-
-                                    // Output sleep if we flushed/idle
-                                    let current_idle = now.duration_since(last_event_time);
-                                    if current_idle > Duration::from_millis(50) && char_buffer.is_empty() {
-                                        recorded_events.push(Event::Sleep(current_idle));
-                                        last_event_time = now;
-                                    }
-
-                                    if is_simple_char(named_key, mods) {
-                                        if let NamedKey::Char(c) = named_key {
-                                            char_buffer.push(c);
-                                        }
-                                    } else {
-                                        recorded_events.push(Event::Key {
-                                            key: key_spec.clone(),
-                                            action: KeyAction::Press,
-                                            count: 1,
-                                            delay: Duration::from_millis(50),
-                                        });
-                                        last_event_time = now;
-                                    }
-                                }
-
-                                if let Ok(bytes) = translator.encode(&key_spec, action, &terminal) {
-                                    pty.write(bytes);
-                                }
+            crossbeam_channel::select! {
+                recv(pty_rx) -> res => {
+                    match res {
+                        Ok(data) => {
+                            if data.is_empty() {
+                                break; // EOF
                             }
-                            crossterm::event::Event::Mouse(mouse_event) => {
-                                if true {
-                                    if let Some((action, button)) = map_crossterm_mouse(mouse_event.kind) {
-                                        let col = mouse_event.column;
-                                        let row = mouse_event.row;
 
-                                        // Translate row coordinate: subtract 2 header rows
-                                        if row < 2 {
-                                            continue;
+                            // Feed output to libghostty VT parser
+                            terminal.vt_write(&data);
+
+
+
+
+                        }
+                        Err(_) => break,
+                    }
+                }
+                recv(event_rx) -> res => {
+                    match res {
+                        Ok(event) => {
+                            match event {
+                                crossterm::event::Event::Key(key_event) => {
+                                    // Interrupt and flush active mouse movement
+                                    if let Some(mut tracker) = active_tracker.take() {
+                                        if let Some(ev) = tracker.flush() {
+                                            recorded_events.push(ev);
                                         }
-                                        let row = row - 2;
+                                    }
 
-                                        if col >= cols || row >= rows {
-                                            continue;
+                                    let (named_key, mods) = map_crossterm_key(key_event);
+                                    let key_spec = KeySpec { key: named_key, mods };
+                                    let action = if key_event.kind == crossterm::event::KeyEventKind::Release {
+                                        KeyAction::Release
+                                    } else {
+                                        KeyAction::Press
+                                    };
+
+                                    let now = Instant::now();
+
+                                    if action == KeyAction::Press {
+                                        let idle_duration = now.duration_since(last_event_time);
+
+                                        // Flush buffer on significant idle or special keys
+                                        if idle_duration > Duration::from_secs(1) || !is_simple_char(named_key, mods) {
+                                            flush_char_buffer(&mut char_buffer, &mut recorded_events, &mut last_event_time);
                                         }
 
-                                        let now = Instant::now();
-                                        last_mouse_move_time = now;
-                                        flush_char_buffer(&mut char_buffer, &mut recorded_events, &mut last_event_time);
-
-                                        // Update local dragging flag
-                                        match action {
-                                            MouseAction::Press => {
-                                                if button == Some(MouseButton::Left) {
-                                                    is_dragging = true;
-                                                }
-                                            }
-                                            MouseAction::Release => {
-                                                if button == Some(MouseButton::Left) {
-                                                    is_dragging = false;
-                                                }
-                                            }
-                                            _ => {}
-                                        }
-
-                                        // Update pointer coordinates for live rendering
-                                        let mouse_state = if is_dragging {
-                                            MouseState::Dragging
-                                        } else if action == MouseAction::Press {
-                                            MouseState::Clicking
-                                        } else {
-                                            MouseState::Moving
-                                        };
-                                        current_mouse_pos = Some((col as f32, row as f32, mouse_state));
-
-                                        // 1. If it's movement (Motion / Drag), feed to segment tracker
-                                        let is_drag = action == MouseAction::Motion && is_dragging;
-                                        let is_move = action == MouseAction::Motion && !is_dragging;
-
-                                        if is_drag || is_move {
-                                            let mut start_new = false;
-                                            if let Some(ref tracker) = active_tracker {
-                                                if tracker.is_drag != is_drag {
-                                                    if let Some(ev) = active_tracker.as_mut().unwrap().flush() {
-                                                        recorded_events.push(ev);
-                                                    }
-                                                    start_new = true;
-                                                }
-                                            } else {
-                                                start_new = true;
-                                            }
-
-                                            if start_new {
-                                                let mut tracker = MouseSegmentTracker::new(is_drag);
-                                                // Initialize segment starting point at the previous mouse coords
-                                                tracker.points.push((current_mouse_col, current_mouse_row, last_event_time));
-                                                active_tracker = Some(tracker);
-                                            }
-
-                                            if let Some(ref mut tracker) = active_tracker {
-                                                if let Some(ev) = tracker.add_point(col, row, now) {
-                                                    recorded_events.push(ev);
-                                                }
-                                            }
-                                            current_mouse_col = col;
-                                            current_mouse_row = row;
+                                        // Output sleep if we flushed/idle
+                                        let current_idle = now.duration_since(last_event_time);
+                                        if current_idle > Duration::from_millis(50) && char_buffer.is_empty() {
+                                            recorded_events.push(Event::Sleep(current_idle));
                                             last_event_time = now;
+                                        }
+
+                                        if is_simple_char(named_key, mods) {
+                                            if let NamedKey::Char(c) = named_key {
+                                                char_buffer.push(c);
+                                            }
                                         } else {
-                                            // 2. Otherwise (Press / Release / Scroll), flush movement segment first
-                                            if let Some(mut tracker) = active_tracker.take() {
-                                                if let Some(ev) = tracker.flush() {
-                                                    recorded_events.push(ev);
-                                                }
+                                            recorded_events.push(Event::Key {
+                                                key: key_spec.clone(),
+                                                action: KeyAction::Press,
+                                                count: 1,
+                                                delay: Duration::from_millis(50),
+                                            });
+                                            last_event_time = now;
+                                        }
+                                    }
+
+                                    if let Ok(bytes) = translator.encode(&key_spec, action, &terminal) {
+                                        pty.write(bytes);
+                                    }
+                                }
+                                crossterm::event::Event::Mouse(mouse_event) => {
+                                    if true {
+                                        if let Some((action, button)) = map_crossterm_mouse(mouse_event.kind) {
+                                            let col = mouse_event.column;
+                                            let row = mouse_event.row;
+
+                                            // Translate row coordinate: subtract 2 header rows
+                                            if row < 2 {
+                                                continue;
+                                            }
+                                            let row = row - 2;
+
+                                            if col >= cols || row >= rows {
+                                                continue;
                                             }
 
-                                            let current_idle = now.duration_since(last_event_time);
-                                            if current_idle > Duration::from_millis(50) {
-                                                recorded_events.push(Event::Sleep(current_idle));
-                                            }
+                                            let now = Instant::now();
+                                            last_mouse_move_time = now;
+                                            flush_char_buffer(&mut char_buffer, &mut recorded_events, &mut last_event_time);
 
-                                            // Process instantaneous mouse event
+                                            // Update local dragging flag
                                             match action {
                                                 MouseAction::Press => {
                                                     if button == Some(MouseButton::Left) {
-                                                        drag_start_col = col;
-                                                        drag_start_row = row;
+                                                        is_dragging = true;
                                                     }
                                                 }
                                                 MouseAction::Release => {
                                                     if button == Some(MouseButton::Left) {
-                                                        if col == drag_start_col && row == drag_start_row {
-                                                            recorded_events.push(Event::Click {
+                                                        is_dragging = false;
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
+
+                                            // Update pointer coordinates for live rendering
+                                            let mouse_state = if is_dragging {
+                                                MouseState::Dragging
+                                            } else if action == MouseAction::Press {
+                                                MouseState::Clicking
+                                            } else {
+                                                MouseState::Moving
+                                            };
+                                            current_mouse_pos = Some((col as f32, row as f32, mouse_state));
+
+                                            // 1. If it's movement (Motion / Drag), feed to segment tracker
+                                            let is_drag = action == MouseAction::Motion && is_dragging;
+                                            let is_move = action == MouseAction::Motion && !is_dragging;
+
+                                            if is_drag || is_move {
+                                                let mut start_new = false;
+                                                if let Some(ref tracker) = active_tracker {
+                                                    if tracker.is_drag != is_drag {
+                                                        if let Some(ev) = active_tracker.as_mut().unwrap().flush() {
+                                                            recorded_events.push(ev);
+                                                        }
+                                                        start_new = true;
+                                                    }
+                                                } else {
+                                                    start_new = true;
+                                                }
+
+                                                if start_new {
+                                                    let mut tracker = MouseSegmentTracker::new(is_drag);
+                                                    // Initialize segment starting point at the previous mouse coords
+                                                    tracker.points.push((current_mouse_col, current_mouse_row, last_event_time));
+                                                    active_tracker = Some(tracker);
+                                                }
+
+                                                if let Some(ref mut tracker) = active_tracker {
+                                                    if let Some(ev) = tracker.add_point(col, row, now) {
+                                                        recorded_events.push(ev);
+                                                    }
+                                                }
+                                                current_mouse_col = col;
+                                                current_mouse_row = row;
+                                                last_event_time = now;
+                                            } else {
+                                                // 2. Otherwise (Press / Release / Scroll), flush movement segment first
+                                                if let Some(mut tracker) = active_tracker.take() {
+                                                    if let Some(ev) = tracker.flush() {
+                                                        recorded_events.push(ev);
+                                                    }
+                                                }
+
+                                                let current_idle = now.duration_since(last_event_time);
+                                                if current_idle > Duration::from_millis(50) {
+                                                    recorded_events.push(Event::Sleep(current_idle));
+                                                }
+
+                                                // Process instantaneous mouse event
+                                                match action {
+                                                    MouseAction::Press => {
+                                                        if button == Some(MouseButton::Left) {
+                                                            drag_start_col = col;
+                                                            drag_start_row = row;
+                                                        }
+                                                    }
+                                                    MouseAction::Release => {
+                                                        if button == Some(MouseButton::Left) {
+                                                            if col == drag_start_col && row == drag_start_row {
+                                                                recorded_events.push(Event::Click {
+                                                                    col,
+                                                                    row,
+                                                                    delay: Duration::from_millis(50),
+                                                                });
+                                                            } else {
+                                                                recorded_events.push(Event::MouseDrag {
+                                                                    start_col: drag_start_col,
+                                                                    start_row: drag_start_row,
+                                                                    end_col: col,
+                                                                    end_row: row,
+                                                                    delay: Duration::from_millis(50),
+                                                                    easing: None,
+                                                                });
+                                                            }
+                                                        } else if button == Some(MouseButton::Right) {
+                                                            recorded_events.push(Event::RightClick {
                                                                 col,
                                                                 row,
                                                                 delay: Duration::from_millis(50),
                                                             });
-                                                        } else {
-                                                            recorded_events.push(Event::MouseDrag {
-                                                                start_col: drag_start_col,
-                                                                start_row: drag_start_row,
-                                                                end_col: col,
-                                                                end_row: row,
+                                                        } else if button == Some(MouseButton::WheelUp) {
+                                                            recorded_events.push(Event::MouseScroll {
+                                                                col,
+                                                                row,
+                                                                direction: crate::script::ScrollDirection::Up,
                                                                 delay: Duration::from_millis(50),
-                                                                easing: None,
+                                                            });
+                                                        } else if button == Some(MouseButton::WheelDown) {
+                                                            recorded_events.push(Event::MouseScroll {
+                                                                col,
+                                                                row,
+                                                                direction: crate::script::ScrollDirection::Down,
+                                                                delay: Duration::from_millis(50),
                                                             });
                                                         }
-                                                    } else if button == Some(MouseButton::Right) {
-                                                        recorded_events.push(Event::RightClick {
-                                                            col,
-                                                            row,
-                                                            delay: Duration::from_millis(50),
-                                                        });
-                                                    } else if button == Some(MouseButton::WheelUp) {
-                                                        recorded_events.push(Event::MouseScroll {
-                                                            col,
-                                                            row,
-                                                            direction: crate::script::ScrollDirection::Up,
-                                                            delay: Duration::from_millis(50),
-                                                        });
-                                                    } else if button == Some(MouseButton::WheelDown) {
-                                                        recorded_events.push(Event::MouseScroll {
-                                                            col,
-                                                            row,
-                                                            direction: crate::script::ScrollDirection::Down,
-                                                            delay: Duration::from_millis(50),
-                                                        });
+                                                        current_mouse_col = col;
+                                                        current_mouse_row = row;
                                                     }
-                                                    current_mouse_col = col;
-                                                    current_mouse_row = row;
+                                                    _ => {}
                                                 }
-                                                _ => {}
+                                                last_event_time = now;
                                             }
-                                            last_event_time = now;
-                                        }
 
-                                        // Encode and transmit mouse coordinates to the PTY
-                                        if let Ok(bytes) = encode_mouse_event(
-                                            action,
-                                            button,
-                                            col,
-                                            row,
-                                            &terminal,
-                                            cfg.cell_width_px,
-                                            cfg.cell_height_px,
-                                            cols,
-                                            rows,
-                                        ) {
-                                            pty.write(&bytes);
+                                            // Encode and transmit mouse coordinates to the PTY
+                                            if let Ok(bytes) = encode_mouse_event(
+                                                action,
+                                                button,
+                                                col,
+                                                row,
+                                                &terminal,
+                                                cfg.cell_width_px,
+                                                cfg.cell_height_px,
+                                                cols,
+                                                rows,
+                                            ) {
+                                                pty.write(&bytes);
+                                            }
                                         }
                                     }
                                 }
-                            }
-                            crossterm::event::Event::Paste(text) => {
-                                flush_char_buffer(&mut char_buffer, &mut recorded_events, &mut last_event_time);
-                                let now = Instant::now();
-                                let idle_duration = now.duration_since(last_event_time);
-                                if idle_duration > Duration::from_millis(50) {
-                                    recorded_events.push(Event::Sleep(idle_duration));
+                                crossterm::event::Event::Paste(text) => {
+                                    flush_char_buffer(&mut char_buffer, &mut recorded_events, &mut last_event_time);
+                                    let now = Instant::now();
+                                    let idle_duration = now.duration_since(last_event_time);
+                                    if idle_duration > Duration::from_millis(50) {
+                                        recorded_events.push(Event::Sleep(idle_duration));
+                                    }
+                                    recorded_events.push(Event::Type {
+                                        text: text.clone(),
+                                        delay: Duration::from_millis(50),
+                                    });
+                                    last_event_time = now;
+                                    pty.write(text.as_bytes());
                                 }
-                                recorded_events.push(Event::Type {
-                                    text: text.clone(),
-                                    delay: Duration::from_millis(50),
-                                });
-                                last_event_time = now;
-                                pty.write(text.as_bytes());
-                            }
-                            crossterm::event::Event::Resize(new_host_cols, new_host_rows) => {
-                                let new_cols = new_host_cols;
-                                let new_rows = new_host_rows.saturating_sub(2);
-                                if new_rows > 0 {
-                                    cols = new_cols;
-                                    rows = new_rows;
-                                    let _ = terminal.resize(new_cols, new_rows, cfg.cell_width_px, cfg.cell_height_px);
-                                    let pty_size = PtySize {
-                                        cols: new_cols,
-                                        rows: new_rows,
-                                        px_w: new_cols * cfg.cell_width_px as u16,
-                                        px_h: new_rows * cfg.cell_height_px as u16,
-                                    };
-                                    pty.resize(pty_size);
-                                    let _ = ratatui_term.resize(ratatui::prelude::Rect::new(0, 0, new_host_cols, new_host_rows));
+                                crossterm::event::Event::Resize(new_host_cols, new_host_rows) => {
+                                    let new_cols = new_host_cols;
+                                    let new_rows = new_host_rows.saturating_sub(2);
+                                    if new_rows > 0 {
+                                        cols = new_cols;
+                                        rows = new_rows;
+                                        let _ = terminal.resize(new_cols, new_rows, cfg.cell_width_px, cfg.cell_height_px);
+                                        let pty_size = PtySize {
+                                            cols: new_cols,
+                                            rows: new_rows,
+                                            px_w: new_cols * cfg.cell_width_px as u16,
+                                            px_h: new_rows * cfg.cell_height_px as u16,
+                                        };
+                                        pty.resize(pty_size);
+                                        let _ = ratatui_term.resize(ratatui::prelude::Rect::new(0, 0, new_host_cols, new_host_rows));
+                                    }
                                 }
+                                _ => {}
                             }
-                            _ => {}
                         }
+                        Err(_) => break,
                     }
-                    Err(_) => break,
                 }
-            }
-            recv(ticker) -> _ => {
-                let elapsed = start_time.elapsed();
-                if let Ok((mut frame, _)) = capture(
-                    &mut render_state,
-                    &mut row_it,
-                    &mut cell_it,
-                    &mut terminal,
-                    elapsed,
-                    cols,
-                    rows,
-                    true,
-                    None,
-                    None,
-                ) {
-                    if Instant::now().duration_since(last_mouse_move_time) > Duration::from_secs(3) {
-                        current_mouse_pos = None;
+                recv(ticker) -> _ => {
+                    let elapsed = start_time.elapsed();
+                    if let Ok((mut frame, _)) = capture(
+                        &mut render_state,
+                        &mut row_it,
+                        &mut cell_it,
+                        &mut terminal,
+                        elapsed,
+                        cols,
+                        rows,
+                        true,
+                        None,
+                        None,
+                    ) {
+                        if Instant::now().duration_since(last_mouse_move_time) > Duration::from_secs(3) {
+                            current_mouse_pos = None;
+                        }
+                        // Inject mouse pointer into the frame so the GIF compiler renders it
+                        frame.mouse_cursor = current_mouse_pos;
+
+                        // Update host screen via Ratatui
+                        let _ = draw_terminal_state(&mut ratatui_term, &frame, elapsed);
+
+                        // Send to background renderer
+                        let _ = renderer_tx.try_send(frame);
                     }
-                    // Inject mouse pointer into the frame so the GIF compiler renders it
-                    frame.mouse_cursor = current_mouse_pos;
-
-                    // Update host screen via Ratatui
-                    let _ = draw_terminal_state(&mut ratatui_term, &frame, elapsed);
-
-                    // Send to background renderer
-                    let _ = renderer_tx.try_send(frame);
                 }
             }
         }
     }
-    }
-
-
 
     // Flush any remaining active movements or buffered characters
     if let Some(mut tracker) = active_tracker.take() {
@@ -947,10 +944,7 @@ pub fn record(
                 }
             }
             Event::Key {
-                key,
-                action,
-                count,
-                ..
+                key, action, count, ..
             } => {
                 if *action == KeyAction::Press {
                     let mut spec_parts = Vec::new();
@@ -1046,10 +1040,7 @@ pub fn record(
                     crate::script::ScrollDirection::Up => "Up",
                     crate::script::ScrollDirection::Down => "Down",
                 };
-                tape_content.push_str(&format!(
-                    "MouseScroll {} {} {}\n",
-                    col, row, dir_str
-                ));
+                tape_content.push_str(&format!("MouseScroll {} {} {}\n", col, row, dir_str));
             }
             _ => {}
         }

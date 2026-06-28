@@ -159,7 +159,9 @@ fn update_readme_version() -> Result<(), Box<dyn Error>> {
     let mut updated = false;
     let mut lines = Vec::new();
     for line in readme.lines() {
-        if line.contains("uses: HalFrgrd/evp@v") && line.contains(" # Replace with the desired release tag") {
+        if line.contains("uses: HalFrgrd/evp@v")
+            && line.contains(" # Replace with the desired release tag")
+        {
             let prefix = "uses: HalFrgrd/evp@v";
             let suffix = " # Replace with the desired release tag";
             if let Some(start) = line.find(prefix) {

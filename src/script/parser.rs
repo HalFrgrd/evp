@@ -5,10 +5,10 @@
 //! line into tokens (whitespace separated, with `"…"` / `'…'` / `` `…` ``
 //! quoted strings preserved verbatim) then dispatch on the first token.
 
+use easing_function::easings::StandardEasing;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use easing_function::easings::StandardEasing;
 
 use anyhow::{Context, Result, anyhow, bail};
 
@@ -228,7 +228,9 @@ fn parse_line(
                 && !path_lower.ends_with(".txt")
                 && !path_lower.ends_with(".ascii")
             {
-                bail!("Screenshot path must end with .png, .svg, .svgz, .json, .txt, or .ascii (got `{path}`)");
+                bail!(
+                    "Screenshot path must end with .png, .svg, .svgz, .json, .txt, or .ascii (got `{path}`)"
+                );
             }
             script.events.push(Event::Screenshot(path));
         }
@@ -709,7 +711,12 @@ fn parse_explicit_key_action(tokens: &[String], action: KeyAction) -> Result<Eve
 }
 
 fn parse_easing(name: &str) -> Result<StandardEasing> {
-    match name.to_ascii_lowercase().replace("-", "").replace("_", "").as_str() {
+    match name
+        .to_ascii_lowercase()
+        .replace("-", "")
+        .replace("_", "")
+        .as_str()
+    {
         "linear" => Ok(StandardEasing::Linear),
         "easeinsine" => Ok(StandardEasing::InSine),
         "easeoutsine" => Ok(StandardEasing::OutSine),
@@ -750,13 +757,14 @@ fn parse_mouse_config(
     prefix: &str,
     default_delay: Duration,
 ) -> Result<(Duration, Option<StandardEasing>)> {
-    let parts = head.strip_prefix(prefix)
+    let parts = head
+        .strip_prefix(prefix)
         .and_then(|s| s.strip_prefix('@'))
         .unwrap_or("");
     if parts.is_empty() {
         return Ok((default_delay, None));
     }
-    
+
     // Split by '@'
     let sub_parts: Vec<&str> = parts.split('@').collect();
     match sub_parts.len() {
@@ -1184,7 +1192,6 @@ mod tests {
         let err = parse("Output out.gif\nWait+Invalid /regex/\n").unwrap_err();
         assert!(format!("{err:#}").contains("unknown command `Wait+Invalid`"));
     }
-
 
     #[test]
     fn theme_json_parses() {

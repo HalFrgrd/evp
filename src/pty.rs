@@ -245,7 +245,10 @@ impl Pty {
     }
 
     pub fn try_clone(&self) -> Result<Self> {
-        let fd = self.0.try_clone().context("failed to clone PTY master fd")?;
+        let fd = self
+            .0
+            .try_clone()
+            .context("failed to clone PTY master fd")?;
         Ok(Self(fd))
     }
 

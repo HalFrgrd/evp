@@ -15,9 +15,9 @@
 //! (event or frame) using `poll(2)` on the PTY fd so any incoming output
 //! also wakes us early.
 
+use easing_function::easings::StandardEasing;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use easing_function::easings::StandardEasing;
 
 use anyhow::{Context, Result};
 use crossbeam_channel::{Sender, TrySendError};
@@ -181,7 +181,9 @@ fn resolve_mouse_position(
         return None;
     }
 
-    let active = segments.iter().find(|s| s.start_time <= recorded_at && recorded_at <= s.end_time);
+    let active = segments
+        .iter()
+        .find(|s| s.start_time <= recorded_at && recorded_at <= s.end_time);
     if let Some(s) = active {
         let duration = s.end_time.saturating_sub(s.start_time);
         if duration == Duration::ZERO {
@@ -190,17 +192,18 @@ fn resolve_mouse_position(
         let elapsed = recorded_at.saturating_sub(s.start_time);
         let f = elapsed.as_secs_f32() / duration.as_secs_f32();
         let f = f.clamp(0.0, 1.0);
-        
+
         use easing_function::Easing;
         let easing = s.easing.unwrap_or(StandardEasing::InOutCubic);
         let f_eased = easing.ease(f);
-        
+
         let col = s.start_col + f_eased * (s.end_col - s.start_col);
         let row = s.start_row + f_eased * (s.end_row - s.start_row);
-        
+
         Some((col, row, s.state))
     } else {
-        let last_before = segments.iter()
+        let last_before = segments
+            .iter()
             .filter(|s| s.end_time <= recorded_at)
             .max_by_key(|s| s.end_time);
         if let Some(s) = last_before {
@@ -214,7 +217,11 @@ fn resolve_mouse_position(
             if first.start_time.saturating_sub(recorded_at) > Duration::from_secs(3) {
                 None
             } else {
-                Some((first.start_col, first.start_row, crate::recording::MouseState::Moving))
+                Some((
+                    first.start_col,
+                    first.start_row,
+                    crate::recording::MouseState::Moving,
+                ))
             }
         }
     }
@@ -322,8 +329,6 @@ pub fn run_with_raw_frame_consumers(
     let mut last_cursor_moved_at: Option<Duration> = None;
     let mut prev_cursor_capture: Option<Option<(u16, u16)>> = None;
 
-
-
     // Wait‑for state. When we're inside a `Wait`, all later events stall
     // until the regex matches or the timeout elapses.
     let mut wait_state: Option<WaitState> = None;
@@ -381,7 +386,8 @@ pub fn run_with_raw_frame_consumers(
                 None
             };
 
-            let next_frame_due = next_frame_at <= now && (next_frame_at <= total_duration || wait_state.is_some());
+            let next_frame_due =
+                next_frame_at <= now && (next_frame_at <= total_duration || wait_state.is_some());
 
             let process_event = match (next_event_at, next_frame_due) {
                 (Some(event_at), true) => event_at <= next_frame_at,
@@ -648,7 +654,10 @@ struct Scheduled {
     event: Event,
 }
 
-fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Vec<MouseSegment>, Duration) {
+fn build_timeline(
+    events: &[Event],
+    settings: &Settings,
+) -> (Vec<Scheduled>, Vec<MouseSegment>, Duration) {
     let mut out = Vec::new();
     let mut mouse_segments = Vec::new();
     let mut cursor = Duration::ZERO;
@@ -864,7 +873,7 @@ fn build_timeline(events: &[Event], settings: &Settings) -> (Vec<Scheduled>, Vec
                             row: y0,
                         },
                     });
-                    
+
                     mouse_segments.push(MouseSegment {
                         start_time: cursor,
                         end_time: cursor + (points.len() - 1) as u32 * per,
@@ -1287,7 +1296,12 @@ fn write_screenshot(frame: &RawFrame, script: &Script, path: &std::path::Path) -
                     } else {
                         let prev_is_wide = if c > 0 {
                             let prev_cell = &frame.cells[r * cols + (c - 1)];
-                            prev_cell.text.chars().next().map(|ch| ch.width() == Some(2)).unwrap_or(false)
+                            prev_cell
+                                .text
+                                .chars()
+                                .next()
+                                .map(|ch| ch.width() == Some(2))
+                                .unwrap_or(false)
                         } else {
                             false
                         };

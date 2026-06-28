@@ -373,8 +373,7 @@ fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()
             Ok(())
         }
         Commands::Validate { tape } => {
-            evp::parse_script_file(&tape)
-                .with_context(|| format!("parsing {}", tape.display()))?;
+            evp::parse_script_file(&tape).with_context(|| format!("parsing {}", tape.display()))?;
             println!("{}: ok", tape.display());
             Ok(())
         }
@@ -387,13 +386,16 @@ fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()
             init_tracing(cli, evp_start);
             log_build_info_debug();
             info!("running embedded test tape (run-sample-script)");
-            let script = evp::parse_script(EMBEDDED_TEST_TAPE).context("parsing embedded test tape")?;
+            let script =
+                evp::parse_script(EMBEDDED_TEST_TAPE).context("parsing embedded test tape")?;
             run_script(cli, &script, evp_start)?;
             Ok(())
         }
         Commands::PrintRefScript => {
             println!("# This is a reference tape to help you write your tape files.");
-            println!("# We recommend viewing this tape using the Elixir language type for syntax highlighting.");
+            println!(
+                "# We recommend viewing this tape using the Elixir language type for syntax highlighting."
+            );
             println!("#");
             for line in REF_SCRIPT.lines() {
                 println!("# {}", line);
@@ -401,7 +403,13 @@ fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()
             println!("\n{}", EMBEDDED_TEST_TAPE);
             Ok(())
         }
-        Commands::Record { mut tape, cols, rows, shell, theme } => {
+        Commands::Record {
+            mut tape,
+            cols,
+            rows,
+            shell,
+            theme,
+        } => {
             init_tracing(cli, evp_start);
             log_build_info_debug();
 
@@ -528,19 +536,13 @@ mod tests {
     #[test]
     fn parses_run_sample_script_subcommand() {
         let cli = Cli::try_parse_from(["evp", "run-sample-script"]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Some(Commands::RunSampleScript)
-        ));
+        assert!(matches!(cli.command, Some(Commands::RunSampleScript)));
     }
 
     #[test]
     fn parses_print_ref_script_subcommand() {
         let cli = Cli::try_parse_from(["evp", "print-ref-script"]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Some(Commands::PrintRefScript)
-        ));
+        assert!(matches!(cli.command, Some(Commands::PrintRefScript)));
     }
 
     #[test]
