@@ -401,10 +401,20 @@ fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()
             println!("\n{}", EMBEDDED_TEST_TAPE);
             Ok(())
         }
-        Commands::Record { tape, cols, rows, shell, theme } => {
+        Commands::Record { mut tape, cols, rows, shell, theme } => {
             init_tracing(cli, evp_start);
             log_build_info_debug();
-            evp::record(tape, shell, cols, rows, theme)?;
+
+            let mut output_override = None;
+            for out in &cli.output {
+                if out.extension().map_or(false, |ext| ext == "tape") {
+                    tape = out.clone();
+                } else {
+                    output_override = Some(out.clone());
+                }
+            }
+
+            evp::record(tape, shell, cols, rows, theme, output_override)?;
             Ok(())
         }
     }

@@ -447,6 +447,7 @@ pub fn record(
     override_cols: Option<u16>,
     override_rows: Option<u16>,
     theme_name: Option<String>,
+    output_override: Option<PathBuf>,
 ) -> Result<()> {
     // 1. Resolve geometry
     let (actual_host_cols, actual_host_rows) = crossterm::terminal::size()
@@ -503,7 +504,7 @@ pub fn record(
     let mut translator = KeyTranslator::new()?;
 
     // 4. Initialize background GIF/SVG renderer
-    let gif_path = tape_path.with_extension("gif");
+    let gif_path = output_override.unwrap_or_else(|| tape_path.with_extension("gif"));
     let render_opts = RenderOptions {
         font_path: settings.font_family.clone(),
         font_size: settings.font_size,
