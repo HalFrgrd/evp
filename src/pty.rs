@@ -23,7 +23,7 @@ use nix::{
     fcntl::{self, OFlag},
     pty::{ForkptyResult, Winsize},
     sys::{signal, wait},
-    unistd::{self, Pid},
+    unistd::Pid,
 };
 
 /// Master side of the pseudo-terminal.
@@ -289,10 +289,14 @@ impl Pty {
 fn default_shell_path() -> PathBuf {
     match std::env::var_os("SHELL") {
         Some(s) if !s.is_empty() => PathBuf::from(s),
-        _ => match unistd::User::from_uid(unistd::getuid()) {
-            Ok(Some(user)) => user.shell,
-            _ => PathBuf::from("/bin/sh"),
-        },
+        _ => {
+            let bash = PathBuf::from("/bin/bash");
+            if bash.exists() {
+                bash
+            } else {
+                PathBuf::from("/bin/sh")
+            }
+        }
     }
 }
 
