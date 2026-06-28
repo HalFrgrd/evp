@@ -58,10 +58,31 @@ jobs:
           ${{ runner.temp }}/docker/build/evp print-ref-script > /dev/null
           ${{ runner.temp }}/docker/build/evp run-sample-script --output ${{ runner.temp }}/test-ci.gif
 
-  render-examples:
-    name: Render Examples and Release
+  render-examples-matrix:
+    name: Render Example (${{ matrix.example }})
     needs: build-and-test
     runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        example:
+          - char_spacing
+          - colors
+          - cols_rows
+          - embedded-font-demo
+          - evp_demo
+          - evp_record_demo
+          - hello
+          - keys
+          - margin
+          - mouse
+          - mouse_small
+          - my_program_demo
+          - padding
+          - progress
+          - shell-tour
+          - test
+          - window_title
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -69,11 +90,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Build all examples in Docker
+      - name: Build example in Docker
         uses: docker/bake-action@v7
         with:
           files: docker-bake.hcl
-          targets: examples
+          targets: example-${{ matrix.example }}
           set: |
             *.output=type=local,dest=${{ runner.temp }}/docker/examples
             *.cache-from=type=gha
@@ -83,6 +104,29 @@ jobs:
           VERGEN_GIT_BRANCH: ${{ github.ref_name }}
           VERGEN_GIT_COMMIT_DATE: ${{ github.event.head_commit.timestamp }}
           VERGEN_GIT_DIRTY: "false"
+
+      - name: Upload example artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: example-build-${{ matrix.example }}
+          path: ${{ runner.temp }}/docker/examples/*
+          if-no-files-found: error
+
+  publish-examples-release:
+    name: Consolidate and Publish Examples
+    needs: render-examples-matrix
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download all example artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: example-build-*
+          path: ${{ runner.temp }}/docker/examples
+          merge-multiple: true
+
       - name: Generate performance stats summary
         run: ./scripts/generate_stats_summary.py
         env:
