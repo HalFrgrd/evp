@@ -4,9 +4,11 @@ ARG DEBIAN_VERSION=bookworm
 ARG ZIG_VERSION=0.15.2
 ARG GHOSTTY_COMMIT=6590196661f769dd8f2b3e85d6c98262c4ec5b3b
 
-FROM debian:${DEBIAN_VERSION} AS build-libghostty
+FROM --platform=$BUILDPLATFORM debian:${DEBIAN_VERSION} AS build-libghostty
 ARG ZIG_VERSION
 ARG GHOSTTY_COMMIT
+ARG BUILDARCH
+ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -18,11 +20,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \
-    arch="$(uname -m)"; \
-    case "$arch" in \
-        x86_64)  zig_arch="x86_64" ;; \
-        aarch64) zig_arch="aarch64" ;; \
-        *) echo "unsupported arch $arch" >&2; exit 1 ;; \
+    case "$BUILDARCH" in \
+        amd64) zig_arch="x86_64" ;; \
+        arm64) zig_arch="aarch64" ;; \
+        *) echo "unsupported build arch $BUILDARCH" >&2; exit 1 ;; \
     esac; \
     tarball="zig-${zig_arch}-linux-${ZIG_VERSION}.tar.xz"; \
     curl -fsSLo "/tmp/${tarball}" "https://ziglang.org/download/${ZIG_VERSION}/${tarball}"; \
@@ -46,11 +47,10 @@ RUN git clone --filter=blob:none --no-checkout \
 WORKDIR /ghostty
 RUN --mount=type=cache,target=/zig-cache \
         set -eux; \
-        arch="$(uname -m)"; \
-        case "$arch" in \
-            x86_64)  zig_target="x86_64-linux-musl" ;; \
-            aarch64) zig_target="aarch64-linux-musl" ;; \
-            *) echo "unsupported arch $arch" >&2; exit 1 ;; \
+        case "$TARGETARCH" in \
+            amd64) zig_target="x86_64-linux-musl" ;; \
+            arm64) zig_target="aarch64-linux-musl" ;; \
+            *) echo "unsupported target arch $TARGETARCH" >&2; exit 1 ;; \
         esac; \
         zig build \
             -Demit-lib-vt \
