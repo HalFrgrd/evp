@@ -98,6 +98,8 @@ EVP turns your terminal into raw mode and captures all keystrokes, mouse clicks,
 
 When you are done, simply exit the subshell (e.g. type `exit` or press `Ctrl+D`). EVP will instantly write the formatted `.tape` script to disk and compile the `.gif` in the background!
 
+![EVP Record Demo](https://github.com/HalFrgrd/evp/releases/download/assets/evp_record_demo.gif)
+
 #### GitHub Actions
 
 You can run `evp` directly in your GitHub Actions workflows to automate rendering your terminal recordings. Since the action downloads a prebuilt static binary, no Rust toolchain or Docker setup is required:

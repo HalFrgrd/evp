@@ -74,6 +74,7 @@ group "examples" {
     "example-colors",
     "example-embedded-font-demo",
     "example-evp_demo",
+    "example-evp_record_demo",
     "example-hello",
     "example-keys",
     "example-margin",
@@ -128,6 +129,12 @@ target "example-embedded-font-demo" {
 target "example-evp_demo" {
   inherits = ["example-base"]
   args     = { EXAMPLE_NAME = "evp_demo" }
+  output   = ["type=local,dest=${EXTRACT_EXAMPLES_DEST}"]
+}
+
+target "example-evp_record_demo" {
+  inherits = ["example-base"]
+  args     = { EXAMPLE_NAME = "evp_record_demo" }
   output   = ["type=local,dest=${EXTRACT_EXAMPLES_DEST}"]
 }
 
