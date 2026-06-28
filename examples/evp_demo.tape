@@ -17,5 +17,5 @@ Sleep 500ms
 Type "evp examples/my_program_demo.tape --output my_program_demo.stats"
 Sleep 500ms
 Enter
-Wait+Screen /evp: evp finished/
+Wait+Screen "evp: evp finished"
 Sleep 1s

@@ -179,9 +179,11 @@ Env PS1 "$ "                        # Set environment variables for the shell pr
 Sleep 1s                            # Pause playback for a duration (e.g. 500ms, 1.5s, 2m)
 Hide                                # Hide subsequent commands from recording output
 Show                                # Resume recording commands to output files
-Screenshot frame.png                # Capture the current terminal window frame as a PNG, SVG, or JSON
+Screenshot frame.png                # Capture the current terminal window frame as a PNG, SVG, JSON, TXT, or ASCII
 Screenshot frame.svg
 Screenshot frame.json
+Screenshot frame.txt
+Screenshot frame.ascii
 
 # --- Clipboard Controls ---
 Copy "text to clipboard"            # Copy a string into the system clipboard
@@ -207,7 +209,7 @@ MouseDrag@EaseInOutQuad 0 0 10 10   # Left click and drag with EaseInOutQuad eas
 MouseScroll 10 20 Up                # Scroll mouse wheel Up or Down at column 10, row 20
 
 # --- Wait / Synchronization ---
-Wait /Ready/                        # Wait for output matching text pattern
+Wait "Ready"                        # Wait for output matching text pattern
 Wait /regex/                        # Wait for output matching regular expression
 Wait+Screen /regex/                 # Wait scanning full screen instead of only the last line
 Wait+Line /regex/                   # Explicitly wait scanning last line only (default)
