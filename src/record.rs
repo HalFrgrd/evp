@@ -183,6 +183,7 @@ fn draw_terminal_state(
     ratatui_term: &mut RatatuiTerminal<CrosstermBackend<std::io::Stdout>>,
     frame: &crate::recording::RawFrame,
     elapsed: Duration,
+    host_mouse_pos: Option<(u16, u16)>,
 ) -> Result<()> {
     ratatui_term.draw(|f| {
         let chunks = Layout::default()
@@ -201,12 +202,36 @@ fn draw_terminal_state(
         } else {
             Span::raw(" ")
         };
-        let info_text = Span::raw(format!(
-            " EVP recording active ({}s), exit the program to stop recording.",
-            elapsed.as_secs()
-        ));
+
+        let seconds_str = format!("{}s", elapsed.as_secs());
+        let prefix = format!(
+            " EVP recording active ({}). To stop recording, exit the program or ",
+            seconds_str
+        );
+        let start_col = 1 + prefix.chars().count();
+        let end_col = start_col + 10;
+
+        let is_hovered = if let Some((col, row)) = host_mouse_pos {
+            row == 0 && (col as usize) >= start_col && (col as usize) < end_col
+        } else {
+            false
+        };
+
+        let prefix_span = Span::raw(prefix);
+        let mut click_style = Style::default().add_modifier(Modifier::UNDERLINED);
+        if is_hovered {
+            click_style = click_style.add_modifier(Modifier::REVERSED);
+        }
+        let click_span = Span::styled("click here", click_style);
+        let suffix_span = Span::raw(".");
+
         f.render_widget(
-            Paragraph::new(Line::from(vec![blink_dot, info_text])),
+            Paragraph::new(Line::from(vec![
+                blink_dot,
+                prefix_span,
+                click_span,
+                suffix_span,
+            ])),
             chunks[0],
         );
 
@@ -477,7 +502,7 @@ pub fn record(
 
     // 2. Spawn PTY and child process shell
     info!(cols, rows, ?shell, "starting interactive recording");
-    let (pty, _child) = Pty::spawn(shell.as_deref(), &[], pty_size, false)
+    let (pty, mut child) = Pty::spawn(shell.as_deref(), &[], pty_size, false)
         .context("spawning PTY for record session")?;
 
     // 3. Initialize libghostty VT
@@ -581,6 +606,7 @@ pub fn record(
         let mut drag_start_row = 0u16;
         let mut current_mouse_pos: Option<(f32, f32, MouseState)> = None;
         let mut last_mouse_move_time = start_time;
+        let mut host_mouse_pos: Option<(u16, u16)> = None;
 
         let mut render_state = RenderState::new()?;
         let mut row_it = RowIterator::new()?;
@@ -662,15 +688,78 @@ pub fn record(
                                     }
                                 }
                                 crossterm::event::Event::Mouse(mouse_event) => {
+                                    host_mouse_pos = Some((mouse_event.column, mouse_event.row));
+
+                                    let seconds_str = format!("{}s", start_time.elapsed().as_secs());
+                                    let prefix = format!(
+                                        " EVP recording active ({}). To stop recording, exit the program or ",
+                                        seconds_str
+                                    );
+                                    let start_col = 1 + prefix.chars().count();
+                                    let end_col = start_col + 10;
+                                    let is_click_here = mouse_event.row == 0
+                                        && (mouse_event.column as usize) >= start_col
+                                        && (mouse_event.column as usize) < end_col;
+
+                                    if is_click_here {
+                                        if let crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) = mouse_event.kind {
+                                            if let crate::pty::Child::Active(pid) = child {
+                                                let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGHUP);
+                                                std::thread::sleep(std::time::Duration::from_millis(100));
+                                                let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGKILL);
+                                                let _ = nix::sys::wait::waitpid(pid, None);
+                                                child = crate::pty::Child::Reaped;
+                                            }
+                                            break;
+                                        }
+
+                                        // Redraw to update hover style instantly
+                                        let elapsed = start_time.elapsed();
+                                        if let Ok((mut frame, _)) = capture(
+                                            &mut render_state,
+                                            &mut row_it,
+                                            &mut cell_it,
+                                            &mut terminal,
+                                            elapsed,
+                                            cols,
+                                            rows,
+                                            true,
+                                            None,
+                                            None,
+                                        ) {
+                                            frame.mouse_cursor = current_mouse_pos;
+                                            let _ = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos);
+                                        }
+                                        continue;
+                                    }
+
+                                    // If we moved off "click here" to another part of the header/divider, redraw to clear hover
+                                    if mouse_event.row < 2 {
+                                        let elapsed = start_time.elapsed();
+                                        if let Ok((mut frame, _)) = capture(
+                                            &mut render_state,
+                                            &mut row_it,
+                                            &mut cell_it,
+                                            &mut terminal,
+                                            elapsed,
+                                            cols,
+                                            rows,
+                                            true,
+                                            None,
+                                            None,
+                                        ) {
+                                            frame.mouse_cursor = current_mouse_pos;
+                                            let _ = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos);
+                                        }
+                                        continue;
+                                    }
+
                                     if true {
                                         if let Some((action, button)) = map_crossterm_mouse(mouse_event.kind) {
                                             let col = mouse_event.column;
                                             let row = mouse_event.row;
 
                                             // Translate row coordinate: subtract 2 header rows
-                                            if row < 2 {
-                                                continue;
-                                            }
                                             let row = row - 2;
 
                                             if col >= cols || row >= rows {
@@ -881,7 +970,7 @@ pub fn record(
                         frame.mouse_cursor = current_mouse_pos;
 
                         // Update host screen via Ratatui
-                        let _ = draw_terminal_state(&mut ratatui_term, &frame, elapsed);
+                        let _ = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos);
 
                         // Send to background renderer
                         let _ = renderer_tx.try_send(frame);
@@ -1057,6 +1146,7 @@ pub fn record(
         .join()
         .context("awaiting background GIF renderer compilation")?;
 
+    let _ = child;
     info!(
         tape = %tape_path.display(),
         gif = %gif_path.display(),
