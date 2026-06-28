@@ -598,27 +598,7 @@ pub fn record(
                         // Feed output to libghostty VT parser
                         terminal.vt_write(&data);
 
-                        // Capture and redraw host terminal screen
-                        let elapsed = start_time.elapsed();
-                        if let Ok((mut frame, _)) = capture(
-                            &mut render_state,
-                            &mut row_it,
-                            &mut cell_it,
-                            &mut terminal,
-                            elapsed,
-                            cols,
-                            rows,
-                            true,
-                            None,
-                            None,
-                        ) {
-                            if Instant::now().duration_since(last_mouse_move_time) > Duration::from_secs(3) {
-                                current_mouse_pos = None;
-                            }
-                            // Inject mouse pointer into the frame so the GIF compiler renders it
-                            frame.mouse_cursor = current_mouse_pos;
-                            let _ = draw_terminal_state(&mut ratatui_term, &frame, elapsed);
-                        }
+
 
 
                     }
