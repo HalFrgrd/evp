@@ -69,7 +69,7 @@ After installing, you can:
   # Generate a reference script:
   evp print-ref-script > demo.tape
 
-  # Edit the tape file with your editor (e.g. vim demo.tape), then compile it:
+  # Edit the tape file with your editor (e.g. vim demo.tape), then get evp to create a gif from it:
   evp demo.tape
   ```
   If you already have a VHS script, you can run:
@@ -86,13 +86,14 @@ After installing, you can:
   # Customize the outputs, shell, theme, and geometry:
   evp record --output my_demo.tape --output demo.svg --shell zsh --theme "Catppuccin Mocha" --cols 100 --rows 40
   ```
-  When you are done, simply exit the subshell (e.g., type `exit` or press `Ctrl+D`). EVP will instantly write the formatted `.tape` script and compile the recording!
+  When you are done, simply exit the subshell (e.g., type `exit` or press `Ctrl+D`). EVP will write the formatted `.tape` script and the `.gif` of your session!
 
   ![EVP Record Demo](https://github.com/HalFrgrd/evp/releases/download/assets/evp_record_demo.gif)
 
----
 
-For automated rendering in workflows, pipelines, or containers, see [EVP in CI](EVP_in_ci.md).
+
+### Using evp in CI
+For automated rendering in workflows, pipelines, or containers, see [EVP in CI](evp_in_ci.md).
 
 
 

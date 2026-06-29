@@ -45,28 +45,28 @@ Sleep 500ms
 Enter
 Sleep 1.5s
 
-Type "# You can fine tune the recording by editing demo.tape and re-running it with 'evp demo.tape'"
+Type "# You can fine tune the recording by editing demo.tape and then run 'evp demo.tape'"
 Sleep 500ms
 Enter
 Sleep 1.5s
 
 # 3. Edit the tape file using vim
-Type "vim -c 'set syntax=elixir' demo.tape"
+Type "vim demo.tape"
 Sleep 500ms
 Enter
-Sleep 2s
-
-Type "/^Set FontSize"
 Sleep 1s
+
+Type@150ms "/^Set FontSize"
+Sleep 400ms
 Enter
-Sleep 1s
+Sleep 400ms
 
 Type "w"
-Sleep 1s
+Sleep 400ms
 Type "w"
-Sleep 1s
+Sleep 400ms
 Type "dw"
-Sleep 1s
+Sleep 400ms
 
 Type "i"
 Sleep 500ms
@@ -85,6 +85,7 @@ Type "evp demo.tape"
 Sleep 500ms
 Enter
 Wait+Screen /evp: evp finished/
+
 Sleep 1.5s
 
 # 5. Run ls -l demo* again
