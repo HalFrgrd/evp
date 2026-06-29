@@ -14,9 +14,9 @@ Set FontSize 20
 Set Framerate 30
 Set Shell {helper_bin} mouse
 Sleep 200ms
-Click 5 5
+Shift+Click 5 5
 Sleep 100ms
-RightClick 10 10
+Ctrl+RightClick 10 10
 Sleep 100ms
 MouseMove 1 1 3 1
 Sleep 100ms
@@ -42,26 +42,28 @@ Sleep 200ms
     // Expected Colors from Theme Constants (support both normal and bright variants):
     // Red (Left Click): normal [215, 78, 111], bright [254, 95, 134]
     let is_red = |bg: [u8; 3]| bg == [215, 78, 111] || bg == [254, 95, 134];
-    // Green (Right Click): normal [49, 187, 113], bright [0, 215, 135]
-    let is_green = |bg: [u8; 3]| bg == [49, 187, 113] || bg == [0, 215, 135];
+    // Yellow (Shift + Left Click): normal [211, 229, 97], bright [235, 255, 113]
+    let is_yellow = |bg: [u8; 3]| bg == [211, 229, 97] || bg == [235, 255, 113];
+    // Blue (Ctrl + Right Click): normal [128, 86, 255], bright [155, 121, 255]
+    let is_blue = |bg: [u8; 3]| bg == [128, 86, 255] || bg == [155, 121, 255];
     // Purple/Magenta (Drag): normal [237, 97, 215], bright [255, 122, 234]
     let is_purple = |bg: [u8; 3]| bg == [237, 97, 215] || bg == [255, 122, 234];
     // Light Blue (Move truecolor): [173, 216, 230]
     let expected_light_blue = [173, 216, 230];
 
-    // Assert Click at (5, 5) turns Red
+    // Assert Click at (5, 5) turns Yellow (Shift + Left Click)
     let cell_click = get_cell(5, 5);
     assert!(
-        is_red(cell_click.bg),
-        "expected cell (5,5) to be Red/Bright Red: {:?}",
+        is_yellow(cell_click.bg),
+        "expected cell (5,5) to be Yellow/Bright Yellow: {:?}",
         cell_click
     );
 
-    // Assert RightClick at (10, 10) turns Green
+    // Assert RightClick at (10, 10) turns Blue (Ctrl + Right Click)
     let cell_rclick = get_cell(10, 10);
     assert!(
-        is_green(cell_rclick.bg),
-        "expected cell (10,10) to be Green/Bright Green: {:?}",
+        is_blue(cell_rclick.bg),
+        "expected cell (10,10) to be Blue/Bright Blue: {:?}",
         cell_rclick
     );
 

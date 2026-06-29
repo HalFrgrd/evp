@@ -26,6 +26,27 @@ pub fn write_reference_header() -> String {
     header
 }
 
+fn format_mods_prefix(mods: ModSet) -> String {
+    let mut parts = Vec::new();
+    if mods.ctrl {
+        parts.push("Ctrl");
+    }
+    if mods.alt {
+        parts.push("Alt");
+    }
+    if mods.shift {
+        parts.push("Shift");
+    }
+    if mods.super_key {
+        parts.push("Super");
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("{}+", parts.join("+"))
+    }
+}
+
 /// Formats a list of recorded events and configurations into a complete, valid `.tape` script string.
 pub fn write_tape_script(
     events: &[Event],
@@ -129,22 +150,45 @@ pub fn write_tape_script(
                     }
                 }
             }
-            Event::Click { col, row, .. } => {
-                tape_content.push_str(&format!("Click {} {}\n", col, row));
+            Event::Click { col, row, mods, .. } => {
+                tape_content.push_str(&format!(
+                    "{}Click {} {}\n",
+                    format_mods_prefix(*mods),
+                    col,
+                    row
+                ));
             }
-            Event::RightClick { col, row, .. } => {
-                tape_content.push_str(&format!("RightClick {} {}\n", col, row));
+            Event::RightClick { col, row, mods, .. } => {
+                tape_content.push_str(&format!(
+                    "{}RightClick {} {}\n",
+                    format_mods_prefix(*mods),
+                    col,
+                    row
+                ));
+            }
+            Event::DoubleClick { col, row, mods, .. } => {
+                tape_content.push_str(&format!(
+                    "{}DoubleClick {} {}\n",
+                    format_mods_prefix(*mods),
+                    col,
+                    row
+                ));
             }
             Event::MouseDrag {
                 start_col,
                 start_row,
                 end_col,
                 end_row,
+                mods,
                 ..
             } => {
                 tape_content.push_str(&format!(
-                    "MouseDrag {} {} {} {}\n",
-                    start_col, start_row, end_col, end_row
+                    "{}MouseDrag {} {} {} {}\n",
+                    format_mods_prefix(*mods),
+                    start_col,
+                    start_row,
+                    end_col,
+                    end_row
                 ));
             }
             Event::MouseMove {
@@ -152,24 +196,36 @@ pub fn write_tape_script(
                 start_row,
                 end_col,
                 end_row,
+                mods,
                 ..
             } => {
                 tape_content.push_str(&format!(
-                    "MouseMove {} {} {} {}\n",
-                    start_col, start_row, end_col, end_row
+                    "{}MouseMove {} {} {} {}\n",
+                    format_mods_prefix(*mods),
+                    start_col,
+                    start_row,
+                    end_col,
+                    end_row
                 ));
             }
             Event::MouseScroll {
                 col,
                 row,
                 direction,
+                mods,
                 ..
             } => {
                 let dir_str = match direction {
                     crate::script::ScrollDirection::Up => "Up",
                     crate::script::ScrollDirection::Down => "Down",
                 };
-                tape_content.push_str(&format!("MouseScroll {} {} {}\n", col, row, dir_str));
+                tape_content.push_str(&format!(
+                    "{}MouseScroll {} {} {}\n",
+                    format_mods_prefix(*mods),
+                    col,
+                    row,
+                    dir_str
+                ));
             }
             _ => {}
         }

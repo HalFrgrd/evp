@@ -157,17 +157,33 @@ pub enum Event {
     /// Resume recording after a [`Event::Hide`].
     Show,
     /// Click at coordinates.
-    Click { col: u16, row: u16, delay: Duration },
+    Click {
+        col: u16,
+        row: u16,
+        mods: ModSet,
+        delay: Duration,
+    },
     /// Right click at coordinates.
-    RightClick { col: u16, row: u16, delay: Duration },
+    RightClick {
+        col: u16,
+        row: u16,
+        mods: ModSet,
+        delay: Duration,
+    },
     /// Double click at coordinates.
-    DoubleClick { col: u16, row: u16, delay: Duration },
+    DoubleClick {
+        col: u16,
+        row: u16,
+        mods: ModSet,
+        delay: Duration,
+    },
     /// Click and drag mouse.
     MouseDrag {
         start_col: u16,
         start_row: u16,
         end_col: u16,
         end_row: u16,
+        mods: ModSet,
         delay: Duration,
         easing: Option<StandardEasing>,
     },
@@ -177,6 +193,7 @@ pub enum Event {
         start_row: u16,
         end_col: u16,
         end_row: u16,
+        mods: ModSet,
         delay: Duration,
         easing: Option<StandardEasing>,
     },
@@ -185,6 +202,7 @@ pub enum Event {
         col: u16,
         row: u16,
         direction: ScrollDirection,
+        mods: ModSet,
         delay: Duration,
     },
     /// Low-level encoded mouse input sequence.
@@ -193,6 +211,7 @@ pub enum Event {
         button: Option<MouseButton>,
         col: u16,
         row: u16,
+        mods: ModSet,
     },
 }
 

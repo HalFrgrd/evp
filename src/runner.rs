@@ -714,7 +714,12 @@ fn build_timeline(
                     });
                 }
             }
-            Event::Click { col, row, delay } => {
+            Event::Click {
+                col,
+                row,
+                mods,
+                delay,
+            } => {
                 let per = scale(*delay);
                 mouse_segments.push(MouseSegment {
                     start_time: cursor,
@@ -733,6 +738,7 @@ fn build_timeline(
                         button: Some(crate::script::MouseButton::Left),
                         col: *col,
                         row: *row,
+                        mods: *mods,
                     },
                 });
                 cursor += per;
@@ -743,10 +749,16 @@ fn build_timeline(
                         button: Some(crate::script::MouseButton::Left),
                         col: *col,
                         row: *row,
+                        mods: *mods,
                     },
                 });
             }
-            Event::RightClick { col, row, delay } => {
+            Event::RightClick {
+                col,
+                row,
+                mods,
+                delay,
+            } => {
                 let per = scale(*delay);
                 mouse_segments.push(MouseSegment {
                     start_time: cursor,
@@ -765,6 +777,7 @@ fn build_timeline(
                         button: Some(crate::script::MouseButton::Right),
                         col: *col,
                         row: *row,
+                        mods: *mods,
                     },
                 });
                 cursor += per;
@@ -775,10 +788,16 @@ fn build_timeline(
                         button: Some(crate::script::MouseButton::Right),
                         col: *col,
                         row: *row,
+                        mods: *mods,
                     },
                 });
             }
-            Event::DoubleClick { col, row, delay } => {
+            Event::DoubleClick {
+                col,
+                row,
+                mods,
+                delay,
+            } => {
                 let per = scale(*delay);
                 mouse_segments.push(MouseSegment {
                     start_time: cursor,
@@ -808,6 +827,7 @@ fn build_timeline(
                             button: Some(crate::script::MouseButton::Left),
                             col: *col,
                             row: *row,
+                            mods: *mods,
                         },
                     });
                     cursor += per;
@@ -818,6 +838,7 @@ fn build_timeline(
                             button: Some(crate::script::MouseButton::Left),
                             col: *col,
                             row: *row,
+                            mods: *mods,
                         },
                     });
                     cursor += per;
@@ -827,6 +848,7 @@ fn build_timeline(
                 col,
                 row,
                 direction,
+                mods,
                 delay,
             } => {
                 let per = scale(*delay);
@@ -841,6 +863,7 @@ fn build_timeline(
                         button: Some(btn),
                         col: *col,
                         row: *row,
+                        mods: *mods,
                     },
                 });
                 cursor += per;
@@ -851,6 +874,7 @@ fn build_timeline(
                         button: Some(btn),
                         col: *col,
                         row: *row,
+                        mods: *mods,
                     },
                 });
             }
@@ -859,6 +883,7 @@ fn build_timeline(
                 start_row,
                 end_col,
                 end_row,
+                mods,
                 delay,
                 easing,
             } => {
@@ -878,6 +903,7 @@ fn build_timeline(
                             button: Some(crate::script::MouseButton::Left),
                             col: x0,
                             row: y0,
+                            mods: *mods,
                         },
                     });
 
@@ -911,6 +937,7 @@ fn build_timeline(
                                 button: Some(crate::script::MouseButton::Left),
                                 col: x,
                                 row: y,
+                                mods: *mods,
                             },
                         });
                     }
@@ -923,6 +950,7 @@ fn build_timeline(
                             button: Some(crate::script::MouseButton::Left),
                             col: x1,
                             row: y1,
+                            mods: *mods,
                         },
                     });
                 }
@@ -932,6 +960,7 @@ fn build_timeline(
                 start_row,
                 end_col,
                 end_row,
+                mods,
                 delay,
                 easing,
             } => {
@@ -951,6 +980,7 @@ fn build_timeline(
                             button: None,
                             col: x0,
                             row: y0,
+                            mods: *mods,
                         },
                     });
 
@@ -974,6 +1004,7 @@ fn build_timeline(
                                 button: None,
                                 col: x,
                                 row: y,
+                                mods: *mods,
                             },
                         });
                     }
@@ -1027,6 +1058,23 @@ fn generate_line_points(x0: i16, y0: i16, x1: i16, y1: i16) -> Vec<(u16, u16)> {
         }
     }
     points
+}
+
+fn map_mods_to_ghostty(mods: crate::script::ModSet) -> libghostty_vt::key::Mods {
+    let mut g_mods = libghostty_vt::key::Mods::empty();
+    if mods.shift {
+        g_mods |= libghostty_vt::key::Mods::SHIFT;
+    }
+    if mods.alt {
+        g_mods |= libghostty_vt::key::Mods::ALT;
+    }
+    if mods.ctrl {
+        g_mods |= libghostty_vt::key::Mods::CTRL;
+    }
+    if mods.super_key {
+        g_mods |= libghostty_vt::key::Mods::SUPER;
+    }
+    g_mods
 }
 
 // ---------------------------------------------------------------------------
@@ -1106,6 +1154,7 @@ fn execute_event(
             button,
             col,
             row,
+            mods,
         } => {
             let x = (*col as f32 * opts.cell_width_px as f32) + (opts.cell_width_px as f32 / 2.0);
             let y = (*row as f32 * opts.cell_height_px as f32) + (opts.cell_height_px as f32 / 2.0);
@@ -1147,6 +1196,7 @@ fn execute_event(
                 crate::script::MouseButton::WheelDown => libghostty_vt::mouse::Button::Five,
             }));
             mouse_event.set_position(pos);
+            mouse_event.set_mods(map_mods_to_ghostty(*mods));
 
             let mut buf = vec![0u8; 64];
             let len = encoder.encode(&mouse_event, &mut buf)?;

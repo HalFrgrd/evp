@@ -124,6 +124,15 @@ fn map_crossterm_key(event: crossterm::event::KeyEvent) -> (NamedKey, ModSet) {
     (key, mods)
 }
 
+fn map_crossterm_mods(modifiers: crossterm::event::KeyModifiers) -> ModSet {
+    ModSet {
+        ctrl: modifiers.contains(crossterm::event::KeyModifiers::CONTROL),
+        alt: modifiers.contains(crossterm::event::KeyModifiers::ALT),
+        shift: modifiers.contains(crossterm::event::KeyModifiers::SHIFT),
+        super_key: modifiers.contains(crossterm::event::KeyModifiers::SUPER),
+    }
+}
+
 fn map_crossterm_mouse(
     kind: crossterm::event::MouseEventKind,
 ) -> Option<(MouseAction, Option<MouseButton>)> {
@@ -391,13 +400,15 @@ fn is_collinear(ax: u16, ay: u16, bx: u16, by: u16, cx: u16, cy: u16) -> bool {
 struct MouseSegmentTracker {
     points: Vec<(u16, u16, Instant)>,
     is_drag: bool,
+    mods: ModSet,
 }
 
 impl MouseSegmentTracker {
-    fn new(is_drag: bool) -> Self {
+    fn new(is_drag: bool, mods: ModSet) -> Self {
         Self {
             points: Vec::new(),
             is_drag,
+            mods,
         }
     }
 
@@ -463,6 +474,7 @@ impl MouseSegmentTracker {
                 start_row: start.1,
                 end_col: end.0,
                 end_row: end.1,
+                mods: self.mods,
                 delay,
                 easing: None,
             })
@@ -472,6 +484,7 @@ impl MouseSegmentTracker {
                 start_row: start.1,
                 end_col: end.0,
                 end_row: end.1,
+                mods: self.mods,
                 delay,
                 easing: None,
             })
@@ -865,7 +878,8 @@ pub fn record(
                                                 }
 
                                                 if start_new {
-                                                    let mut tracker = MouseSegmentTracker::new(is_drag);
+                                                    let tracker_mods = map_crossterm_mods(mouse_event.modifiers);
+                                                    let mut tracker = MouseSegmentTracker::new(is_drag, tracker_mods);
                                                     // Initialize segment starting point at the previous mouse coords
                                                     tracker.points.push((current_mouse_col, current_mouse_row, last_event_time));
                                                     active_tracker = Some(tracker);
@@ -892,6 +906,8 @@ pub fn record(
                                                     recorded_events.push(Event::Sleep(current_idle));
                                                 }
 
+                                                let ev_mods = map_crossterm_mods(mouse_event.modifiers);
+
                                                 // Process instantaneous mouse event
                                                 match action {
                                                     MouseAction::Press => {
@@ -906,6 +922,7 @@ pub fn record(
                                                                 recorded_events.push(Event::Click {
                                                                     col,
                                                                     row,
+                                                                    mods: ev_mods,
                                                                     delay: Duration::from_millis(50),
                                                                 });
                                                             } else {
@@ -914,6 +931,7 @@ pub fn record(
                                                                     start_row: drag_start_row,
                                                                     end_col: col,
                                                                     end_row: row,
+                                                                    mods: ev_mods,
                                                                     delay: Duration::from_millis(50),
                                                                     easing: None,
                                                                 });
@@ -922,6 +940,7 @@ pub fn record(
                                                             recorded_events.push(Event::RightClick {
                                                                 col,
                                                                 row,
+                                                                mods: ev_mods,
                                                                 delay: Duration::from_millis(50),
                                                             });
                                                         } else if button == Some(MouseButton::WheelUp) {
@@ -929,6 +948,7 @@ pub fn record(
                                                                 col,
                                                                 row,
                                                                 direction: crate::script::ScrollDirection::Up,
+                                                                mods: ev_mods,
                                                                 delay: Duration::from_millis(50),
                                                             });
                                                         } else if button == Some(MouseButton::WheelDown) {
@@ -936,6 +956,7 @@ pub fn record(
                                                                 col,
                                                                 row,
                                                                 direction: crate::script::ScrollDirection::Down,
+                                                                mods: ev_mods,
                                                                 delay: Duration::from_millis(50),
                                                             });
                                                         }

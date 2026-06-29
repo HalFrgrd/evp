@@ -201,12 +201,13 @@ Release Down                        # Explicitly release a held key
 
 # --- Mouse Controls ---
 Click 10 20                         # Left click at column 10, row 20
-RightClick 10 20                    # Right click at column 10, row 20
+Shift+Click 10 20                   # Shift + Left click at column 10, row 20
+Ctrl+RightClick 10 20               # Ctrl + Right click at column 10, row 20
 DoubleClick 10 20                   # Double click at column 10, row 20
 MouseMove@100ms 0 0 10 10           # Move cursor from (0,0) to (10,10) using default sigmoid (EaseInOutCubic) easing
 MouseMove@100ms@EaseInOutElastic 0 0 10 10 # Move cursor with EaseInOutElastic easing curve override
-MouseDrag@EaseInOutQuad 0 0 10 10   # Left click and drag with EaseInOutQuad easing curve
-MouseScroll 10 20 Up                # Scroll mouse wheel Up or Down at column 10, row 20
+Shift+Ctrl+MouseDrag@EaseInOutQuad 0 0 10 10 # Left click and drag with EaseInOutQuad holding Shift+Ctrl
+Ctrl+MouseScroll 10 20 Up           # Scroll mouse wheel Up at column 10, row 20 holding Ctrl
 
 # --- Wait / Synchronization ---
 Wait /regex/                        # Wait for output matching regular expression

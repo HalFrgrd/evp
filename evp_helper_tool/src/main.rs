@@ -80,7 +80,7 @@ fn run_key_mode() -> std::io::Result<()> {
 fn run_mouse_mode() -> std::io::Result<()> {
     use crossterm::{
         QueueableCommand,
-        event::{MouseButton, MouseEventKind},
+        event::MouseEventKind,
         style::{self, Color},
         terminal::{EnterAlternateScreen, LeaveAlternateScreen},
     };
@@ -161,8 +161,20 @@ fn run_mouse_mode() -> std::io::Result<()> {
                 let row = mouse_event.row;
                 if col < cols && row < rows {
                     let new_color = match mouse_event.kind {
-                        MouseEventKind::Down(MouseButton::Left) => Some(Color::Red),
-                        MouseEventKind::Down(MouseButton::Right) => Some(Color::Green),
+                        MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                            if mouse_event.modifiers.contains(crossterm::event::KeyModifiers::SHIFT) {
+                                Some(Color::Yellow)
+                            } else {
+                                Some(Color::Red)
+                            }
+                        }
+                        MouseEventKind::Down(crossterm::event::MouseButton::Right) => {
+                            if mouse_event.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) {
+                                Some(Color::Blue)
+                            } else {
+                                Some(Color::Green)
+                            }
+                        }
                         MouseEventKind::Drag(_) => Some(Color::Magenta),
                         MouseEventKind::Moved => Some(Color::Rgb {
                             r: 173,

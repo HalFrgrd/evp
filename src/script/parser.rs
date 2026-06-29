@@ -152,8 +152,11 @@ fn parse_line(
     if tokens.is_empty() {
         return Ok(());
     }
-    let head = tokens[0].as_str();
+    let orig_head = tokens[0].as_str();
     let rest = &tokens[1..];
+
+    let (head_str, mouse_mods) = parse_cmd_prefix(orig_head);
+    let head = head_str.as_str();
 
     let (cmd_part, timeout_override) = if head.starts_with("Wait") {
         match head.split_once('@') {
@@ -317,17 +320,32 @@ fn parse_line(
         h if h == "Click" || h.starts_with("Click@") => {
             let delay = parse_at_duration(h, "Click", script.settings.typing_speed)?;
             let (col, row) = parse_coords(rest)?;
-            script.events.push(Event::Click { col, row, delay });
+            script.events.push(Event::Click {
+                col,
+                row,
+                mods: mouse_mods,
+                delay,
+            });
         }
         h if h == "RightClick" || h.starts_with("RightClick@") => {
             let delay = parse_at_duration(h, "RightClick", script.settings.typing_speed)?;
             let (col, row) = parse_coords(rest)?;
-            script.events.push(Event::RightClick { col, row, delay });
+            script.events.push(Event::RightClick {
+                col,
+                row,
+                mods: mouse_mods,
+                delay,
+            });
         }
         h if h == "DoubleClick" || h.starts_with("DoubleClick@") => {
             let delay = parse_at_duration(h, "DoubleClick", script.settings.typing_speed)?;
             let (col, row) = parse_coords(rest)?;
-            script.events.push(Event::DoubleClick { col, row, delay });
+            script.events.push(Event::DoubleClick {
+                col,
+                row,
+                mods: mouse_mods,
+                delay,
+            });
         }
         h if h == "MouseDrag" || h.starts_with("MouseDrag@") => {
             let (delay, easing) = parse_mouse_config(h, "MouseDrag", script.settings.typing_speed)?;
@@ -337,6 +355,7 @@ fn parse_line(
                 start_row,
                 end_col,
                 end_row,
+                mods: mouse_mods,
                 delay,
                 easing,
             });
@@ -349,6 +368,7 @@ fn parse_line(
                 start_row,
                 end_col,
                 end_row,
+                mods: mouse_mods,
                 delay,
                 easing,
             });
@@ -360,6 +380,7 @@ fn parse_line(
                 col,
                 row,
                 direction,
+                mods: mouse_mods,
                 delay,
             });
         }
@@ -368,6 +389,43 @@ fn parse_line(
         _ => script.events.push(parse_key_event(head, rest)?),
     }
     Ok(())
+}
+
+fn parse_cmd_prefix(head: &str) -> (String, ModSet) {
+    if !head.contains('+') {
+        return (head.to_string(), ModSet::default());
+    }
+    let parts: Vec<&str> = head.split('+').collect();
+    let cmd_candidate = parts.last().unwrap().to_string();
+
+    let is_mouse_cmd = cmd_candidate == "Click"
+        || cmd_candidate.starts_with("Click@")
+        || cmd_candidate == "RightClick"
+        || cmd_candidate.starts_with("RightClick@")
+        || cmd_candidate == "DoubleClick"
+        || cmd_candidate.starts_with("DoubleClick@")
+        || cmd_candidate == "MouseDrag"
+        || cmd_candidate.starts_with("MouseDrag@")
+        || cmd_candidate == "MouseMove"
+        || cmd_candidate.starts_with("MouseMove@")
+        || cmd_candidate == "MouseScroll"
+        || cmd_candidate.starts_with("MouseScroll@");
+
+    if !is_mouse_cmd {
+        return (head.to_string(), ModSet::default());
+    }
+
+    let mut mods = ModSet::default();
+    for modifier in &parts[..parts.len() - 1] {
+        match modifier.to_ascii_lowercase().as_str() {
+            "shift" => mods.shift = true,
+            "ctrl" | "control" => mods.ctrl = true,
+            "alt" | "meta" => mods.alt = true,
+            "super" | "windows" | "cmd" | "command" => mods.super_key = true,
+            _ => {}
+        }
+    }
+    (cmd_candidate, mods)
 }
 
 fn parse_coords(rest: &[String]) -> Result<(u16, u16)> {
@@ -1281,41 +1339,56 @@ mod tests {
             MouseMove 30 30 40 40
             MouseScroll 50 60 Up
             MouseScroll@50ms 70 80 Down
+            Shift+Click 11 22
+            Ctrl+Alt+MouseDrag 10 20 30 40
+            Super+MouseScroll 12 34 Down
         "#;
         let s = parse(src).unwrap();
-        assert_eq!(s.events.len(), 8);
+        assert_eq!(s.events.len(), 11);
 
         assert!(matches!(
             &s.events[0],
-            Event::Click { col: 10, row: 20, delay } if *delay == Duration::from_millis(50)
+            Event::Click { col: 10, row: 20, mods, delay } if *delay == Duration::from_millis(50) && *mods == ModSet::default()
         ));
         assert!(matches!(
             &s.events[1],
-            Event::Click { col: 30, row: 40, delay } if *delay == Duration::from_millis(100)
+            Event::Click { col: 30, row: 40, mods, delay } if *delay == Duration::from_millis(100) && *mods == ModSet::default()
         ));
         assert!(matches!(
             &s.events[2],
-            Event::RightClick { col: 15, row: 25, delay } if *delay == Duration::from_millis(50)
+            Event::RightClick { col: 15, row: 25, mods, delay } if *delay == Duration::from_millis(50) && *mods == ModSet::default()
         ));
         assert!(matches!(
             &s.events[3],
-            Event::DoubleClick { col: 5, row: 5, delay } if *delay == Duration::from_millis(50)
+            Event::DoubleClick { col: 5, row: 5, mods, delay } if *delay == Duration::from_millis(50) && *mods == ModSet::default()
         ));
         assert!(matches!(
             &s.events[4],
-            Event::MouseDrag { start_col: 10, start_row: 10, end_col: 20, end_row: 20, delay, easing: None } if *delay == Duration::from_millis(50)
+            Event::MouseDrag { start_col: 10, start_row: 10, end_col: 20, end_row: 20, mods, delay, easing: None } if *delay == Duration::from_millis(50) && *mods == ModSet::default()
         ));
         assert!(matches!(
             &s.events[5],
-            Event::MouseMove { start_col: 30, start_row: 30, end_col: 40, end_row: 40, delay, easing: None } if *delay == Duration::from_millis(50)
+            Event::MouseMove { start_col: 30, start_row: 30, end_col: 40, end_row: 40, mods, delay, easing: None } if *delay == Duration::from_millis(50) && *mods == ModSet::default()
         ));
         assert!(matches!(
             &s.events[6],
-            Event::MouseScroll { col: 50, row: 60, direction: ScrollDirection::Up, delay } if *delay == Duration::from_millis(50)
+            Event::MouseScroll { col: 50, row: 60, direction: ScrollDirection::Up, mods, delay } if *delay == Duration::from_millis(50) && *mods == ModSet::default()
         ));
         assert!(matches!(
             &s.events[7],
-            Event::MouseScroll { col: 70, row: 80, direction: ScrollDirection::Down, delay } if *delay == Duration::from_millis(50)
+            Event::MouseScroll { col: 70, row: 80, direction: ScrollDirection::Down, mods, delay } if *delay == Duration::from_millis(50) && *mods == ModSet::default()
+        ));
+        assert!(matches!(
+            &s.events[8],
+            Event::Click { col: 11, row: 22, mods, delay } if *delay == Duration::from_millis(50) && mods.shift && !mods.ctrl && !mods.alt
+        ));
+        assert!(matches!(
+            &s.events[9],
+            Event::MouseDrag { start_col: 10, start_row: 20, end_col: 30, end_row: 40, mods, .. } if mods.ctrl && mods.alt && !mods.shift
+        ));
+        assert!(matches!(
+            &s.events[10],
+            Event::MouseScroll { col: 12, row: 34, direction: ScrollDirection::Down, mods, .. } if mods.super_key && !mods.ctrl
         ));
 
         // Test explicit custom easings
@@ -1328,11 +1401,11 @@ mod tests {
         assert_eq!(s_easing.events.len(), 2);
         assert!(matches!(
             &s_easing.events[0],
-            Event::MouseMove { start_col: 10, start_row: 10, end_col: 20, end_row: 20, delay, easing: Some(StandardEasing::InOutElastic) } if *delay == Duration::from_millis(100)
+            Event::MouseMove { start_col: 10, start_row: 10, end_col: 20, end_row: 20, delay, easing: Some(StandardEasing::InOutElastic), .. } if *delay == Duration::from_millis(100)
         ));
         assert!(matches!(
             &s_easing.events[1],
-            Event::MouseDrag { start_col: 30, start_row: 30, end_col: 40, end_row: 40, delay, easing: Some(StandardEasing::InOutQuadradic) } if *delay == Duration::from_millis(50)
+            Event::MouseDrag { start_col: 30, start_row: 30, end_col: 40, end_row: 40, delay, easing: Some(StandardEasing::InOutQuadradic), .. } if *delay == Duration::from_millis(50)
         ));
     }
 
@@ -1366,11 +1439,19 @@ mod tests {
             Event::Click {
                 col: 12,
                 row: 34,
+                mods: ModSet {
+                    ctrl: true,
+                    ..ModSet::default()
+                },
                 delay: Duration::from_millis(50),
             },
             Event::RightClick {
                 col: 56,
                 row: 78,
+                mods: ModSet {
+                    shift: true,
+                    ..ModSet::default()
+                },
                 delay: Duration::from_millis(50),
             },
             Event::MouseDrag {
@@ -1378,6 +1459,7 @@ mod tests {
                 start_row: 2,
                 end_col: 3,
                 end_row: 4,
+                mods: ModSet::default(),
                 delay: Duration::from_millis(50),
                 easing: None,
             },
@@ -1386,6 +1468,10 @@ mod tests {
                 start_row: 6,
                 end_col: 7,
                 end_row: 8,
+                mods: ModSet {
+                    alt: true,
+                    ..ModSet::default()
+                },
                 delay: Duration::from_millis(50),
                 easing: None,
             },
@@ -1393,6 +1479,11 @@ mod tests {
                 col: 9,
                 row: 10,
                 direction: ScrollDirection::Up,
+                mods: ModSet {
+                    ctrl: true,
+                    shift: true,
+                    ..ModSet::default()
+                },
                 delay: Duration::from_millis(50),
             },
         ];
@@ -1417,11 +1508,11 @@ mod tests {
         assert!(serialized.contains("Type@100ms \"echo \\\"hello\\\"\""));
         assert!(serialized.contains("Sleep 500ms"));
         assert!(serialized.contains("Ctrl+C"));
-        assert!(serialized.contains("Click 12 34"));
-        assert!(serialized.contains("RightClick 56 78"));
+        assert!(serialized.contains("Ctrl+Click 12 34"));
+        assert!(serialized.contains("Shift+RightClick 56 78"));
         assert!(serialized.contains("MouseDrag 1 2 3 4"));
-        assert!(serialized.contains("MouseMove 5 6 7 8"));
-        assert!(serialized.contains("MouseScroll 9 10 Up"));
+        assert!(serialized.contains("Alt+MouseMove 5 6 7 8"));
+        assert!(serialized.contains("Ctrl+Shift+MouseScroll 9 10 Up"));
 
         // Round-trip parse check!
         let parsed = parse(&serialized).unwrap();
@@ -1450,11 +1541,11 @@ mod tests {
         ));
         assert!(matches!(
             &parsed.events[3],
-            Event::Click { col: 12, row: 34, delay } if *delay == Duration::from_millis(50)
+            Event::Click { col: 12, row: 34, mods, delay } if *delay == Duration::from_millis(50) && mods.ctrl && !mods.shift
         ));
         assert!(matches!(
             &parsed.events[4],
-            Event::RightClick { col: 56, row: 78, delay } if *delay == Duration::from_millis(50)
+            Event::RightClick { col: 56, row: 78, mods, delay } if *delay == Duration::from_millis(50) && mods.shift && !mods.ctrl
         ));
         assert!(matches!(
             &parsed.events[5],
@@ -1463,8 +1554,9 @@ mod tests {
                 start_row: 2,
                 end_col: 3,
                 end_row: 4,
+                mods,
                 ..
-            }
+            } if *mods == ModSet::default()
         ));
         assert!(matches!(
             &parsed.events[6],
@@ -1473,12 +1565,13 @@ mod tests {
                 start_row: 6,
                 end_col: 7,
                 end_row: 8,
+                mods,
                 ..
-            }
+            } if mods.alt && !mods.ctrl
         ));
         assert!(matches!(
             &parsed.events[7],
-            Event::MouseScroll { col: 9, row: 10, direction: ScrollDirection::Up, delay } if *delay == Duration::from_millis(50)
+            Event::MouseScroll { col: 9, row: 10, direction: ScrollDirection::Up, mods, delay } if *delay == Duration::from_millis(50) && mods.ctrl && mods.shift
         ));
     }
 }
