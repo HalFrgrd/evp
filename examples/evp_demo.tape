@@ -4,27 +4,33 @@
 Output evp_demo.gif
 
 Set Shell bash --norc
-Set Width 1200
+Set Width 1500
 Set Height 600
 Set FontSize 18
-Set TypingSpeed 40ms
+Set TypingSpeed 60ms
 Set Framerate 30
-Set WaitTimeout 120s
+Set WaitTimeout 60s
 
+Hide
 Sleep 500ms
 # Clear any old demo files to ensure clean outputs
-Type "rm -f demo.tape demo.gif"
+Type " rm -f demo.tape demo.gif && clear"
 Enter
 Sleep 300ms
+Show
 
 # 1. Run evp record
-Type "evp record --rows 12 --cols 80"
+Type "evp record --theme Snazzy"
 Sleep 500ms
 Enter
 Sleep 1.5s
 
 # Inside evp record subshell
 Type "echo 'Welcome to EVP interactive recording!'"
+Sleep 500ms
+Enter
+Sleep 1s
+Type "# While recording, your inputs are saved to demo.tape and this inner screen is saved to demo.gif"
 Sleep 500ms
 Enter
 Sleep 1s
@@ -39,18 +45,36 @@ Sleep 500ms
 Enter
 Sleep 1.5s
 
-# 3. Edit the tape file using vim
-Type "vim demo.tape"
+Type "# You can fine tune the recording by editing demo.tape and re-running it with 'evp demo.tape'"
 Sleep 500ms
 Enter
 Sleep 1.5s
-Type "i"
-Sleep 200ms
-Type "# Edited using Vim!"
+
+# 3. Edit the tape file using vim
+Type "vim -c 'set syntax=elixir' demo.tape"
 Sleep 500ms
 Enter
-Escape
+Sleep 2s
+
+Type "/^Set FontSize"
+Sleep 1s
+Enter
+Sleep 1s
+
+Type "w"
+Sleep 1s
+Type "w"
+Sleep 1s
+Type "dw"
+Sleep 1s
+
+Type "i"
 Sleep 500ms
+Type " 24"
+Sleep 500ms
+Escape
+Sleep 1s
+
 Type ":wq"
 Sleep 500ms
 Enter

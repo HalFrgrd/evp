@@ -5,6 +5,7 @@ FROM ubuntu:26.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
+        vim \
         && rm -rf /var/lib/apt/lists/*
 
 # Copy the evp binary and evp_helper_tool from the evp-binary build context
