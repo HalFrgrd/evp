@@ -352,7 +352,10 @@ fn run_gif_stream_worker(
                 }
             }
         }
-        let buf = rasterize_raw_frame(&frame, &font_set, scale, baseline, cfg, &mut glyph_cache);
+        let buf = {
+            let _t = crate::telemetry::ScopeTimer::new("gif_rasterize_raw_frame");
+            rasterize_raw_frame(&frame, &font_set, scale, baseline, cfg, &mut glyph_cache)
+        };
 
         last_seen_t_ms = frame.t_ms;
 
@@ -360,11 +363,17 @@ fn run_gif_stream_worker(
             // gifski expects absolute presentation timestamps and the first
             // frame at t=0. Emit the very first captured frame unconditionally
             // so leading sleeps are represented correctly.
-            let rgba = rgb_to_rgba(&buf);
+            let rgba = {
+                let _t = crate::telemetry::ScopeTimer::new("gif_rgb_to_rgba");
+                rgb_to_rgba(&buf)
+            };
             let frame_img = imgref::ImgVec::new(rgba, cfg.canvas_w as usize, cfg.canvas_h as usize);
-            collector
-                .add_frame_rgba(frame_index, frame_img, 0.0)
-                .context("add first frame to gifski")?;
+            {
+                let _t = crate::telemetry::ScopeTimer::new("gifski_add_frame");
+                collector
+                    .add_frame_rgba(frame_index, frame_img, 0.0)
+                    .context("add first frame to gifski")?;
+            }
             frame_index += 1;
             last_emitted_t_ms = frame.t_ms;
             prev_buf = Some(buf);
@@ -375,11 +384,17 @@ fn run_gif_stream_worker(
             continue;
         }
 
-        let rgba = rgb_to_rgba(&buf);
+        let rgba = {
+            let _t = crate::telemetry::ScopeTimer::new("gif_rgb_to_rgba");
+            rgb_to_rgba(&buf)
+        };
         let frame_img = imgref::ImgVec::new(rgba, cfg.canvas_w as usize, cfg.canvas_h as usize);
-        collector
-            .add_frame_rgba(frame_index, frame_img, frame.t_ms as f64 / 1000.0)
-            .context("add frame to gifski")?;
+        {
+            let _t = crate::telemetry::ScopeTimer::new("gifski_add_frame");
+            collector
+                .add_frame_rgba(frame_index, frame_img, frame.t_ms as f64 / 1000.0)
+                .context("add frame to gifski")?;
+        }
 
         frame_index += 1;
         last_emitted_t_ms = frame.t_ms;
@@ -392,11 +407,17 @@ fn run_gif_stream_worker(
     if last_seen_t_ms > last_emitted_t_ms
         && let Some(buf) = prev_buf.as_ref()
     {
-        let rgba = rgb_to_rgba(buf);
+        let rgba = {
+            let _t = crate::telemetry::ScopeTimer::new("gif_rgb_to_rgba");
+            rgb_to_rgba(buf)
+        };
         let frame_img = imgref::ImgVec::new(rgba, cfg.canvas_w as usize, cfg.canvas_h as usize);
-        collector
-            .add_frame_rgba(frame_index, frame_img, last_seen_t_ms as f64 / 1000.0)
-            .context("add trailing delay frame to gifski")?;
+        {
+            let _t = crate::telemetry::ScopeTimer::new("gifski_add_frame");
+            collector
+                .add_frame_rgba(frame_index, frame_img, last_seen_t_ms as f64 / 1000.0)
+                .context("add trailing delay frame to gifski")?;
+        }
     }
 
     drop(collector);
@@ -468,134 +489,137 @@ fn rasterize_raw_frame(
         }
     }
 
-    for row in 0..frame.rows {
-        for col in 0..frame.cols {
-            let idx = row as usize * frame.cols as usize + col as usize;
-            let cell = &frame.cells[idx];
-            let x = cfg.content_x + col as u32 * cell_w;
-            let y = cfg.content_y + row as u32 * cell_h;
+    {
+        let _t = crate::telemetry::ScopeTimer::new("gif_rasterize_cells_loop");
+        for row in 0..frame.rows {
+            for col in 0..frame.cols {
+                let idx = row as usize * frame.cols as usize + col as usize;
+                let cell = &frame.cells[idx];
+                let x = cfg.content_x + col as u32 * cell_w;
+                let y = cfg.content_y + row as u32 * cell_h;
 
-            let (mut fg, mut bg) = (cell.fg, cell.bg);
-            if cell.flags & style_flags::INVERSE != 0 {
-                std::mem::swap(&mut fg, &mut bg);
-            }
-            // SGR 2 dim: blend fg 50% toward bg (equivalent to opacity 0.5).
-            if cell.flags & style_flags::DIM != 0 {
-                fg = dim_color(fg, bg);
-            }
+                let (mut fg, mut bg) = (cell.fg, cell.bg);
+                if cell.flags & style_flags::INVERSE != 0 {
+                    std::mem::swap(&mut fg, &mut bg);
+                }
+                // SGR 2 dim: blend fg 50% toward bg (equivalent to opacity 0.5).
+                if cell.flags & style_flags::DIM != 0 {
+                    fg = dim_color(fg, bg);
+                }
 
-            let is_cursor = frame.cursor == Some((col, row));
-            if is_cursor {
-                bg = frame.cursor_color.unwrap_or(frame.default_fg);
-                fg = frame.cursor_accent.unwrap_or(frame.default_bg);
-            }
+                let is_cursor = frame.cursor == Some((col, row));
+                if is_cursor {
+                    bg = frame.cursor_color.unwrap_or(frame.default_fg);
+                    fg = frame.cursor_accent.unwrap_or(frame.default_bg);
+                }
 
-            if bg != frame.default_bg || cell.flags & style_flags::INVERSE != 0 || is_cursor {
-                fill_rect(&mut buf, cfg.canvas_w, x, y, cell_w, cell_h, bg);
-            }
+                if bg != frame.default_bg || cell.flags & style_flags::INVERSE != 0 || is_cursor {
+                    fill_rect(&mut buf, cfg.canvas_w, x, y, cell_w, cell_h, bg);
+                }
 
-            if cell.text.is_empty() {
-                continue;
-            }
+                if cell.text.is_empty() {
+                    continue;
+                }
 
-            let mut pen_x = x as f32;
-            let pen_y_baseline = y as i32 + baseline as i32;
-            for ch in cell.text.chars() {
-                let (font_idx, font) = font_set.select_for_char(cell.flags, ch);
-                let glyph_id: GlyphId = font.glyph_id(ch);
+                let mut pen_x = x as f32;
+                let pen_y_baseline = y as i32 + baseline as i32;
+                for ch in cell.text.chars() {
+                    let (font_idx, font) = font_set.select_for_char(cell.flags, ch);
+                    let glyph_id: GlyphId = font.glyph_id(ch);
 
-                // Populate the cache on first encounter of this
-                // (font, glyph, scale) combination.
-                //
-                // font_idx is the index into FontSet::fonts; the total
-                // number of faces is small (< 10 for the default set) so
-                // u16 is always sufficient.
-                debug_assert!(
-                    font_idx <= u16::MAX as usize,
-                    "font_idx {font_idx} exceeds u16 range"
-                );
-                let mut glyph_scale = scale;
-                let mut char_baseline = pen_y_baseline;
+                    // Populate the cache on first encounter of this
+                    // (font, glyph, scale) combination.
+                    //
+                    // font_idx is the index into FontSet::fonts; the total
+                    // number of faces is small (< 10 for the default set) so
+                    // u16 is always sufficient.
+                    debug_assert!(
+                        font_idx <= u16::MAX as usize,
+                        "font_idx {font_idx} exceeds u16 range"
+                    );
+                    let mut glyph_scale = scale;
+                    let mut char_baseline = pen_y_baseline;
 
-                if is_box_drawing(ch) {
+                    if is_box_drawing(ch) {
+                        let scaled = font.as_scaled(scale);
+                        let advance = scaled.h_advance(glyph_id);
+                        let bbox_w = cell_w as f32;
+                        let bbox_h = cell_h as f32;
+
+                        let glyph_w = advance.max(1.0);
+                        let glyph_h = (scaled.ascent() - scaled.descent()).max(1.0);
+
+                        // We want the box drawing character to exactly fill the cell width and height,
+                        // so we stretch it accordingly.
+                        glyph_scale.x = scale.x * (bbox_w / glyph_w);
+                        glyph_scale.y = scale.y * (bbox_h / glyph_h);
+
+                        let stretched_scaled = font.as_scaled(glyph_scale);
+                        char_baseline = (y as f32 + stretched_scaled.ascent()).round() as i32;
+                    }
+
+                    let cache_key = GlyphCacheKey {
+                        font_idx: font_idx as u16,
+                        glyph_id: glyph_id.0,
+                        scale_bits_x: glyph_scale.x.to_bits(),
+                        scale_bits_y: glyph_scale.y.to_bits(),
+                    };
+                    let bitmap = glyph_cache.entry(cache_key).or_insert_with(|| {
+                        let glyph: Glyph = glyph_id.with_scale(glyph_scale);
+                        font.outline_glyph(glyph).map(|outline| {
+                            let bounds = outline.px_bounds();
+                            let w = (bounds.max.x - bounds.min.x).ceil() as u32;
+                            let h = (bounds.max.y - bounds.min.y).ceil() as u32;
+                            let mut pixels = vec![0.0f32; (w * h) as usize];
+                            outline.draw(|gx, gy, coverage| {
+                                let i = (gy * w + gx) as usize;
+                                if i < pixels.len() {
+                                    pixels[i] = coverage;
+                                }
+                            });
+                            GlyphBitmap {
+                                offset_x: bounds.min.x as i32,
+                                offset_y: bounds.min.y as i32,
+                                width: w,
+                                height: h,
+                                pixels,
+                            }
+                        })
+                    });
+
+                    if let Some(bm) = bitmap.as_ref() {
+                        let mut draw_pen_x = pen_x;
+                        if !is_box_drawing(ch) {
+                            draw_pen_x += (cfg.letter_spacing / 2.0).floor();
+                        }
+                        for gy in 0..bm.height {
+                            for gx in 0..bm.width {
+                                let coverage = bm.pixels[(gy * bm.width + gx) as usize];
+                                if coverage <= 0.0 {
+                                    continue;
+                                }
+                                let px = draw_pen_x as i32 + bm.offset_x + gx as i32;
+                                let py = char_baseline + bm.offset_y + gy as i32;
+                                if px < 0 || py < 0 {
+                                    continue;
+                                }
+                                let (px, py) = (px as u32, py as u32);
+                                if px >= cfg.canvas_w || py >= cfg.canvas_h {
+                                    continue;
+                                }
+                                blend_pixel(&mut buf, cfg.canvas_w, px, py, fg, coverage);
+                            }
+                        }
+                    }
+
                     let scaled = font.as_scaled(scale);
-                    let advance = scaled.h_advance(glyph_id);
-                    let bbox_w = cell_w as f32;
-                    let bbox_h = cell_h as f32;
-
-                    let glyph_w = advance.max(1.0);
-                    let glyph_h = (scaled.ascent() - scaled.descent()).max(1.0);
-
-                    // We want the box drawing character to exactly fill the cell width and height,
-                    // so we stretch it accordingly.
-                    glyph_scale.x = scale.x * (bbox_w / glyph_w);
-                    glyph_scale.y = scale.y * (bbox_h / glyph_h);
-
-                    let stretched_scaled = font.as_scaled(glyph_scale);
-                    char_baseline = (y as f32 + stretched_scaled.ascent()).round() as i32;
+                    pen_x += scaled.h_advance(glyph_id);
                 }
 
-                let cache_key = GlyphCacheKey {
-                    font_idx: font_idx as u16,
-                    glyph_id: glyph_id.0,
-                    scale_bits_x: glyph_scale.x.to_bits(),
-                    scale_bits_y: glyph_scale.y.to_bits(),
-                };
-                let bitmap = glyph_cache.entry(cache_key).or_insert_with(|| {
-                    let glyph: Glyph = glyph_id.with_scale(glyph_scale);
-                    font.outline_glyph(glyph).map(|outline| {
-                        let bounds = outline.px_bounds();
-                        let w = (bounds.max.x - bounds.min.x).ceil() as u32;
-                        let h = (bounds.max.y - bounds.min.y).ceil() as u32;
-                        let mut pixels = vec![0.0f32; (w * h) as usize];
-                        outline.draw(|gx, gy, coverage| {
-                            let i = (gy * w + gx) as usize;
-                            if i < pixels.len() {
-                                pixels[i] = coverage;
-                            }
-                        });
-                        GlyphBitmap {
-                            offset_x: bounds.min.x as i32,
-                            offset_y: bounds.min.y as i32,
-                            width: w,
-                            height: h,
-                            pixels,
-                        }
-                    })
-                });
-
-                if let Some(bm) = bitmap.as_ref() {
-                    let mut draw_pen_x = pen_x;
-                    if !is_box_drawing(ch) {
-                        draw_pen_x += (cfg.letter_spacing / 2.0).floor();
-                    }
-                    for gy in 0..bm.height {
-                        for gx in 0..bm.width {
-                            let coverage = bm.pixels[(gy * bm.width + gx) as usize];
-                            if coverage <= 0.0 {
-                                continue;
-                            }
-                            let px = draw_pen_x as i32 + bm.offset_x + gx as i32;
-                            let py = char_baseline + bm.offset_y + gy as i32;
-                            if px < 0 || py < 0 {
-                                continue;
-                            }
-                            let (px, py) = (px as u32, py as u32);
-                            if px >= cfg.canvas_w || py >= cfg.canvas_h {
-                                continue;
-                            }
-                            blend_pixel(&mut buf, cfg.canvas_w, px, py, fg, coverage);
-                        }
-                    }
+                if cell.flags & style_flags::UNDERLINE != 0 {
+                    let uy = y + cell_h.saturating_sub(2);
+                    fill_rect(&mut buf, cfg.canvas_w, x, uy, cell_w, 1, fg);
                 }
-
-                let scaled = font.as_scaled(scale);
-                pen_x += scaled.h_advance(glyph_id);
-            }
-
-            if cell.flags & style_flags::UNDERLINE != 0 {
-                let uy = y + cell_h.saturating_sub(2);
-                fill_rect(&mut buf, cfg.canvas_w, x, uy, cell_w, 1, fg);
             }
         }
     }

@@ -324,6 +324,19 @@ fn run_script(cli: &Cli, script: &evp::Script, evp_start: Instant) -> Result<()>
         }
     }
 
+    let timings = evp::telemetry::get_timings();
+    let mut sorted_timings: Vec<_> = timings.into_iter().collect();
+    sorted_timings.sort_by_key(|(_, stats)| std::cmp::Reverse(stats.total_ms));
+    for (name, stats) in sorted_timings {
+        info!(
+            scope = %name,
+            total_ms = stats.total_ms,
+            count = stats.count,
+            avg_ms = stats.total_ms / (stats.count as u128).max(1),
+            "telemetry scope stats"
+        );
+    }
+
     info!(elapsed_ms = evp_start.elapsed().as_millis(), "evp finished");
     Ok(())
 }
@@ -463,7 +476,7 @@ struct StatsOutput {
     wall_ms: u128,
     total_events: usize,
     cpu_affinity: String,
-    telemetry: std::collections::HashMap<String, u128>,
+    telemetry: std::collections::HashMap<String, evp::telemetry::TimingStats>,
 }
 
 #[cfg(target_os = "linux")]

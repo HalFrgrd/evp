@@ -162,14 +162,20 @@ fn run_mouse_mode() -> std::io::Result<()> {
                 if col < cols && row < rows {
                     let new_color = match mouse_event.kind {
                         MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
-                            if mouse_event.modifiers.contains(crossterm::event::KeyModifiers::SHIFT) {
+                            if mouse_event
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::SHIFT)
+                            {
                                 Some(Color::Yellow)
                             } else {
                                 Some(Color::Red)
                             }
                         }
                         MouseEventKind::Down(crossterm::event::MouseButton::Right) => {
-                            if mouse_event.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) {
+                            if mouse_event
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::CONTROL)
+                            {
                                 Some(Color::Blue)
                             } else {
                                 Some(Color::Green)
