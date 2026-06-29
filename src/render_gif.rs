@@ -295,6 +295,19 @@ fn rgb_to_rgba(rgb: &[u8]) -> Vec<rgb::RGBA<u8>> {
     rgba
 }
 
+fn is_visual_identical(f1: &RawFrame, f2: &RawFrame) -> bool {
+    f1.cols == f2.cols
+        && f1.rows == f2.rows
+        && f1.cells == f2.cells
+        && f1.cursor == f2.cursor
+        && f1.mouse_cursor == f2.mouse_cursor
+        && f1.title == f2.title
+        && f1.default_bg == f2.default_bg
+        && f1.default_fg == f2.default_fg
+        && f1.cursor_color == f2.cursor_color
+        && f1.cursor_accent == f2.cursor_accent
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_gif_stream_worker(
     rx: Receiver<RawFrame>,
@@ -317,7 +330,8 @@ fn run_gif_stream_worker(
     let mut glyph_cache = GlyphCache::new();
     let mut last_seen_t_ms = 0u32;
     let mut last_emitted_t_ms = 0u32;
-    let mut prev_buf: Option<Vec<u8>> = None;
+    let mut prev_frame: Option<RawFrame> = None;
+    let mut prev_rgba: Option<Vec<rgb::RGBA<u8>>> = None;
     let mut frame_index = 0usize;
 
     // The gifski writer must run concurrently with frame ingestion: the
@@ -352,6 +366,14 @@ fn run_gif_stream_worker(
                 }
             }
         }
+
+        if let Some(ref prev) = prev_frame {
+            if is_visual_identical(prev, &frame) {
+                last_seen_t_ms = frame.t_ms;
+                continue;
+            }
+        }
+
         let buf = {
             let _t = crate::telemetry::ScopeTimer::new("gif_rasterize_raw_frame");
             rasterize_raw_frame(&frame, &font_set, scale, baseline, cfg, &mut glyph_cache)
@@ -359,15 +381,17 @@ fn run_gif_stream_worker(
 
         last_seen_t_ms = frame.t_ms;
 
-        if prev_buf.is_none() {
+        let rgba = {
+            let _t = crate::telemetry::ScopeTimer::new("gif_rgb_to_rgba");
+            rgb_to_rgba(&buf)
+        };
+
+        if prev_frame.is_none() {
             // gifski expects absolute presentation timestamps and the first
             // frame at t=0. Emit the very first captured frame unconditionally
             // so leading sleeps are represented correctly.
-            let rgba = {
-                let _t = crate::telemetry::ScopeTimer::new("gif_rgb_to_rgba");
-                rgb_to_rgba(&buf)
-            };
-            let frame_img = imgref::ImgVec::new(rgba, cfg.canvas_w as usize, cfg.canvas_h as usize);
+            let frame_img =
+                imgref::ImgVec::new(rgba.clone(), cfg.canvas_w as usize, cfg.canvas_h as usize);
             {
                 let _t = crate::telemetry::ScopeTimer::new("gifski_add_frame");
                 collector
@@ -376,19 +400,13 @@ fn run_gif_stream_worker(
             }
             frame_index += 1;
             last_emitted_t_ms = frame.t_ms;
-            prev_buf = Some(buf);
+            prev_rgba = Some(rgba);
+            prev_frame = Some(frame);
             continue;
         }
 
-        if prev_buf.as_ref() == Some(&buf) {
-            continue;
-        }
-
-        let rgba = {
-            let _t = crate::telemetry::ScopeTimer::new("gif_rgb_to_rgba");
-            rgb_to_rgba(&buf)
-        };
-        let frame_img = imgref::ImgVec::new(rgba, cfg.canvas_w as usize, cfg.canvas_h as usize);
+        let frame_img =
+            imgref::ImgVec::new(rgba.clone(), cfg.canvas_w as usize, cfg.canvas_h as usize);
         {
             let _t = crate::telemetry::ScopeTimer::new("gifski_add_frame");
             collector
@@ -398,19 +416,16 @@ fn run_gif_stream_worker(
 
         frame_index += 1;
         last_emitted_t_ms = frame.t_ms;
-        prev_buf = Some(buf);
+        prev_rgba = Some(rgba);
+        prev_frame = Some(frame);
     }
 
     // If capture ended on unchanged frames (common for trailing Sleep),
     // flush the trailing delay by duplicating the last emitted frame at
     // the final absolute timestamp.
     if last_seen_t_ms > last_emitted_t_ms
-        && let Some(buf) = prev_buf.as_ref()
+        && let Some(rgba) = prev_rgba
     {
-        let rgba = {
-            let _t = crate::telemetry::ScopeTimer::new("gif_rgb_to_rgba");
-            rgb_to_rgba(buf)
-        };
         let frame_img = imgref::ImgVec::new(rgba, cfg.canvas_w as usize, cfg.canvas_h as usize);
         {
             let _t = crate::telemetry::ScopeTimer::new("gifski_add_frame");
