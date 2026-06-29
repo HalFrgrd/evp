@@ -53,9 +53,9 @@ All the text on one terminal row is rendered inside of a `<text>` span which hel
 
 GIF rendering is powered by [gifski](https://crates.io/crates/gifski).
 
-## Install
+## Install and Usage
 
-#### Quick install: `install.sh`
+### Quick install: `install.sh`
 
 > [!TIP]
 > No `sudo` required!
@@ -63,77 +63,36 @@ GIF rendering is powered by [gifski](https://crates.io/crates/gifski).
 curl -sSfL https://raw.githubusercontent.com/HalFrgrd/evp/master/install.sh | sh
 ```
 
-#### Build locally
-```bash
-> docker bake extract-libghostty
-> cargo build 
-```
+After installing, you can:
+- **Start from a reference script, edit it, then run `evp demo.tape`**:
+  ```bash
+  # Generate a reference script:
+  evp print-ref-script > demo.tape
 
-## Usage
+  # Edit the tape file with your editor (e.g. vim demo.tape), then compile it:
+  evp demo.tape
+  ```
+  If you already have a VHS script, you can run:
+  ```bash
+  evp --mimic-vhs demo.tape
+  ```
 
-#### CLI
-```bash
-# Start from a base script:
-> evp print-ref-script > demo.tape
-# Modify the script then run it!
-> evp demo.tape
-```
-Or if you already have a VHS script:
-```bash
-> evp --mimic-vhs demo.tape
-```
+- **Or you can run `evp record`**:
+  You can record your live terminal sessions directly to a `.tape` file and a corresponding `.gif`! EVP turns your terminal into raw mode and captures all keystrokes, mouse clicks, drags, movements, and scrolling:
+  ```bash
+  # Record your session (saves to demo.tape and demo.gif by default)
+  evp record
 
-#### Record Interactive Sessions
+  # Customize the outputs, shell, theme, and geometry:
+  evp record --output my_demo.tape --output demo.svg --shell zsh --theme "Catppuccin Mocha" --cols 100 --rows 40
+  ```
+  When you are done, simply exit the subshell (e.g., type `exit` or press `Ctrl+D`). EVP will instantly write the formatted `.tape` script and compile the recording!
 
-You can record your live terminal sessions directly to a `.tape` file and a corresponding `.gif`!
-EVP turns your terminal into raw mode and captures all keystrokes, mouse clicks, drags, movements, and scrolling:
+  ![EVP Record Demo](https://github.com/HalFrgrd/evp/releases/download/assets/evp_record_demo.gif)
 
-```bash
-# Record your session (saves to demo.tape and demo.gif by default)
-> evp record
+---
 
-# Customize the outputs, shell, theme, and geometry:
-> evp record --output my_demo.tape --output demo.svg --shell zsh --theme "Catppuccin Mocha" --cols 100 --rows 40
-```
-
-When you are done, simply exit the subshell (e.g. type `exit` or press `Ctrl+D`). EVP will instantly write the formatted `.tape` script to disk and compile the `.gif` in the background!
-
-![EVP Record Demo](https://github.com/HalFrgrd/evp/releases/download/assets/evp_record_demo.gif)
-
-#### GitHub Actions
-
-You can run `evp` directly in your GitHub Actions workflows to automate rendering your terminal recordings. Since the action downloads a prebuilt static binary, no Rust toolchain or Docker setup is required:
-
-```yaml
-- name: Render tape script
-  uses: HalFrgrd/evp@v0.15.0 # Replace with the desired release tag
-  with:
-    script: demo.tape
-    output: demo.gif
-```
-
-#### Docker
-
-EVP publishes a pre-configured Docker image containing the statically linked `evp` binary on a modern Ubuntu base. 
-
-##### Interactive Demo Environment
-To play around in the sandbox with a customized purple shell prompt and preloaded samples:
-```bash
-docker run -it ghcr.io/halfrgrd/evp:latest
-```
-Inside the container, you will find demo folders and a sample script ready to run:
-```bash
-cd ~/demos
-evp demo.tape --output demo.gif
-```
-
-##### Rendering Local Scripts
-To render your local `.tape` scripts without installing `evp` on your host system, mount your directory:
-```bash
-docker run --rm -v "$(pwd)":/work -w /work ghcr.io/halfrgrd/evp:latest evp my_script.tape
-```
-
-#### Custom docker
+For automated rendering in workflows, pipelines, or containers, see [EVP in CI](EVP_in_ci.md).
 
 
 

@@ -20,11 +20,14 @@ Sleep 2s
 Type `echo "Welcome to EVP interactive recording!"`
 Enter
 Sleep 1s
-Type "ls -la"
+Type `# Your inputs will be saved to demo.tape and demo.gif will be generated.`
+Enter
+Sleep 1s
+Type `# You can then edit the tape, then run 'evp demo.tape' to create a new gif.`
 Enter
 Sleep 1s
 Type "exit"
 Enter
 # Wait for evp record to compile and exit back to standard shell
 Wait+Screen /successfully/
-Sleep 2s
+Sleep 3s
