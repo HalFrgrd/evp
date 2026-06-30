@@ -1056,6 +1056,16 @@ fn lerp_lab(t: f32, lab1: [f32; 3], lab2: [f32; 3]) -> [f32; 3] {
     ]
 }
 
+/// Generates a cohesive 256-color palette based on the active terminal theme.
+///
+/// The design and mathematical approach are adapted from the `color256` project
+/// by Jake Stewart (https://github.com/jake-stewart/color256):
+/// 1. Copy the 16 base ANSI theme colors directly.
+/// 2. Construct the 216-color cube by mapping the 8 primary colors to the corners
+///    of the cube and applying trilinear interpolation in CIELAB colorspace to preserve
+///    apparent brightness across different color gradients.
+/// 3. Construct the grayscale ramp using linear interpolation between the background
+///    and foreground colors. Index 255 is overwritten later and reserved for transparency.
 fn generate_256_palette(base16: [[u8; 3]; 16], bg: [u8; 3], fg: [u8; 3]) -> [[u8; 3]; 256] {
     let bg_lab = rgb_to_lab(bg);
     let fg_lab = rgb_to_lab(fg);
