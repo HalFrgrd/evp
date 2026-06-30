@@ -37,8 +37,9 @@ Sleep 1s
 Type "exit"
 Sleep 500ms
 Enter
-Sleep 2.5s
+Wait+Screen /evp: evp finished/
 
+Sleep 1s
 # 2. Show ls -l demo*
 Type "ls -l demo*"
 Sleep 500ms
