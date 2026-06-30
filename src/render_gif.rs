@@ -305,6 +305,7 @@ fn run_gif_stream_worker(
     cfg: ViewportConfig,
     no_system_fonts: bool,
 ) -> Result<()> {
+    let start_time = std::time::Instant::now();
     let (collector, writer) = gifski::new(Settings {
         width: Some(cfg.canvas_w),
         height: Some(cfg.canvas_h),
@@ -389,6 +390,7 @@ fn run_gif_stream_worker(
     // If capture ended on unchanged frames (common for trailing Sleep),
     // flush the trailing delay by duplicating the last emitted frame at
     // the final absolute timestamp.
+    let mut total_frames = frame_index;
     if last_seen_t_ms > last_emitted_t_ms
         && let Some(buf) = prev_buf.as_ref()
     {
@@ -397,6 +399,7 @@ fn run_gif_stream_worker(
         collector
             .add_frame_rgba(frame_index, frame_img, last_seen_t_ms as f64 / 1000.0)
             .context("add trailing delay frame to gifski")?;
+        total_frames += 1;
     }
 
     drop(collector);
@@ -404,6 +407,33 @@ fn run_gif_stream_worker(
         .join()
         .map_err(|_| anyhow!("gif writer thread panicked"))?
         .context("write gif")?;
+
+    let elapsed_ms = start_time.elapsed().as_millis();
+    if let Ok(mut data) = std::fs::read(&out) {
+        if data.last() == Some(&0x3B) {
+            data.pop(); // Remove trailer
+            let comment = format!(
+                "Created with EVP v{} (sha: {}, frames: {}, cols: {}, rows: {}, fps: {}, render_time: {}ms)",
+                env!("CARGO_PKG_VERSION"),
+                env!("VERGEN_GIT_SHA"),
+                total_frames,
+                cfg.cols,
+                cfg.rows,
+                cfg.framerate,
+                elapsed_ms
+            );
+            let comment_bytes = comment.as_bytes();
+            data.push(0x21); // Extension Introducer
+            data.push(0xFE); // Comment Label
+            let len = comment_bytes.len().min(255);
+            data.push(len as u8); // Block size
+            data.extend_from_slice(&comment_bytes[..len]);
+            data.push(0x00); // Block Terminator
+            data.push(0x3B); // Restore GIF Trailer
+            let _ = std::fs::write(&out, data);
+        }
+    }
+
     Ok(())
 }
 

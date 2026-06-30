@@ -304,6 +304,7 @@ pub fn render_svg(rec: &Recording, opts: &SvgOptions, out: &Path) -> Result<()> 
 /// Same as [`render_svg`] but returns the document as a `String` —
 /// useful for tests and for callers embedding the SVG inline.
 pub fn render_svg_to_string(rec: &Recording, opts: &SvgOptions) -> Result<String> {
+    let start_time = std::time::Instant::now();
     let cfg = ViewportConfig::new(
         rec.cols,
         rec.rows,
@@ -326,7 +327,7 @@ pub fn render_svg_to_string(rec: &Recording, opts: &SvgOptions) -> Result<String
         frames.push(f);
     }
 
-    render_from_frames(&frames, cfg, opts)
+    render_from_frames(&frames, cfg, opts, start_time)
 }
 
 /// Render a single [`RawFrame`] as a static SVG document returned as a `String`.
@@ -335,7 +336,8 @@ pub fn render_svg_frame_to_string(
     cfg: ViewportConfig,
     opts: &SvgOptions,
 ) -> Result<String> {
-    render_from_frames(std::slice::from_ref(frame), cfg, opts)
+    let start_time = std::time::Instant::now();
+    render_from_frames(std::slice::from_ref(frame), cfg, opts, start_time)
 }
 
 // ---------------------------------------------------------------------------
@@ -1526,6 +1528,11 @@ pub struct SvgDoc {
     pub is_static: bool,
     pub bar_h: u32,
     pub title_segments: Vec<TitleSegment>,
+    pub cols: u32,
+    pub rows: u32,
+    pub framerate: u32,
+    pub total_frames: usize,
+    pub render_time_ms: u128,
 }
 
 fn is_static(start_ms: u32, end_ms: u32, total_ms: u32) -> bool {
@@ -2045,8 +2052,16 @@ impl SvgDoc {
         let mut s = String::with_capacity(128 * 1024);
         s.push_str(&format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
+<!-- Created with EVP v{evp_ver} (sha: {sha}, frames: {frames}, cols: {cols}, rows: {rows}, fps: {fps}, render_time: {render_time}ms) -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" font-family="{font}" font-size="{fs}" xml:space="preserve">
 {style}"#,
+            evp_ver = env!("CARGO_PKG_VERSION"),
+            sha = env!("VERGEN_GIT_SHA"),
+            frames = self.total_frames,
+            cols = self.cols,
+            rows = self.rows,
+            fps = self.framerate,
+            render_time = self.render_time_ms,
             w = self.canvas_w,
             h = self.canvas_h,
             font = escape_attr(&self.font_family),
@@ -2652,6 +2667,7 @@ fn render_from_frames(
     frames: &[RawFrame],
     cfg: ViewportConfig,
     opts: &SvgOptions,
+    start_time: std::time::Instant,
 ) -> Result<String> {
     let canvas_w = cfg.canvas_w;
     let canvas_h = cfg.canvas_h;
@@ -2659,9 +2675,12 @@ fn render_from_frames(
     if frames.is_empty() {
         return Ok(format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
+<!-- Created with EVP v{evp_ver} (sha: {sha}, empty recording) -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">
 </svg>
 "#,
+            evp_ver = env!("CARGO_PKG_VERSION"),
+            sha = env!("VERGEN_GIT_SHA"),
             w = canvas_w,
             h = canvas_h,
         ));
@@ -3178,6 +3197,11 @@ fn render_from_frames(
         },
         window_bar_circles,
         master_timer_dur: total_s,
+        cols: cols as u32,
+        rows: rows as u32,
+        framerate: cfg.framerate,
+        total_frames: frames.len(),
+        render_time_ms: start_time.elapsed().as_millis(),
         bg_rects,
         text_elements,
         cursor_rects,
@@ -3196,12 +3220,13 @@ fn run_svg_stream_worker(
     opts: SvgOptions,
     out: PathBuf,
 ) -> Result<()> {
+    let start_time = std::time::Instant::now();
     let mut frames: Vec<RawFrame> = Vec::new();
     while let Ok(frame) = rx.recv() {
         frames.push(frame);
     }
 
-    let s = render_from_frames(&frames, cfg, &opts)?;
+    let s = render_from_frames(&frames, cfg, &opts, start_time)?;
 
     let is_svgz = out
         .extension()
