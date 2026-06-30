@@ -34,10 +34,27 @@ Type "# While recording, your inputs are saved to demo.tape and this inner scree
 Sleep 500ms
 Enter
 Sleep 1s
+
+Type "# Look! The GIF is growing live as you type!"
+Sleep 500ms
+Enter
+
+Sleep 500ms
+Type "ls -lh demo.gif"
+Sleep 500ms
+Enter
+Sleep 1.5s
+
+Type "ls -lh demo.gif"
+Sleep 500ms
+Enter
+Sleep 1.5s
+
 Type "exit"
 Sleep 500ms
 Enter
-Wait+Screen /evp: evp finished/
+Sleep 2s
+
 
 Sleep 1s
 # 2. Show ls -l demo*
@@ -85,7 +102,7 @@ Sleep 1.5s
 Type "evp demo.tape"
 Sleep 500ms
 Enter
-Wait+Screen /evp: evp finished/
+Wait+Screen /(finished|successful)/
 
 Sleep 1.5s
 

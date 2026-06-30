@@ -1,6 +1,6 @@
 //! Shared raw-frame consumer types and constants.
 
-use crate::FrameStyle;
+use crate::{FrameStyle, Theme};
 
 // Raw-frame consumers can briefly lag behind capture on busy systems; this
 // queue absorbs bursts so the upstream pipeline usually stays lock-free.
@@ -136,6 +136,7 @@ pub struct RenderOptions {
     pub letter_spacing: f32,
     pub frame_style: FrameStyle,
     pub no_system_fonts: bool,
+    pub theme: Theme,
 }
 
 impl Default for RenderOptions {
@@ -147,6 +148,7 @@ impl Default for RenderOptions {
             letter_spacing: 1.0,
             frame_style: FrameStyle::default(),
             no_system_fonts: false,
+            theme: Theme::vhs_default(),
         }
     }
 }

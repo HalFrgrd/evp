@@ -21,6 +21,8 @@ See it in action below:
 ## VHS comparison
 EVP is extends [VHS](https://github.com/charmbracelet/vhs) in these ways:
 - Significantly faster. No more skipped frames when creating demos in GitHub Actions!
+    - Frames are written to the GIF file as the recording session runs.
+    - When the recording finishes, the GIF file is instantly ready.
 - Animated SVGs:
     - Super crisp demos
     - You can select and copy text from the SVG as it is playing!
@@ -51,7 +53,10 @@ Fonts are embedded into the SVG using [this method](https://stackoverflow.com/qu
 A custom optimizer reduces the file size and complexity.
 All the text on one terminal row is rendered inside of a `<text>` span which helps the browser copy the right text when you select and copy from the SVG.
 
-GIF rendering is powered by [gifski](https://crates.io/crates/gifski).
+GIF rendering: a 256 color palette is setup at the start and reused for nearly all frames.
+Only minimal diffs between frames are written to the file.
+This yields exceptionally small GIF file sizes.
+
 
 ## Install and Usage
 

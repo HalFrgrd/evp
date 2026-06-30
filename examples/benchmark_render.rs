@@ -47,6 +47,7 @@ fn main() -> anyhow::Result<()> {
         letter_spacing: 1.0,
         frame_style: FrameStyle::default(),
         no_system_fonts: false,
+        theme: evp::Theme::vhs_default(),
     };
 
     let mut render_ms_total = 0u128;

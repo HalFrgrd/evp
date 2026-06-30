@@ -16,7 +16,6 @@ use anyhow::{Context, Result, anyhow};
 use crate::font::{FontSet, load_font_family};
 use crate::render_common::is_box_drawing;
 use crossbeam_channel::{Receiver, Sender, bounded};
-use gifski::{Settings, progress};
 use tracing::debug;
 
 use crate::{
@@ -197,12 +196,22 @@ pub fn spawn_gif_stream(
     cfg.ascent_px = ascent_px;
 
     let no_system_fonts = opts.no_system_fonts;
+    let theme = opts.theme.clone();
     let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) =
         bounded(RAW_FRAME_CONSUMER_CHANNEL_CAPACITY);
     let join = thread::Builder::new()
         .name("evp-gif-stream".into())
         .spawn(move || {
-            run_gif_stream_worker(rx, output, font_set, scale, baseline, cfg, no_system_fonts)
+            run_gif_stream_worker(
+                rx,
+                output,
+                font_set,
+                scale,
+                baseline,
+                cfg,
+                no_system_fonts,
+                theme,
+            )
         })
         .expect("failed to spawn gif stream worker");
 
@@ -281,20 +290,6 @@ pub fn render_png_frame(frame: &RawFrame, opts: &RenderOptions, out: &Path) -> R
         .with_context(|| format!("encoding {}", out.display()))
 }
 
-/// Convert RGB (3-byte) to RGBA (4-byte) with full alpha.
-fn rgb_to_rgba(rgb: &[u8]) -> Vec<rgb::RGBA<u8>> {
-    let mut rgba = Vec::with_capacity(rgb.len() / 3);
-    for chunk in rgb.chunks(3) {
-        rgba.push(rgb::RGBA {
-            r: chunk[0],
-            g: chunk[1],
-            b: chunk[2],
-            a: 255, // fully opaque
-        });
-    }
-    rgba
-}
-
 #[allow(clippy::too_many_arguments)]
 fn run_gif_stream_worker(
     rx: Receiver<RawFrame>,
@@ -304,39 +299,40 @@ fn run_gif_stream_worker(
     baseline: u32,
     cfg: ViewportConfig,
     no_system_fonts: bool,
+    theme: crate::Theme,
 ) -> Result<()> {
     let start_time = std::time::Instant::now();
-    let (collector, writer) = gifski::new(Settings {
-        width: Some(cfg.canvas_w),
-        height: Some(cfg.canvas_h),
-        quality: 100,
-        fast: true,
-        repeat: gifski::Repeat::Infinite,
-    })
-    .context("initialize gifski encoder")?;
+
+    let base16 = theme.palette_rgb()?;
+    let bg = theme.background_rgb()?;
+    let fg = theme.foreground_rgb()?;
+    let palette = generate_256_palette(base16, bg, fg);
+
+    let mut flattened_palette = [0u8; 768];
+    for i in 0..256 {
+        flattened_palette[i * 3] = palette[i][0];
+        flattened_palette[i * 3 + 1] = palette[i][1];
+        flattened_palette[i * 3 + 2] = palette[i][2];
+    }
+
+    let file = std::fs::File::create(&out).with_context(|| format!("create {}", out.display()))?;
+    let mut encoder = gif::Encoder::new(
+        file,
+        cfg.canvas_w as u16,
+        cfg.canvas_h as u16,
+        &flattened_palette,
+    )
+    .context("initialize gif encoder")?;
+
+    encoder
+        .set_repeat(gif::Repeat::Infinite)
+        .context("set gif repeat")?;
 
     let mut glyph_cache = GlyphCache::new();
     let mut last_seen_t_ms = 0u32;
-    let mut last_emitted_t_ms = 0u32;
+    let mut pending_frame: Option<(Vec<u8>, u32)> = None;
     let mut prev_buf: Option<Vec<u8>> = None;
     let mut frame_index = 0usize;
-
-    // The gifski writer must run concurrently with frame ingestion: the
-    // collector has a bounded internal queue, so `add_frame_rgba` blocks
-    // when the writer falls behind. Spawn the writer on its own thread and
-    // join it after we drop the collector (which signals EOF to gifski).
-    let out_path = out.clone();
-    let writer_handle = thread::Builder::new()
-        .name("evp-gif-writer".into())
-        .spawn(move || {
-            let file = std::fs::File::create(&out_path)
-                .with_context(|| format!("create {}", out_path.display()))?;
-            let mut p = progress::NoProgress {};
-            writer
-                .write(file, &mut p)
-                .map_err(|e| anyhow!("gifski write error: {e}"))
-        })
-        .expect("failed to spawn gif writer thread");
 
     while let Ok(frame) = rx.recv() {
         if no_system_fonts {
@@ -357,56 +353,45 @@ fn run_gif_stream_worker(
 
         last_seen_t_ms = frame.t_ms;
 
-        if prev_buf.is_none() {
-            // gifski expects absolute presentation timestamps and the first
-            // frame at t=0. Emit the very first captured frame unconditionally
-            // so leading sleeps are represented correctly.
-            let rgba = rgb_to_rgba(&buf);
-            let frame_img = imgref::ImgVec::new(rgba, cfg.canvas_w as usize, cfg.canvas_h as usize);
-            collector
-                .add_frame_rgba(frame_index, frame_img, 0.0)
-                .context("add first frame to gifski")?;
+        // Skip visually identical frames
+        if let Some(ref prev) = prev_buf {
+            if prev == &buf {
+                continue;
+            }
+        }
+
+        if let Some((pending_buf, pending_t_ms)) = pending_frame.take() {
+            let delay_ms = frame.t_ms.saturating_sub(pending_t_ms);
+            write_gif_frame(
+                &mut encoder,
+                &pending_buf,
+                prev_buf.as_ref(),
+                delay_ms,
+                cfg,
+                &palette,
+            )?;
             frame_index += 1;
-            last_emitted_t_ms = frame.t_ms;
-            prev_buf = Some(buf);
-            continue;
+            prev_buf = Some(pending_buf);
         }
 
-        if prev_buf.as_ref() == Some(&buf) {
-            continue;
-        }
+        pending_frame = Some((buf, frame.t_ms));
+    }
 
-        let rgba = rgb_to_rgba(&buf);
-        let frame_img = imgref::ImgVec::new(rgba, cfg.canvas_w as usize, cfg.canvas_h as usize);
-        collector
-            .add_frame_rgba(frame_index, frame_img, frame.t_ms as f64 / 1000.0)
-            .context("add frame to gifski")?;
-
+    if let Some((pending_buf, pending_t_ms)) = pending_frame.take() {
+        let delay_ms = last_seen_t_ms.saturating_sub(pending_t_ms).max(33);
+        write_gif_frame(
+            &mut encoder,
+            &pending_buf,
+            prev_buf.as_ref(),
+            delay_ms,
+            cfg,
+            &palette,
+        )?;
         frame_index += 1;
-        last_emitted_t_ms = frame.t_ms;
-        prev_buf = Some(buf);
     }
 
-    // If capture ended on unchanged frames (common for trailing Sleep),
-    // flush the trailing delay by duplicating the last emitted frame at
-    // the final absolute timestamp.
-    let mut total_frames = frame_index;
-    if last_seen_t_ms > last_emitted_t_ms
-        && let Some(buf) = prev_buf.as_ref()
-    {
-        let rgba = rgb_to_rgba(buf);
-        let frame_img = imgref::ImgVec::new(rgba, cfg.canvas_w as usize, cfg.canvas_h as usize);
-        collector
-            .add_frame_rgba(frame_index, frame_img, last_seen_t_ms as f64 / 1000.0)
-            .context("add trailing delay frame to gifski")?;
-        total_frames += 1;
-    }
-
-    drop(collector);
-    writer_handle
-        .join()
-        .map_err(|_| anyhow!("gif writer thread panicked"))?
-        .context("write gif")?;
+    // Explicitly drop encoder to close/flush the file
+    drop(encoder);
 
     let elapsed_ms = start_time.elapsed().as_millis();
     if let Ok(mut data) = std::fs::read(&out) {
@@ -416,7 +401,7 @@ fn run_gif_stream_worker(
                 "Created with EVP v{} (sha: {}, frames: {}, cols: {}, rows: {}, fps: {}, render_time: {}ms)",
                 env!("CARGO_PKG_VERSION"),
                 env!("VERGEN_GIT_SHA"),
-                total_frames,
+                frame_index,
                 cfg.cols,
                 cfg.rows,
                 cfg.framerate,
@@ -953,4 +938,300 @@ fn draw_string(
         }
         pen_x += scaled.h_advance(glyph_id);
     }
+}
+
+fn clamp(low: f32, high: f32, n: f32) -> f32 {
+    n.max(low).min(high)
+}
+
+fn rgb_to_lab(rgb: [u8; 3]) -> [f32; 3] {
+    let r_val = rgb[0] as f32 / 255.0;
+    let g_val = rgb[1] as f32 / 255.0;
+    let b_val = rgb[2] as f32 / 255.0;
+
+    let r = if r_val <= 0.04045 {
+        r_val / 12.92
+    } else {
+        ((r_val + 0.055) / 1.055).powf(2.4)
+    };
+    let g = if g_val <= 0.04045 {
+        g_val / 12.92
+    } else {
+        ((g_val + 0.055) / 1.055).powf(2.4)
+    };
+    let b = if b_val <= 0.04045 {
+        b_val / 12.92
+    } else {
+        ((b_val + 0.055) / 1.055).powf(2.4)
+    };
+
+    let x = (r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047;
+    let y = (r * 0.2126 + g * 0.7152 + b * 0.0722) / 1.0;
+    let z = (r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883;
+
+    let fx = if x > 0.008856 {
+        x.powf(1.0 / 3.0)
+    } else {
+        7.787 * x + 16.0 / 116.0
+    };
+    let fy = if y > 0.008856 {
+        y.powf(1.0 / 3.0)
+    } else {
+        7.787 * y + 16.0 / 116.0
+    };
+    let fz = if z > 0.008856 {
+        z.powf(1.0 / 3.0)
+    } else {
+        7.787 * z + 16.0 / 116.0
+    };
+
+    [116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)]
+}
+
+fn lab_to_rgb(lab: [f32; 3]) -> [u8; 3] {
+    let l = lab[0];
+    let a = lab[1];
+    let b = lab[2];
+
+    let fy = (l + 16.0) / 116.0;
+    let fx = a / 500.0 + fy;
+    let fz = fy - b / 200.0;
+
+    let fx3 = fx * fx * fx;
+    let fy3 = fy * fy * fy;
+    let fz3 = fz * fz * fz;
+
+    let x = if fx3 > 0.008856 {
+        fx3
+    } else {
+        (fx - 16.0 / 116.0) / 7.787
+    };
+    let y = if fy3 > 0.008856 {
+        fy3
+    } else {
+        (fy - 16.0 / 116.0) / 7.787
+    };
+    let z = if fz3 > 0.008856 {
+        fz3
+    } else {
+        (fz - 16.0 / 116.0) / 7.787
+    };
+
+    let x = x * 0.95047;
+    let y = y * 1.0;
+    let z = z * 1.08883;
+
+    let r_lin = x * 3.2406 + y * -1.5372 + z * -0.4986;
+    let g_lin = x * -0.9689 + y * 1.8758 + z * 0.0415;
+    let b_lin = x * 0.0557 + y * -0.2040 + z * 1.0570;
+
+    let r = if r_lin <= 0.0031308 {
+        12.92 * r_lin
+    } else {
+        1.055 * r_lin.powf(1.0 / 2.4) - 0.055
+    };
+    let g = if g_lin <= 0.0031308 {
+        12.92 * g_lin
+    } else {
+        1.055 * g_lin.powf(1.0 / 2.4) - 0.055
+    };
+    let b = if b_lin <= 0.0031308 {
+        12.92 * b_lin
+    } else {
+        1.055 * b_lin.powf(1.0 / 2.4) - 0.055
+    };
+
+    [
+        clamp(0.0, 255.0, r * 255.0 + 0.5) as u8,
+        clamp(0.0, 255.0, g * 255.0 + 0.5) as u8,
+        clamp(0.0, 255.0, b * 255.0 + 0.5) as u8,
+    ]
+}
+
+fn lerp_lab(t: f32, lab1: [f32; 3], lab2: [f32; 3]) -> [f32; 3] {
+    [
+        lab1[0] + t * (lab2[0] - lab1[0]),
+        lab1[1] + t * (lab2[1] - lab1[1]),
+        lab1[2] + t * (lab2[2] - lab1[2]),
+    ]
+}
+
+/// Generates a cohesive 256-color palette based on the active terminal theme.
+///
+/// The design and mathematical approach are adapted from the `color256` project
+/// by Jake Stewart (https://github.com/jake-stewart/color256):
+/// 1. Copy the 16 base ANSI theme colors directly.
+/// 2. Construct the 216-color cube by mapping the 8 primary colors to the corners
+///    of the cube and applying trilinear interpolation in CIELAB colorspace to preserve
+///    apparent brightness across different color gradients.
+/// 3. Construct the grayscale ramp using linear interpolation between the background
+///    and foreground colors. Index 255 is overwritten later and reserved for transparency.
+fn generate_256_palette(base16: [[u8; 3]; 16], bg: [u8; 3], fg: [u8; 3]) -> [[u8; 3]; 256] {
+    let bg_lab = rgb_to_lab(bg);
+    let fg_lab = rgb_to_lab(fg);
+
+    let base8_lab = [
+        bg_lab,
+        rgb_to_lab(base16[1]),
+        rgb_to_lab(base16[2]),
+        rgb_to_lab(base16[3]),
+        rgb_to_lab(base16[4]),
+        rgb_to_lab(base16[5]),
+        rgb_to_lab(base16[6]),
+        fg_lab,
+    ];
+
+    let mut palette = [[0u8; 3]; 256];
+    for i in 0..16 {
+        palette[i] = base16[i];
+    }
+
+    let mut idx = 16;
+    for r in 0..6 {
+        let c0 = lerp_lab(r as f32 / 5.0, base8_lab[0], base8_lab[1]);
+        let c1 = lerp_lab(r as f32 / 5.0, base8_lab[2], base8_lab[3]);
+        let c2 = lerp_lab(r as f32 / 5.0, base8_lab[4], base8_lab[5]);
+        let c3 = lerp_lab(r as f32 / 5.0, base8_lab[6], base8_lab[7]);
+        for g in 0..6 {
+            let c4 = lerp_lab(g as f32 / 5.0, c0, c1);
+            let c5 = lerp_lab(g as f32 / 5.0, c2, c3);
+            for b in 0..6 {
+                let c6 = lerp_lab(b as f32 / 5.0, c4, c5);
+                if idx < 232 {
+                    palette[idx] = lab_to_rgb(c6);
+                    idx += 1;
+                }
+            }
+        }
+    }
+
+    for i in 0..24 {
+        let t = (i as f32 + 1.0) / 25.0;
+        let lab = lerp_lab(t, base8_lab[0], base8_lab[7]);
+        if idx < 255 {
+            palette[idx] = lab_to_rgb(lab);
+            idx += 1;
+        }
+    }
+
+    // Index 255 is transparent
+    palette[255] = [0, 0, 0];
+
+    palette
+}
+
+fn find_closest_color(color: [u8; 3], palette: &[[u8; 3]; 256]) -> u8 {
+    let mut min_dist = u32::MAX;
+    let mut best_idx = 0;
+    for idx in 0..255 {
+        let pc = palette[idx];
+        let dr = color[0] as i32 - pc[0] as i32;
+        let dg = color[1] as i32 - pc[1] as i32;
+        let db = color[2] as i32 - pc[2] as i32;
+        let dist = (dr * dr + dg * dg + db * db) as u32;
+        if dist < min_dist {
+            min_dist = dist;
+            best_idx = idx;
+        }
+    }
+    best_idx as u8
+}
+
+fn write_gif_frame<W: std::io::Write>(
+    encoder: &mut gif::Encoder<W>,
+    curr_rgb: &[u8],
+    prev_rgb: Option<&Vec<u8>>,
+    delay_ms: u32,
+    cfg: ViewportConfig,
+    palette: &[[u8; 3]; 256],
+) -> Result<()> {
+    let width = cfg.canvas_w as usize;
+    let height = cfg.canvas_h as usize;
+
+    let (min_x, min_y, max_x, max_y) = if let Some(prev) = prev_rgb {
+        let mut min_x = width;
+        let mut min_y = height;
+        let mut max_x = 0;
+        let mut max_y = 0;
+        let mut changed = false;
+
+        for y in 0..height {
+            for x in 0..width {
+                let idx = (y * width + x) * 3;
+                if curr_rgb[idx..idx + 3] != prev[idx..idx + 3] {
+                    if x < min_x {
+                        min_x = x;
+                    }
+                    if x > max_x {
+                        max_x = x;
+                    }
+                    if y < min_y {
+                        min_y = y;
+                    }
+                    if y > max_y {
+                        max_y = y;
+                    }
+                    changed = true;
+                }
+            }
+        }
+
+        if !changed {
+            let mut gif_frame = gif::Frame::default();
+            gif_frame.width = 1;
+            gif_frame.height = 1;
+            gif_frame.left = 0;
+            gif_frame.top = 0;
+            gif_frame.delay = ((delay_ms + 5) / 10).max(1) as u16;
+            gif_frame.transparent = Some(255);
+            gif_frame.dispose = gif::DisposalMethod::Keep;
+            gif_frame.buffer = std::borrow::Cow::Owned(vec![255]);
+            encoder
+                .write_frame(&gif_frame)
+                .context("write empty gif frame")?;
+            return Ok(());
+        }
+
+        (min_x, min_y, max_x, max_y)
+    } else {
+        (0, 0, width - 1, height - 1)
+    };
+
+    let bbox_w = max_x - min_x + 1;
+    let bbox_h = max_y - min_y + 1;
+
+    let mut bbox_indices = vec![0u8; bbox_w * bbox_h];
+
+    for by in 0..bbox_h {
+        let y = min_y + by;
+        for bx in 0..bbox_w {
+            let x = min_x + bx;
+            let idx = (y * width + x) * 3;
+            let curr_c = [curr_rgb[idx], curr_rgb[idx + 1], curr_rgb[idx + 2]];
+
+            if let Some(prev) = prev_rgb {
+                let prev_c = [prev[idx], prev[idx + 1], prev[idx + 2]];
+                if curr_c == prev_c {
+                    bbox_indices[by * bbox_w + bx] = 255;
+                } else {
+                    bbox_indices[by * bbox_w + bx] = find_closest_color(curr_c, palette);
+                }
+            } else {
+                bbox_indices[by * bbox_w + bx] = find_closest_color(curr_c, palette);
+            }
+        }
+    }
+
+    let mut gif_frame = gif::Frame::default();
+    gif_frame.width = bbox_w as u16;
+    gif_frame.height = bbox_h as u16;
+    gif_frame.left = min_x as u16;
+    gif_frame.top = min_y as u16;
+    gif_frame.delay = ((delay_ms + 5) / 10).max(1) as u16;
+    gif_frame.transparent = Some(255);
+    gif_frame.dispose = gif::DisposalMethod::Keep;
+    gif_frame.buffer = std::borrow::Cow::Owned(bbox_indices);
+
+    encoder.write_frame(&gif_frame).context("write gif frame")?;
+    Ok(())
 }

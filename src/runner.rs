@@ -1269,6 +1269,7 @@ fn write_screenshot(frame: &RawFrame, script: &Script, path: &std::path::Path) -
                 border_radius_px: script.settings.border_radius,
             },
             no_system_fonts: false,
+            theme: script.settings.theme.clone(),
         };
         crate::render_gif::render_png_frame(frame, &render_opts, path)
             .with_context(|| format!("writing screenshot {}", path.display()))
