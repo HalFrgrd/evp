@@ -215,6 +215,7 @@ fn run_cli(cli: Cli) -> Result<()> {
                 letter_spacing: rec.letter_spacing,
                 frame_style: rec.frame_style.clone(),
                 no_system_fonts: cli.no_system_fonts,
+                theme: evp::Theme::vhs_default(),
             };
 
             for path in &output_paths {
@@ -262,6 +263,7 @@ fn run_script(cli: &Cli, script: &evp::Script, evp_start: Instant) -> Result<()>
             border_radius_px: script.settings.border_radius,
         },
         no_system_fonts: cli.no_system_fonts,
+        theme: script.settings.theme.clone(),
     };
 
     info!(events = script.events.len(), "script loaded");

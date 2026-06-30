@@ -53,9 +53,8 @@ crossterm = "0.29.0"
 ratatui = "0.29"
 
 # Image / GIF rendering with streaming support.
-gifski = "1.34"
+gif = "0.14.2"
 rgb = "0.8"
-imgref = "1.10"
 ab_glyph = "0.2"
 fontdb = "0.23"
 woff2-patched = "0.4"

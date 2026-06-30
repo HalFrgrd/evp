@@ -598,6 +598,7 @@ pub fn record(
         letter_spacing: settings.letter_spacing,
         frame_style: cfg.frame_style.clone(),
         no_system_fonts: false,
+        theme: settings.theme.clone(),
     };
     let backend = renderer::RendererBackend::for_path(&out_path, &render_opts, true, false)?;
 
