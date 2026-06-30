@@ -334,7 +334,7 @@ pub fn run_with_raw_frame_consumers(
     // `None` = first frame not yet seen; `Some(None)` = cursor was hidden;
     // `Some(Some(pos))` = cursor was visible at `pos`.
     let mut last_cursor_moved_at: Option<Duration> = None;
-    let mut prev_cursor_capture: Option<Option<(u16, u16)>> = None;
+    let mut prev_cursor_pos: Option<(u16, u16)> = None;
 
     // Wait‑for state. When we're inside a `Wait`, all later events stall
     // until the regex matches or the timeout elapses.
@@ -441,7 +441,7 @@ pub fn run_with_raw_frame_consumers(
                 // Capture frame
                 if !hidden || !pending_screenshots.is_empty() {
                     let recorded_at = next_frame_at.saturating_sub(skipped_recording_time);
-                    let (mut frame, raw_cursor_pos) = capture(
+                    let (mut frame, _raw_cursor_pos) = capture(
                         &mut render_state,
                         &mut row_it,
                         &mut cell_it,
@@ -450,16 +450,11 @@ pub fn run_with_raw_frame_consumers(
                         opts.cols,
                         opts.rows,
                         script.settings.cursor_blink,
-                        last_cursor_moved_at,
+                        &mut last_cursor_moved_at,
+                        &mut prev_cursor_pos,
                         script.settings.theme.cursor_accent_rgb().ok().flatten(),
                     )?;
                     frame.mouse_cursor = resolve_mouse_position(recorded_at, &mouse_segments);
-                    if let Some(prev) = prev_cursor_capture {
-                        if raw_cursor_pos != prev {
-                            last_cursor_moved_at = Some(recorded_at);
-                        }
-                    }
-                    prev_cursor_capture = Some(raw_cursor_pos);
                     if !pending_screenshots.is_empty() {
                         let shots = std::mem::take(&mut pending_screenshots);
                         for path in shots {
@@ -1437,7 +1432,8 @@ pub fn capture<'a>(
     cols: u16,
     rows: u16,
     cursor_blink: bool,
-    last_cursor_moved_at: Option<Duration>,
+    last_cursor_moved_at: &mut Option<Duration>,
+    prev_cursor_pos: &mut Option<(u16, u16)>,
     cursor_accent: Option<[u8; 3]>,
 ) -> Result<(RawFrame, Option<(u16, u16)>)> {
     let snap = render_state.update(terminal)?;
@@ -1511,11 +1507,24 @@ pub fn capture<'a>(
         None
     };
 
+    if let Some(pos) = raw_cursor_pos {
+        if let Some(prev) = *prev_cursor_pos {
+            if pos != prev {
+                *last_cursor_moved_at = Some(at);
+            }
+        } else {
+            *last_cursor_moved_at = Some(at);
+        }
+        *prev_cursor_pos = Some(pos);
+    } else {
+        *prev_cursor_pos = None;
+    }
+
     let cursor = if let Some(pos) = raw_cursor_pos {
         if !cursor_blink {
             Some(pos)
         } else {
-            match last_cursor_moved_at {
+            match *last_cursor_moved_at {
                 None => {
                     // Cursor has not moved since recording started; use
                     // absolute-time blink so initial frames animate normally.

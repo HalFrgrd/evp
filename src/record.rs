@@ -686,6 +686,8 @@ pub fn record(
         let mut render_state = RenderState::new()?;
         let mut row_it = RowIterator::new()?;
         let mut cell_it = CellIterator::new()?;
+        let mut last_cursor_moved_at = None;
+        let mut prev_cursor_pos = None;
 
         loop {
             crossbeam_channel::select! {
@@ -785,7 +787,8 @@ pub fn record(
                                             cols,
                                             rows,
                                             true,
-                                            None,
+                                            &mut last_cursor_moved_at,
+                                            &mut prev_cursor_pos,
                                             None,
                                         ) {
                                             frame.mouse_cursor = current_mouse_pos;
@@ -809,7 +812,8 @@ pub fn record(
                                             cols,
                                             rows,
                                             true,
-                                            None,
+                                            &mut last_cursor_moved_at,
+                                            &mut prev_cursor_pos,
                                             None,
                                         ) {
                                             frame.mouse_cursor = current_mouse_pos;
@@ -1033,7 +1037,8 @@ pub fn record(
                         cols,
                         rows,
                         true,
-                        None,
+                        &mut last_cursor_moved_at,
+                        &mut prev_cursor_pos,
                         None,
                     ) {
                         if Instant::now().duration_since(last_mouse_move_time) > Duration::from_secs(3) {

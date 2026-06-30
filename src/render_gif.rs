@@ -398,7 +398,7 @@ fn run_gif_stream_worker(
         if data.last() == Some(&0x3B) {
             data.pop(); // Remove trailer
             let comment = format!(
-                "Created with EVP v{} (sha: {}, frames: {}, cols: {}, rows: {}, fps: {}, render_time: {}ms)",
+                "\nCreated with EVP v{} (sha: {}, frames: {}, cols: {}, rows: {}, fps: {}, render_time: {}ms)\n",
                 env!("CARGO_PKG_VERSION"),
                 env!("VERGEN_GIT_SHA"),
                 frame_index,

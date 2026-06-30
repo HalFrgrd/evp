@@ -9,7 +9,7 @@ Set Height 600
 Set FontSize 18
 Set TypingSpeed 60ms
 Set Framerate 30
-Set WaitTimeout 60s
+Set WaitTimeout 30s
 
 Hide
 Sleep 500ms
@@ -35,26 +35,27 @@ Sleep 500ms
 Enter
 Sleep 1s
 
+
 Type "# Look! The GIF is growing live as you type!"
 Sleep 500ms
 Enter
 
 Sleep 500ms
-Type "ls -lh demo.gif"
+Type "ls -l demo.gif"
 Sleep 500ms
 Enter
 Sleep 1.5s
 
-Type "ls -lh demo.gif"
+Type "ls -l demo.gif"
 Sleep 500ms
 Enter
 Sleep 1.5s
+
 
 Type "exit"
 Sleep 500ms
 Enter
-Sleep 2s
-
+Wait+Line /> /
 
 Sleep 1s
 # 2. Show ls -l demo*
@@ -96,13 +97,13 @@ Sleep 1s
 Type ":wq"
 Sleep 500ms
 Enter
-Sleep 1.5s
+Sleep 1s
 
 # 4. Run evp demo.tape
 Type "evp demo.tape"
 Sleep 500ms
 Enter
-Wait+Screen /(finished|successful)/
+Wait+Line /> /
 
 Sleep 1.5s
 
