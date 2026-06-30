@@ -6,14 +6,14 @@
 [![License](https://img.shields.io/github/license/HalFrgrd/evp)](https://github.com/HalFrgrd/evp/blob/master/LICENSE)
 [![Latest Release](https://img.shields.io/github/v/release/HalFrgrd/evp)](https://github.com/HalFrgrd/evp/releases)
 
-**EVP is a Rust CLI tool to make beautiful terminal recordings.**
+**EVP is a CLI tool to make beautiful terminal recordings.**
 
 </div>
 
-You write a `.tape` file and run `evp my_sript.tape` to produce smooth, high quality, portable GIF or SVG demos.
+You create a `.tape` file and run `evp demo.tape` to produce smooth, high quality, portable GIF or SVG demos.
 EVP is a rewrite of [VHS](https://github.com/charmbracelet/vhs) with some key improvements.
 
-See it in action at [flyline](https://github.com/HalFrgrd/flyline) or below:
+See it in action below:
 
 ![Demo](https://github.com/HalFrgrd/evp/releases/download/assets/evp_demo.gif)
 
@@ -44,9 +44,9 @@ EVP is extends [VHS](https://github.com/charmbracelet/vhs) in these ways:
 
 ## Technology
 EVP runs a shell inside an embedded [libghostty](https://ghostty.org) terminal.
-This allows us to support advanced terminal features in a headless environment such as: complex key combinations; key press and key release events; mouse input support; legacy escape codes.
+This allows us to support advanced terminal features in a headless environment such as: complex key combinations; key press and key release events; mouse input support; legacy escape codes: Kitty image protocol (comming soon!).
 
-The SVG animations are done using [SMIL](https://developer.mozilla.org/en-US/docs/Web/SVG/Guides/SVG_animation_with_SMIL).
+The SVG animations use [SMIL](https://developer.mozilla.org/en-US/docs/Web/SVG/Guides/SVG_animation_with_SMIL).
 Fonts are embedded into the SVG using [this method](https://stackoverflow.com/questions/79680618/how-to-embed-a-font-inside-a-svg-file).
 A custom optimizer reduces the file size and complexity.
 All the text on one terminal row is rendered inside of a `<text>` span which helps the browser copy the right text when you select and copy from the SVG.
@@ -86,13 +86,14 @@ After installing, you can:
   # Customize the outputs, shell, theme, and geometry:
   evp record --output my_demo.tape --output demo.svg --shell zsh --theme "Catppuccin Mocha" --cols 100 --rows 40
   ```
-  When you are done, simply exit the subshell (e.g., type `exit` or press `Ctrl+D`). EVP will write the formatted `.tape` script and the `.gif` of your session!
+  When you are done, simply exit the subshell (e.g., type `exit` or press `Ctrl+D`). EVP will write the formatted `demo.tape` script and `demo.gif` of your session!
+  Then tweak `demo.tape` to your liking, and run `evp demo.tape` to produce a new GIF:
 
   ![EVP Record Demo](https://github.com/HalFrgrd/evp/releases/download/assets/evp_record_demo.gif)
 
 
 
-### Using evp in CI
+### Using EVP in CI
 For automated rendering in workflows, pipelines, or containers, see [EVP in CI](evp_in_ci.md).
 
 
@@ -180,6 +181,8 @@ Wait+Screen@1s /regex/              # Wait scanning full screen with 1s timeout 
 <!-- END_REF_SCRIPT -->
 
 ## Examples
+
+I use EVP for all my projects like [flyline](https://github.com/HalFrgrd/flyline) or [flycomp](https://github.com/HalFrgrd/flycomp).
 
 ### Dynamic window title bar
 
