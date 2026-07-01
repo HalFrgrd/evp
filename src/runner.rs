@@ -888,9 +888,17 @@ fn build_timeline(
                 easing,
             } => {
                 let per = scale(*delay);
-                let points = generate_spline_points(coords);
+                let points = generate_spline_points_f32(coords);
                 if !points.is_empty() {
-                    let total_dur = per * (points.len() - 1) as u32;
+                    let total_dist: f32 = coords
+                        .windows(2)
+                        .map(|w| {
+                            ((w[1].0 as f32 - w[0].0 as f32).powi(2)
+                                + (w[1].1 as f32 - w[0].1 as f32).powi(2))
+                            .sqrt()
+                        })
+                        .sum();
+                    let total_dur = per * total_dist.ceil().max(1.0) as u32;
                     let start_cursor = cursor;
 
                     use easing_function::Easing;
@@ -905,13 +913,15 @@ fn build_timeline(
                     }
 
                     let (x0, y0) = points[0];
+                    let col0 = x0.round() as u16;
+                    let row0 = y0.round() as u16;
                     out.push(Scheduled {
                         at: start_cursor,
                         event: Event::MouseInput {
                             action: crate::script::MouseAction::Press,
                             button: Some(crate::script::MouseButton::Left),
-                            col: x0,
-                            row: y0,
+                            col: col0,
+                            row: row0,
                             pixel_coords: None,
                             mods: *mods,
                         },
@@ -923,10 +933,10 @@ fn build_timeline(
                         mouse_segments.push(MouseSegment {
                             start_time: times[j],
                             end_time: times[j + 1],
-                            start_col: sx as f32,
-                            start_row: sy as f32,
-                            end_col: ex as f32,
-                            end_row: ey as f32,
+                            start_col: sx,
+                            start_row: sy,
+                            end_col: ex,
+                            end_row: ey,
                             state: crate::recording::MouseState::Dragging,
                             easing: None,
                         });
@@ -937,36 +947,44 @@ fn build_timeline(
                     mouse_segments.push(MouseSegment {
                         start_time: t_last,
                         end_time: t_last + per,
-                        start_col: x_last as f32,
-                        start_row: y_last as f32,
-                        end_col: x_last as f32,
-                        end_row: y_last as f32,
+                        start_col: x_last,
+                        start_row: y_last,
+                        end_col: x_last,
+                        end_row: y_last,
                         state: crate::recording::MouseState::Clicking,
                         easing: None,
                     });
 
+                    let mut last_scheduled_cell = (col0, row0);
                     for (j, &(x, y)) in points.iter().enumerate().skip(1) {
-                        out.push(Scheduled {
-                            at: times[j],
-                            event: Event::MouseInput {
-                                action: crate::script::MouseAction::Motion,
-                                button: Some(crate::script::MouseButton::Left),
-                                col: x,
-                                row: y,
-                                pixel_coords: None,
-                                mods: *mods,
-                            },
-                        });
+                        let col = x.round() as u16;
+                        let row = y.round() as u16;
+                        if (col, row) != last_scheduled_cell {
+                            out.push(Scheduled {
+                                at: times[j],
+                                event: Event::MouseInput {
+                                    action: crate::script::MouseAction::Motion,
+                                    button: Some(crate::script::MouseButton::Left),
+                                    col,
+                                    row,
+                                    pixel_coords: None,
+                                    mods: *mods,
+                                },
+                            });
+                            last_scheduled_cell = (col, row);
+                        }
                     }
 
                     cursor = t_last + per;
+                    let final_col = x_last.round() as u16;
+                    let final_row = y_last.round() as u16;
                     out.push(Scheduled {
                         at: cursor,
                         event: Event::MouseInput {
                             action: crate::script::MouseAction::Release,
                             button: Some(crate::script::MouseButton::Left),
-                            col: x_last,
-                            row: y_last,
+                            col: final_col,
+                            row: final_row,
                             pixel_coords: None,
                             mods: *mods,
                         },
@@ -980,9 +998,17 @@ fn build_timeline(
                 easing,
             } => {
                 let per = scale(*delay);
-                let points = generate_spline_points(coords);
+                let points = generate_spline_points_f32(coords);
                 if !points.is_empty() {
-                    let total_dur = per * (points.len() - 1) as u32;
+                    let total_dist: f32 = coords
+                        .windows(2)
+                        .map(|w| {
+                            ((w[1].0 as f32 - w[0].0 as f32).powi(2)
+                                + (w[1].1 as f32 - w[0].1 as f32).powi(2))
+                            .sqrt()
+                        })
+                        .sum();
+                    let total_dur = per * total_dist.ceil().max(1.0) as u32;
                     let start_cursor = cursor;
 
                     use easing_function::Easing;
@@ -997,13 +1023,15 @@ fn build_timeline(
                     }
 
                     let (x0, y0) = points[0];
+                    let col0 = x0.round() as u16;
+                    let row0 = y0.round() as u16;
                     out.push(Scheduled {
                         at: start_cursor,
                         event: Event::MouseInput {
                             action: crate::script::MouseAction::Motion,
                             button: None,
-                            col: x0,
-                            row: y0,
+                            col: col0,
+                            row: row0,
                             pixel_coords: None,
                             mods: *mods,
                         },
@@ -1015,27 +1043,33 @@ fn build_timeline(
                         mouse_segments.push(MouseSegment {
                             start_time: times[j],
                             end_time: times[j + 1],
-                            start_col: sx as f32,
-                            start_row: sy as f32,
-                            end_col: ex as f32,
-                            end_row: ey as f32,
+                            start_col: sx,
+                            start_row: sy,
+                            end_col: ex,
+                            end_row: ey,
                             state: crate::recording::MouseState::Moving,
                             easing: None,
                         });
                     }
 
+                    let mut last_scheduled_cell = (col0, row0);
                     for (j, &(x, y)) in points.iter().enumerate().skip(1) {
-                        out.push(Scheduled {
-                            at: times[j],
-                            event: Event::MouseInput {
-                                action: crate::script::MouseAction::Motion,
-                                button: None,
-                                col: x,
-                                row: y,
-                                pixel_coords: None,
-                                mods: *mods,
-                            },
-                        });
+                        let col = x.round() as u16;
+                        let row = y.round() as u16;
+                        if (col, row) != last_scheduled_cell {
+                            out.push(Scheduled {
+                                at: times[j],
+                                event: Event::MouseInput {
+                                    action: crate::script::MouseAction::Motion,
+                                    button: None,
+                                    col,
+                                    row,
+                                    pixel_coords: None,
+                                    mods: *mods,
+                                },
+                            });
+                            last_scheduled_cell = (col, row);
+                        }
                     }
 
                     cursor = *times.last().unwrap();
@@ -1056,102 +1090,57 @@ fn build_timeline(
     (out, mouse_segments, cursor)
 }
 
-fn generate_line_points(x0: i16, y0: i16, x1: i16, y1: i16) -> Vec<(u16, u16)> {
-    let mut points = Vec::new();
-    let dx = (x1 - x0).abs();
-    let dy = -(y1 - y0).abs();
-    let sx = if x0 < x1 { 1 } else { -1 };
-    let sy = if y0 < y1 { 1 } else { -1 };
-    let mut err = dx + dy;
-
-    let mut x = x0;
-    let mut y = y0;
-
-    loop {
-        points.push((x as u16, y as u16));
-        if x == x1 && y == y1 {
-            break;
-        }
-        let e2 = 2 * err;
-        if e2 >= dy {
-            if x == x1 {
-                break;
-            }
-            err += dy;
-            x += sx;
-        }
-        if e2 <= dx {
-            if y == y1 {
-                break;
-            }
-            err += dx;
-            y += sy;
-        }
-    }
-    points
-}
-
-fn generate_spline_points(coords: &[(u16, u16)]) -> Vec<(u16, u16)> {
+fn generate_spline_points_f32(coords: &[(u16, u16)]) -> Vec<(f32, f32)> {
     if coords.is_empty() {
         return Vec::new();
     }
     if coords.len() == 1 {
-        return vec![coords[0]];
-    }
-    if coords.len() == 2 {
-        return generate_line_points(
-            coords[0].0 as i16,
-            coords[0].1 as i16,
-            coords[1].0 as i16,
-            coords[1].1 as i16,
-        );
+        return vec![(coords[0].0 as f32, coords[0].1 as f32)];
     }
 
     let mut out = Vec::new();
     let m = coords.len();
 
     for i in 0..m - 1 {
-        let p1 = coords[i];
-        let p2 = coords[i + 1];
-        let p0 = if i == 0 { p1 } else { coords[i - 1] };
-        let p3 = if i == m - 2 { p2 } else { coords[i + 2] };
+        let p1 = (coords[i].0 as f32, coords[i].1 as f32);
+        let p2 = (coords[i + 1].0 as f32, coords[i + 1].1 as f32);
+        let p0 = if i == 0 {
+            p1
+        } else {
+            (coords[i - 1].0 as f32, coords[i - 1].1 as f32)
+        };
+        let p3 = if i == m - 2 {
+            p2
+        } else {
+            (coords[i + 2].0 as f32, coords[i + 2].1 as f32)
+        };
 
-        let dx = p2.0 as f32 - p1.0 as f32;
-        let dy = p2.1 as f32 - p1.1 as f32;
+        let dx = p2.0 - p1.0;
+        let dy = p2.1 - p1.1;
         let dist = (dx * dx + dy * dy).sqrt();
-        let steps = (dist * 2.0).ceil() as usize;
-        let steps = steps.max(5);
+        let steps = (dist * 10.0).ceil() as usize;
+        let steps = steps.max(10);
 
         for step in 0..steps {
             let u = step as f32 / steps as f32;
 
             let x = 0.5
-                * ((2.0 * p1.0 as f32)
-                    + (-(p0.0 as f32) + (p2.0 as f32)) * u
-                    + (2.0 * p0.0 as f32 - 5.0 * p1.0 as f32 + 4.0 * p2.0 as f32 - p3.0 as f32)
-                        * u.powi(2)
-                    + (-(p0.0 as f32) + 3.0 * p1.0 as f32 - 3.0 * p2.0 as f32 + p3.0 as f32)
-                        * u.powi(3));
+                * ((2.0 * p1.0)
+                    + (-p0.0 + p2.0) * u
+                    + (2.0 * p0.0 - 5.0 * p1.0 + 4.0 * p2.0 - p3.0) * u.powi(2)
+                    + (-p0.0 + 3.0 * p1.0 - 3.0 * p2.0 + p3.0) * u.powi(3));
             let y = 0.5
-                * ((2.0 * p1.1 as f32)
-                    + (-(p0.1 as f32) + (p2.1 as f32)) * u
-                    + (2.0 * p0.1 as f32 - 5.0 * p1.1 as f32 + 4.0 * p2.1 as f32 - p3.1 as f32)
-                        * u.powi(2)
-                    + (-(p0.1 as f32) + 3.0 * p1.1 as f32 - 3.0 * p2.1 as f32 + p3.1 as f32)
-                        * u.powi(3));
+                * ((2.0 * p1.1)
+                    + (-p0.1 + p2.1) * u
+                    + (2.0 * p0.1 - 5.0 * p1.1 + 4.0 * p2.1 - p3.1) * u.powi(2)
+                    + (-p0.1 + 3.0 * p1.1 - 3.0 * p2.1 + p3.1) * u.powi(3));
 
-            let rounded_x = x.round() as u16;
-            let rounded_y = y.round() as u16;
-            if out.is_empty() || out.last().unwrap() != &(rounded_x, rounded_y) {
-                out.push((rounded_x, rounded_y));
-            }
+            out.push((x, y));
         }
     }
 
-    let final_pt = *coords.last().unwrap();
-    if out.is_empty() || out.last().unwrap() != &final_pt {
-        out.push(final_pt);
-    }
+    let final_pt = (coords[m - 1].0 as f32, coords[m - 1].1 as f32);
+    out.push(final_pt);
 
     out
 }
