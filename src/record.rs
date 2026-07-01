@@ -8,7 +8,7 @@ use libghostty_vt::{
 };
 use ratatui::{
     Terminal as RatatuiTerminal,
-    backend::CrosstermBackend,
+    backend::TerminaBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -86,83 +86,75 @@ fn encode_mouse_event(
     Ok(buf[..len].to_vec())
 }
 
-fn map_crossterm_key(event: crossterm::event::KeyEvent) -> (NamedKey, ModSet) {
+fn map_termina_key(event: termina::event::KeyEvent) -> (NamedKey, ModSet) {
     let key = match event.code {
-        crossterm::event::KeyCode::Char(c) => NamedKey::Char(c),
-        crossterm::event::KeyCode::Enter => NamedKey::Enter,
-        crossterm::event::KeyCode::Tab => NamedKey::Tab,
-        crossterm::event::KeyCode::Backspace => NamedKey::Backspace,
-        crossterm::event::KeyCode::Delete => NamedKey::Delete,
-        crossterm::event::KeyCode::Insert => NamedKey::Insert,
-        crossterm::event::KeyCode::Esc => NamedKey::Escape,
-        crossterm::event::KeyCode::Up => NamedKey::Up,
-        crossterm::event::KeyCode::Down => NamedKey::Down,
-        crossterm::event::KeyCode::Left => NamedKey::Left,
-        crossterm::event::KeyCode::Right => NamedKey::Right,
-        crossterm::event::KeyCode::PageUp => NamedKey::PageUp,
-        crossterm::event::KeyCode::PageDown => NamedKey::PageDown,
-        crossterm::event::KeyCode::Home => NamedKey::Home,
-        crossterm::event::KeyCode::End => NamedKey::End,
+        termina::event::KeyCode::Char(c) => NamedKey::Char(c),
+        termina::event::KeyCode::Enter => NamedKey::Enter,
+        termina::event::KeyCode::Tab => NamedKey::Tab,
+        termina::event::KeyCode::Backspace => NamedKey::Backspace,
+        termina::event::KeyCode::Delete => NamedKey::Delete,
+        termina::event::KeyCode::Insert => NamedKey::Insert,
+        termina::event::KeyCode::Escape => NamedKey::Escape,
+        termina::event::KeyCode::Up => NamedKey::Up,
+        termina::event::KeyCode::Down => NamedKey::Down,
+        termina::event::KeyCode::Left => NamedKey::Left,
+        termina::event::KeyCode::Right => NamedKey::Right,
+        termina::event::KeyCode::PageUp => NamedKey::PageUp,
+        termina::event::KeyCode::PageDown => NamedKey::PageDown,
+        termina::event::KeyCode::Home => NamedKey::Home,
+        termina::event::KeyCode::End => NamedKey::End,
         _ => NamedKey::Char(' '),
     };
 
     let mods = ModSet {
-        ctrl: event
-            .modifiers
-            .contains(crossterm::event::KeyModifiers::CONTROL),
-        alt: event
-            .modifiers
-            .contains(crossterm::event::KeyModifiers::ALT),
-        shift: event
-            .modifiers
-            .contains(crossterm::event::KeyModifiers::SHIFT),
-        super_key: event
-            .modifiers
-            .contains(crossterm::event::KeyModifiers::SUPER),
+        ctrl: event.modifiers.contains(termina::event::Modifiers::CONTROL),
+        alt: event.modifiers.contains(termina::event::Modifiers::ALT),
+        shift: event.modifiers.contains(termina::event::Modifiers::SHIFT),
+        super_key: event.modifiers.contains(termina::event::Modifiers::SUPER),
     };
 
     (key, mods)
 }
 
-fn map_crossterm_mods(modifiers: crossterm::event::KeyModifiers) -> ModSet {
+fn map_termina_mods(modifiers: termina::event::Modifiers) -> ModSet {
     ModSet {
-        ctrl: modifiers.contains(crossterm::event::KeyModifiers::CONTROL),
-        alt: modifiers.contains(crossterm::event::KeyModifiers::ALT),
-        shift: modifiers.contains(crossterm::event::KeyModifiers::SHIFT),
-        super_key: modifiers.contains(crossterm::event::KeyModifiers::SUPER),
+        ctrl: modifiers.contains(termina::event::Modifiers::CONTROL),
+        alt: modifiers.contains(termina::event::Modifiers::ALT),
+        shift: modifiers.contains(termina::event::Modifiers::SHIFT),
+        super_key: modifiers.contains(termina::event::Modifiers::SUPER),
     }
 }
 
-fn map_crossterm_mouse(
-    kind: crossterm::event::MouseEventKind,
+fn map_termina_mouse(
+    kind: termina::event::MouseEventKind,
 ) -> Option<(MouseAction, Option<MouseButton>)> {
     match kind {
-        crossterm::event::MouseEventKind::Down(btn) => {
+        termina::event::MouseEventKind::Down(btn) => {
             Some((MouseAction::Press, map_mouse_button(btn)))
         }
-        crossterm::event::MouseEventKind::Up(btn) => {
+        termina::event::MouseEventKind::Up(btn) => {
             Some((MouseAction::Release, map_mouse_button(btn)))
         }
-        crossterm::event::MouseEventKind::Drag(btn) => {
+        termina::event::MouseEventKind::Drag(btn) => {
             Some((MouseAction::Motion, map_mouse_button(btn)))
         }
-        crossterm::event::MouseEventKind::Moved => Some((MouseAction::Motion, None)),
-        crossterm::event::MouseEventKind::ScrollUp => {
+        termina::event::MouseEventKind::Moved => Some((MouseAction::Motion, None)),
+        termina::event::MouseEventKind::ScrollUp => {
             Some((MouseAction::Press, Some(MouseButton::WheelUp)))
         }
-        crossterm::event::MouseEventKind::ScrollDown => {
+        termina::event::MouseEventKind::ScrollDown => {
             Some((MouseAction::Press, Some(MouseButton::WheelDown)))
         }
-        crossterm::event::MouseEventKind::ScrollLeft
-        | crossterm::event::MouseEventKind::ScrollRight => None,
+        termina::event::MouseEventKind::ScrollLeft
+        | termina::event::MouseEventKind::ScrollRight => None,
     }
 }
 
-fn map_mouse_button(btn: crossterm::event::MouseButton) -> Option<MouseButton> {
+fn map_mouse_button(btn: termina::event::MouseButton) -> Option<MouseButton> {
     match btn {
-        crossterm::event::MouseButton::Left => Some(MouseButton::Left),
-        crossterm::event::MouseButton::Right => Some(MouseButton::Right),
-        crossterm::event::MouseButton::Middle => Some(MouseButton::Middle),
+        termina::event::MouseButton::Left => Some(MouseButton::Left),
+        termina::event::MouseButton::Right => Some(MouseButton::Right),
+        termina::event::MouseButton::Middle => Some(MouseButton::Middle),
     }
 }
 
@@ -260,7 +252,7 @@ fn layout_header(
 }
 
 fn draw_terminal_state(
-    ratatui_term: &mut RatatuiTerminal<CrosstermBackend<std::io::Stdout>>,
+    ratatui_term: &mut RatatuiTerminal<TerminaBackend<termina::PlatformTerminal>>,
     frame: &crate::recording::RawFrame,
     elapsed: Duration,
     host_mouse_pos: Option<(u16, u16)>,
@@ -497,36 +489,64 @@ impl MouseSegmentTracker {
 
 struct TerminalCapabilityGuard;
 
-impl TerminalCapabilityGuard {
-    fn new() -> Result<Self> {
-        crossterm::terminal::enable_raw_mode().context("enabling terminal raw mode")?;
-        crossterm::execute!(
-            std::io::stdout(),
-            crossterm::terminal::EnterAlternateScreen,
-            crossterm::event::EnableMouseCapture,
-            crossterm::event::EnableBracketedPaste,
-            crossterm::event::PushKeyboardEnhancementFlags(
-                crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                    | crossterm::event::KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-                    | crossterm::event::KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
-                    | crossterm::event::KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
-            )
-        )
-        .context("initializing host terminal capabilities")?;
-        Ok(Self)
-    }
-}
-
 impl Drop for TerminalCapabilityGuard {
     fn drop(&mut self) {
-        let _ = crossterm::execute!(
+        use std::io::Write;
+        use termina::Terminal;
+        use termina::escape::csi::{Csi, DecPrivateMode, DecPrivateModeCode, Keyboard, Mode};
+
+        let _ = write!(
             std::io::stdout(),
-            crossterm::event::PopKeyboardEnhancementFlags,
-            crossterm::event::DisableBracketedPaste,
-            crossterm::event::DisableMouseCapture,
-            crossterm::terminal::LeaveAlternateScreen
+            "{}",
+            Csi::Keyboard(Keyboard::PopFlags(1))
         );
-        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = write!(
+            std::io::stdout(),
+            "{}",
+            Csi::Mode(Mode::ResetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::BracketedPaste
+            )))
+        );
+        let _ = write!(
+            std::io::stdout(),
+            "{}",
+            Csi::Mode(Mode::ResetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::MouseTracking
+            )))
+        );
+        let _ = write!(
+            std::io::stdout(),
+            "{}",
+            Csi::Mode(Mode::ResetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::ButtonEventMouse
+            )))
+        );
+        let _ = write!(
+            std::io::stdout(),
+            "{}",
+            Csi::Mode(Mode::ResetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::AnyEventMouse
+            )))
+        );
+        let _ = write!(
+            std::io::stdout(),
+            "{}",
+            Csi::Mode(Mode::ResetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::SGRMouse
+            )))
+        );
+        let _ = write!(
+            std::io::stdout(),
+            "{}",
+            Csi::Mode(Mode::ResetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::ClearAndEnableAlternateScreen
+            )))
+        );
+        let _ = std::io::stdout().flush();
+
+        if let Ok(mut term) = termina::PlatformTerminal::new() {
+            let _ = term.enter_cooked_mode();
+        }
     }
 }
 
@@ -541,8 +561,14 @@ pub fn record(
     output_override: Option<PathBuf>,
 ) -> Result<()> {
     // 1. Resolve geometry
-    let (actual_host_cols, actual_host_rows) =
-        crossterm::terminal::size().context("getting host terminal size")?;
+    use termina::Terminal as TerminaTerminalTrait;
+    let mut host_terminal =
+        termina::PlatformTerminal::new().context("creating PlatformTerminal")?;
+    let ws = host_terminal
+        .get_dimensions()
+        .context("getting host terminal size")?;
+    let actual_host_cols = ws.cols;
+    let actual_host_rows = ws.rows;
 
     let mut cols = override_cols.unwrap_or(actual_host_cols);
     let mut rows = override_rows.unwrap_or(actual_host_rows.saturating_sub(2));
@@ -550,6 +576,70 @@ pub fn record(
     if rows == 0 {
         bail!("terminal height is too small for EVP recording");
     }
+
+    // Configure raw mode and terminal capabilities
+    host_terminal
+        .enter_raw_mode()
+        .context("entering raw mode")?;
+    use std::io::Write;
+    use termina::escape::csi::{
+        Csi, DecPrivateMode, DecPrivateModeCode, Keyboard, KittyKeyboardFlags, Mode,
+    };
+    write!(
+        host_terminal,
+        "{}",
+        Csi::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+            DecPrivateModeCode::ClearAndEnableAlternateScreen
+        )))
+    )?;
+    write!(
+        host_terminal,
+        "{}",
+        Csi::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+            DecPrivateModeCode::MouseTracking
+        )))
+    )?;
+    write!(
+        host_terminal,
+        "{}",
+        Csi::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+            DecPrivateModeCode::ButtonEventMouse
+        )))
+    )?;
+    write!(
+        host_terminal,
+        "{}",
+        Csi::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+            DecPrivateModeCode::AnyEventMouse
+        )))
+    )?;
+    write!(
+        host_terminal,
+        "{}",
+        Csi::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+            DecPrivateModeCode::SGRMouse
+        )))
+    )?;
+    write!(
+        host_terminal,
+        "{}",
+        Csi::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+            DecPrivateModeCode::BracketedPaste
+        )))
+    )?;
+
+    let flags = KittyKeyboardFlags::DISAMBIGUATE_ESCAPE_CODES
+        | KittyKeyboardFlags::REPORT_EVENT_TYPES
+        | KittyKeyboardFlags::REPORT_ALTERNATE_KEYS
+        | KittyKeyboardFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES;
+    write!(
+        host_terminal,
+        "{}",
+        Csi::Keyboard(Keyboard::PushFlags(flags))
+    )?;
+    host_terminal.flush()?;
+
+    let _guard = TerminalCapabilityGuard;
 
     let mut settings = Settings::default();
     settings.cols = Some(cols);
@@ -607,10 +697,11 @@ pub fn record(
     let renderer_tx = renderer_handle.tx.clone();
 
     // 5. Setup channels and multi-threaded event polling
+    let reader = host_terminal.event_reader();
     let (event_tx, event_rx) = crossbeam_channel::unbounded();
     std::thread::spawn(move || {
         loop {
-            match crossterm::event::read() {
+            match reader.read(|_| true) {
                 Ok(event) => {
                     if event_tx.send(event).is_err() {
                         break;
@@ -664,12 +755,10 @@ pub fn record(
     let mut active_tracker: Option<MouseSegmentTracker> = None;
 
     {
-        // 6. Enter alternate screen buffer, raw mode, and enable host terminal capabilities
-        let _guard = TerminalCapabilityGuard::new()?;
-
-        let backend = CrosstermBackend::new(std::io::stdout());
+        let backend = TerminaBackend::new(host_terminal);
         let mut ratatui_term = RatatuiTerminal::new(backend)?;
-        ratatui_term.clear()?;
+        // Render an empty frame to synchronize ratatui buffer state without deadlocking on get_cursor_position
+        ratatui_term.draw(|_| {})?;
 
         // Mouse tracking variables
         let mut current_mouse_col = 0u16;
@@ -707,7 +796,7 @@ pub fn record(
                     match res {
                         Ok(event) => {
                             match event {
-                                crossterm::event::Event::Key(key_event) => {
+                                termina::Event::Key(key_event) => {
                                     // Interrupt and flush active mouse movement
                                     if let Some(mut tracker) = active_tracker.take() {
                                         if let Some(ev) = tracker.flush() {
@@ -715,9 +804,9 @@ pub fn record(
                                         }
                                     }
 
-                                    let (named_key, mods) = map_crossterm_key(key_event);
+                                    let (named_key, mods) = map_termina_key(key_event);
                                     let key_spec = KeySpec { key: named_key, mods };
-                                    let action = if key_event.kind == crossterm::event::KeyEventKind::Release {
+                                    let action = if key_event.kind == termina::event::KeyEventKind::Release {
                                         KeyAction::Release
                                     } else {
                                         KeyAction::Press
@@ -759,13 +848,13 @@ pub fn record(
                                         pty.write(bytes);
                                     }
                                 }
-                                crossterm::event::Event::Mouse(mouse_event) => {
+                                termina::Event::Mouse(mouse_event) => {
                                     host_mouse_pos = Some((mouse_event.column, mouse_event.row));
 
                                     let is_click_here = click_here_cells.contains(&(mouse_event.column, mouse_event.row));
 
                                     if is_click_here {
-                                        if let crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) = mouse_event.kind {
+                                        if let termina::event::MouseEventKind::Down(termina::event::MouseButton::Left) = mouse_event.kind {
                                             if let crate::pty::Child::Active(pid) = child {
                                                 let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGHUP);
                                                 std::thread::sleep(std::time::Duration::from_millis(100));
@@ -825,7 +914,7 @@ pub fn record(
                                         continue;
                                     }
 
-                                    if let Some((action, button)) = map_crossterm_mouse(mouse_event.kind) {
+                                    if let Some((action, button)) = map_termina_mouse(mouse_event.kind) {
                                             let col = mouse_event.column;
                                             let row = mouse_event.row;
 
@@ -883,7 +972,7 @@ pub fn record(
                                                 }
 
                                                 if start_new {
-                                                    let tracker_mods = map_crossterm_mods(mouse_event.modifiers);
+                                                    let tracker_mods = map_termina_mods(mouse_event.modifiers);
                                                     let mut tracker = MouseSegmentTracker::new(is_drag, tracker_mods);
                                                     // Initialize segment starting point at the previous mouse coords
                                                     tracker.points.push((current_mouse_col, current_mouse_row, last_event_time));
@@ -911,7 +1000,7 @@ pub fn record(
                                                     recorded_events.push(Event::Sleep(current_idle));
                                                 }
 
-                                                let ev_mods = map_crossterm_mods(mouse_event.modifiers);
+                                                let ev_mods = map_termina_mods(mouse_event.modifiers);
 
                                                 // Process instantaneous mouse event
                                                 match action {
@@ -989,7 +1078,7 @@ pub fn record(
                                             }
                                         }
                                     }
-                                crossterm::event::Event::Paste(text) => {
+                                termina::Event::Paste(text) => {
                                     flush_char_buffer(&mut char_buffer, &mut recorded_events, &mut last_event_time);
                                     let now = Instant::now();
                                     let idle_duration = now.duration_since(last_event_time);
@@ -1003,7 +1092,9 @@ pub fn record(
                                     last_event_time = now;
                                     pty.write(text.as_bytes());
                                 }
-                                crossterm::event::Event::Resize(new_host_cols, new_host_rows) => {
+                                termina::Event::WindowResized(ws) => {
+                                    let new_host_cols = ws.cols;
+                                    let new_host_rows = ws.rows;
                                     let new_cols = new_host_cols;
                                     let new_rows = new_host_rows.saturating_sub(2);
                                     if new_rows > 0 {
@@ -1060,6 +1151,8 @@ pub fn record(
             }
         }
     }
+
+    drop(_guard);
 
     info!("interactive session finished; compiling recording in background...");
 
