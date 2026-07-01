@@ -453,6 +453,34 @@ impl tracing_subscriber::fmt::time::FormatTime for Uptime {
     }
 }
 
+struct LogWriter;
+
+impl std::io::Write for LogWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if evp::telemetry::SUSPEND_LOGGING.load(std::sync::atomic::Ordering::Relaxed) {
+            Ok(buf.len())
+        } else {
+            std::io::stderr().write(buf)
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        if evp::telemetry::SUSPEND_LOGGING.load(std::sync::atomic::Ordering::Relaxed) {
+            Ok(())
+        } else {
+            std::io::stderr().flush()
+        }
+    }
+}
+
+struct MakeLogWriter;
+
+impl<'a> tracing_subscriber::fmt::writer::MakeWriter<'a> for MakeLogWriter {
+    type Writer = LogWriter;
+    fn make_writer(&'a self) -> Self::Writer {
+        LogWriter
+    }
+}
+
 fn init_tracing(cli: &Cli, start: Instant) {
     let filter = cli
         .log_level
@@ -462,6 +490,7 @@ fn init_tracing(cli: &Cli, start: Instant) {
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))
         });
     let _ = tracing_subscriber::fmt()
+        .with_writer(MakeLogWriter)
         .with_env_filter(filter.clone())
         .with_timer(Uptime(start))
         .try_init();

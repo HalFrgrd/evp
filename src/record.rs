@@ -695,6 +695,7 @@ impl Drop for TerminalCapabilityGuard {
         if let Ok(mut term) = termina::PlatformTerminal::new() {
             let _ = term.enter_cooked_mode();
         }
+        crate::telemetry::SUSPEND_LOGGING.store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -730,6 +731,7 @@ pub fn record(
     host_terminal
         .enter_raw_mode()
         .context("entering raw mode")?;
+    crate::telemetry::SUSPEND_LOGGING.store(true, std::sync::atomic::Ordering::SeqCst);
     use std::io::Write;
     use termina::escape::csi::{
         Csi, DecModeSetting, DecPrivateMode, DecPrivateModeCode, Keyboard, KittyKeyboardFlags, Mode,
