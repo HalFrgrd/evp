@@ -1351,20 +1351,25 @@ pub fn record(
                     }
                 }
                 recv(ticker) -> _ => {
+                    let _loop_timer = crate::telemetry::ScopeTimer::new("record_tick_total");
                     let elapsed = start_time.elapsed();
-                    if let Ok((mut frame, _)) = capture(
-                        &mut render_state,
-                        &mut row_it,
-                        &mut cell_it,
-                        &mut terminal,
-                        elapsed,
-                        cols,
-                        rows,
-                        true,
-                        &mut last_cursor_moved_at,
-                        &mut prev_cursor_pos,
-                        None,
-                    ) {
+                    let capture_res = {
+                        let _cap_timer = crate::telemetry::ScopeTimer::new("record_capture");
+                        capture(
+                            &mut render_state,
+                            &mut row_it,
+                            &mut cell_it,
+                            &mut terminal,
+                            elapsed,
+                            cols,
+                            rows,
+                            true,
+                            &mut last_cursor_moved_at,
+                            &mut prev_cursor_pos,
+                            None,
+                        )
+                    };
+                    if let Ok((mut frame, _)) = capture_res {
                         if Instant::now().duration_since(last_mouse_move_time) > Duration::from_secs(3) {
                             current_mouse_pos = None;
                         }
@@ -1372,12 +1377,17 @@ pub fn record(
                         frame.mouse_cursor = current_mouse_pos;
 
                         // Update host screen via Ratatui
-                        if let Ok((height, cells)) = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos) {
+                        let draw_res = {
+                            let _draw_timer = crate::telemetry::ScopeTimer::new("record_draw_terminal_state");
+                            draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos)
+                        };
+                        if let Ok((height, cells)) = draw_res {
                             header_height = height;
                             click_here_cells = cells;
                         }
 
                         // Send to background renderer
+                        let _send_timer = crate::telemetry::ScopeTimer::new("record_send_frame");
                         let _ = renderer_tx.try_send(frame);
                     }
                 }

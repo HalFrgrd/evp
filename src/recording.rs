@@ -81,6 +81,21 @@ pub struct RawFrame {
     pub title: Option<String>,
 }
 
+impl RawFrame {
+    pub fn is_visually_identical(&self, other: &RawFrame) -> bool {
+        self.cols == other.cols
+            && self.rows == other.rows
+            && self.cursor == other.cursor
+            && self.default_fg == other.default_fg
+            && self.default_bg == other.default_bg
+            && self.cursor_color == other.cursor_color
+            && self.cursor_accent == other.cursor_accent
+            && self.title == other.title
+            && self.mouse_cursor == other.mouse_cursor
+            && self.cells == other.cells
+    }
+}
+
 /// A single cell diff entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CellChange {

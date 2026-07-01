@@ -301,6 +301,7 @@ fn run_gif_stream_worker(
     no_system_fonts: bool,
     theme: crate::Theme,
 ) -> Result<()> {
+    let _worker_timer = crate::telemetry::ScopeTimer::new("gif_worker_total");
     let start_time = std::time::Instant::now();
 
     let base16 = theme.palette_rgb()?;
@@ -332,9 +333,17 @@ fn run_gif_stream_worker(
     let mut last_seen_t_ms = 0u32;
     let mut pending_frame: Option<(Vec<u8>, u32)> = None;
     let mut prev_buf: Option<Vec<u8>> = None;
+    let mut prev_frame: Option<RawFrame> = None;
     let mut frame_index = 0usize;
 
     while let Ok(frame) = rx.recv() {
+        if let Some(ref prev) = prev_frame {
+            if frame.is_visually_identical(prev) {
+                last_seen_t_ms = frame.t_ms;
+                continue;
+            }
+        }
+
         if no_system_fonts {
             for cell in &frame.cells {
                 for ch in cell.text.chars() {
@@ -349,19 +358,38 @@ fn run_gif_stream_worker(
                 }
             }
         }
-        let buf = rasterize_raw_frame(&frame, &font_set, scale, baseline, cfg, &mut glyph_cache);
+        let buf = {
+            let _rast_timer = crate::telemetry::ScopeTimer::new("gif_rasterize_frame");
+            rasterize_raw_frame(&frame, &font_set, scale, baseline, cfg, &mut glyph_cache)
+        };
 
         last_seen_t_ms = frame.t_ms;
 
-        // Skip visually identical frames
-        if let Some(ref prev) = prev_buf {
-            if prev == &buf {
-                continue;
-            }
-        }
-
         if let Some((pending_buf, pending_t_ms)) = pending_frame.take() {
             let delay_ms = frame.t_ms.saturating_sub(pending_t_ms);
+            {
+                let _write_timer = crate::telemetry::ScopeTimer::new("gif_write_frame");
+                write_gif_frame(
+                    &mut encoder,
+                    &pending_buf,
+                    prev_buf.as_ref(),
+                    delay_ms,
+                    cfg,
+                    &palette,
+                )?;
+            }
+            frame_index += 1;
+            prev_buf = Some(pending_buf);
+        }
+
+        pending_frame = Some((buf, frame.t_ms));
+        prev_frame = Some(frame);
+    }
+
+    if let Some((pending_buf, pending_t_ms)) = pending_frame.take() {
+        let delay_ms = last_seen_t_ms.saturating_sub(pending_t_ms).max(33);
+        {
+            let _write_timer = crate::telemetry::ScopeTimer::new("gif_write_frame");
             write_gif_frame(
                 &mut encoder,
                 &pending_buf,
@@ -370,52 +398,39 @@ fn run_gif_stream_worker(
                 cfg,
                 &palette,
             )?;
-            frame_index += 1;
-            prev_buf = Some(pending_buf);
         }
-
-        pending_frame = Some((buf, frame.t_ms));
-    }
-
-    if let Some((pending_buf, pending_t_ms)) = pending_frame.take() {
-        let delay_ms = last_seen_t_ms.saturating_sub(pending_t_ms).max(33);
-        write_gif_frame(
-            &mut encoder,
-            &pending_buf,
-            prev_buf.as_ref(),
-            delay_ms,
-            cfg,
-            &palette,
-        )?;
         frame_index += 1;
     }
 
     // Explicitly drop encoder to close/flush the file
     drop(encoder);
 
-    let elapsed_ms = start_time.elapsed().as_millis();
-    if let Ok(mut data) = std::fs::read(&out) {
-        if data.last() == Some(&0x3B) {
-            data.pop(); // Remove trailer
-            let comment = format!(
-                "\nCreated with EVP v{} (sha: {}, frames: {}, cols: {}, rows: {}, fps: {}, render_time: {}ms)\n",
-                env!("CARGO_PKG_VERSION"),
-                env!("VERGEN_GIT_SHA"),
-                frame_index,
-                cfg.cols,
-                cfg.rows,
-                cfg.framerate,
-                elapsed_ms
-            );
-            let comment_bytes = comment.as_bytes();
-            data.push(0x21); // Extension Introducer
-            data.push(0xFE); // Comment Label
-            let len = comment_bytes.len().min(255);
-            data.push(len as u8); // Block size
-            data.extend_from_slice(&comment_bytes[..len]);
-            data.push(0x00); // Block Terminator
-            data.push(0x3B); // Restore GIF Trailer
-            let _ = std::fs::write(&out, data);
+    {
+        let _finalize_timer = crate::telemetry::ScopeTimer::new("gif_finalize_comment");
+        let elapsed_ms = start_time.elapsed().as_millis();
+        if let Ok(mut data) = std::fs::read(&out) {
+            if data.last() == Some(&0x3B) {
+                data.pop(); // Remove trailer
+                let comment = format!(
+                    "\nCreated with EVP v{} (sha: {}, frames: {}, cols: {}, rows: {}, fps: {}, render_time: {}ms)\n",
+                    env!("CARGO_PKG_VERSION"),
+                    env!("VERGEN_GIT_SHA"),
+                    frame_index,
+                    cfg.cols,
+                    cfg.rows,
+                    cfg.framerate,
+                    elapsed_ms
+                );
+                let comment_bytes = comment.as_bytes();
+                data.push(0x21); // Extension Introducer
+                data.push(0xFE); // Comment Label
+                let len = comment_bytes.len().min(255);
+                data.push(len as u8); // Block size
+                data.extend_from_slice(&comment_bytes[..len]);
+                data.push(0x00); // Block Terminator
+                data.push(0x3B); // Restore GIF Trailer
+                let _ = std::fs::write(&out, data);
+            }
         }
     }
 
