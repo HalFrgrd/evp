@@ -26,6 +26,13 @@ use crate::{
 
 const TRANSPARENT_COLOR_INDEX: u8 = 255;
 
+const MOUSE_POINTER_WIDTH: u32 = 12;
+const MOUSE_POINTER_HEIGHT: u32 = 19;
+
+const MOUSE_RIPPLE_CLICK_RADIUS: u32 = 16;
+const MOUSE_RIPPLE_DRAG_RADIUS: u32 = 32;
+const MOUSE_RIPPLE_MAX_RADIUS: i32 = 48; // Bounding box padding for mouse updates
+
 /// Cache key identifying a rasterised glyph outline.
 #[derive(Hash, Eq, PartialEq)]
 struct GlyphCacheKey {
@@ -443,10 +450,10 @@ fn is_cell_changed(
             let cx = (cfg.content_x as f32 + m_col * cell_w as f32 + cell_w as f32 / 2.0) as i32;
             let cy = (cfg.content_y as f32 + m_row * cell_h as f32 + cell_h as f32 / 2.0) as i32;
 
-            let x_min = cx - 48;
-            let x_max = cx + 48;
-            let y_min = cy - 48;
-            let y_max = cy + 48;
+            let x_min = cx - MOUSE_RIPPLE_MAX_RADIUS;
+            let x_max = cx + MOUSE_RIPPLE_MAX_RADIUS;
+            let y_min = cy - MOUSE_RIPPLE_MAX_RADIUS;
+            let y_max = cy + MOUSE_RIPPLE_MAX_RADIUS;
 
             let cell_x = (cfg.content_x + col as u32 * cell_w) as i32;
             let cell_y = (cfg.content_y + row as u32 * cell_h) as i32;
@@ -705,6 +712,54 @@ fn rasterize_raw_frame_idx(
         }
     }
 
+    // Restore margin/border pixels under the mouse cursor areas (current and previous)
+    // to erase any pointer/ripple artifacts overlapping the margins or borders
+    for mouse in &[curr.mouse_cursor, prev.and_then(|p| p.mouse_cursor)] {
+        if let Some((m_col, m_row, _)) = *mouse {
+            let cx = (cfg.content_x as f32 + m_col * cell_w as f32 + cell_w as f32 / 2.0) as i32;
+            let cy = (cfg.content_y as f32 + m_row * cell_h as f32 + cell_h as f32 / 2.0) as i32;
+
+            let x_min = (cx - MOUSE_RIPPLE_MAX_RADIUS).max(0) as u32;
+            let x_max = (cx + MOUSE_RIPPLE_MAX_RADIUS)
+                .min(cfg.canvas_w as i32 - 1)
+                .max(0) as u32;
+            let y_min = (cy - MOUSE_RIPPLE_MAX_RADIUS).max(0) as u32;
+            let y_max = (cy + MOUSE_RIPPLE_MAX_RADIUS)
+                .min(cfg.canvas_h as i32 - 1)
+                .max(0) as u32;
+
+            let radius = cfg
+                .frame_style
+                .border_radius_px
+                .min(cfg.frame_w / 2)
+                .min(cfg.frame_h / 2) as i64;
+
+            for py in y_min..=y_max {
+                for px in x_min..=x_max {
+                    let in_frame = px >= cfg.frame_x
+                        && px < cfg.frame_x + cfg.frame_w
+                        && py >= cfg.frame_y
+                        && py < cfg.frame_y + cfg.frame_h;
+
+                    let is_margin = if !in_frame {
+                        true
+                    } else if radius > 0 {
+                        !inside_rounded_rect(px, py, cfg, radius)
+                    } else {
+                        false
+                    };
+
+                    if is_margin {
+                        let i = (py * cfg.canvas_w + px) as usize;
+                        if i < buf.len() {
+                            buf[i] = margin_idx;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if let Some((m_col, m_row, m_state)) = curr.mouse_cursor {
         use crate::recording::MouseState;
         let cx = (cfg.content_x as f32 + m_col * cell_w as f32 + cell_w as f32 / 2.0) as i32;
@@ -720,7 +775,7 @@ fn rasterize_raw_frame_idx(
                     cfg.canvas_h,
                     cx,
                     cy,
-                    16,
+                    MOUSE_RIPPLE_CLICK_RADIUS,
                     [255, 0, 0],
                     0.5,
                     curr.default_bg,
@@ -735,7 +790,7 @@ fn rasterize_raw_frame_idx(
                     cfg.canvas_h,
                     cx,
                     cy,
-                    16,
+                    MOUSE_RIPPLE_DRAG_RADIUS,
                     [237, 97, 215],
                     0.5,
                     curr.default_bg,
@@ -744,9 +799,9 @@ fn rasterize_raw_frame_idx(
             MouseState::Moving => {}
         }
 
-        for dy in 0..CURSOR_HEIGHT {
-            for dx in 0..CURSOR_WIDTH {
-                let val = CURSOR_BITMAP[(dy * CURSOR_WIDTH + dx) as usize];
+        for dy in 0..MOUSE_POINTER_HEIGHT {
+            for dx in 0..MOUSE_POINTER_WIDTH {
+                let val = CURSOR_BITMAP[(dy * MOUSE_POINTER_WIDTH + dx) as usize];
                 if val == 0 {
                     continue;
                 }
@@ -797,10 +852,7 @@ fn dim_color(fg: [u8; 3], bg: [u8; 3]) -> [u8; 3] {
     ]
 }
 
-const CURSOR_WIDTH: u32 = 12;
-const CURSOR_HEIGHT: u32 = 19;
-
-const CURSOR_BITMAP: [u8; 12 * 19] = [
+const CURSOR_BITMAP: [u8; MOUSE_POINTER_WIDTH as usize * MOUSE_POINTER_HEIGHT as usize] = [
     2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 2, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 2, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 2, 1, 1, 1,
     1, 2, 0, 0, 0, 0, 0, 0, 2, 1, 1, 1, 1, 1, 2, 0, 0, 0, 0, 0, 2, 1, 1, 1, 1, 1, 1, 2, 0, 0, 0, 0,

@@ -73,4 +73,5 @@ pub fn clear_timings() {
     }
 }
 
-pub static SUSPEND_LOGGING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static SUSPEND_LOGGING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
