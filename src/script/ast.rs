@@ -179,20 +179,14 @@ pub enum Event {
     },
     /// Click and drag mouse.
     MouseDrag {
-        start_col: u16,
-        start_row: u16,
-        end_col: u16,
-        end_row: u16,
+        coords: Vec<(u16, u16)>,
         mods: ModSet,
         delay: Duration,
         easing: Option<StandardEasing>,
     },
     /// Move mouse without pressing any buttons.
     MouseMove {
-        start_col: u16,
-        start_row: u16,
-        end_col: u16,
-        end_row: u16,
+        coords: Vec<(u16, u16)>,
         mods: ModSet,
         delay: Duration,
         easing: Option<StandardEasing>,

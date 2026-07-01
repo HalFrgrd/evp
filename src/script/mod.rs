@@ -235,41 +235,39 @@ pub fn write_tape_script(
                 ));
             }
             Event::MouseDrag {
-                start_col,
-                start_row,
-                end_col,
-                end_row,
+                coords,
                 mods,
                 delay,
                 easing,
             } => {
+                let coords_str = coords
+                    .iter()
+                    .map(|(c, r)| format!("{} {}", c, r))
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 tape_content.push_str(&format!(
-                    "{}{} {} {} {} {}\n",
+                    "{}{} {}\n",
                     format_mods_prefix(*mods),
                     format_mouse_cmd("MouseDrag", *delay, *easing),
-                    start_col,
-                    start_row,
-                    end_col,
-                    end_row
+                    coords_str
                 ));
             }
             Event::MouseMove {
-                start_col,
-                start_row,
-                end_col,
-                end_row,
+                coords,
                 mods,
                 delay,
                 easing,
             } => {
+                let coords_str = coords
+                    .iter()
+                    .map(|(c, r)| format!("{} {}", c, r))
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 tape_content.push_str(&format!(
-                    "{}{} {} {} {} {}\n",
+                    "{}{} {}\n",
                     format_mods_prefix(*mods),
                     format_mouse_cmd("MouseMove", *delay, *easing),
-                    start_col,
-                    start_row,
-                    end_col,
-                    end_row
+                    coords_str
                 ));
             }
             Event::MouseScroll {

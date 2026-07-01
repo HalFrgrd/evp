@@ -389,22 +389,50 @@ fn draw_terminal_state(
     Ok((header_height, click_cells))
 }
 
-/// Distance from point C to line AB. Collinear if within deviation threshold.
-fn is_collinear(ax: u16, ay: u16, bx: u16, by: u16, cx: u16, cy: u16) -> bool {
-    let dx = bx as f32 - ax as f32;
-    let dy = by as f32 - ay as f32;
+fn perpendicular_distance(p: (u16, u16), line_start: (u16, u16), line_end: (u16, u16)) -> f32 {
+    let dx = line_end.0 as f32 - line_start.0 as f32;
+    let dy = line_end.1 as f32 - line_start.1 as f32;
+    let len_sq = dx * dx + dy * dy;
+    if len_sq < 0.01 {
+        let diff_x = p.0 as f32 - line_start.0 as f32;
+        let diff_y = p.1 as f32 - line_start.1 as f32;
+        return (diff_x * diff_x + diff_y * diff_y).sqrt();
+    }
+    let num = (dy * p.0 as f32 - dx * p.1 as f32 + line_end.0 as f32 * line_start.1 as f32
+        - line_end.1 as f32 * line_start.0 as f32)
+        .abs();
+    num / len_sq.sqrt()
+}
 
-    let length_sq = dx * dx + dy * dy;
-    if length_sq < 0.01 {
-        return true;
+fn rdp_simplify(points: &[(u16, u16, Instant)], epsilon: f32) -> Vec<(u16, u16, Instant)> {
+    if points.len() < 3 {
+        return points.to_vec();
     }
 
-    let numerator = ((dy * cx as f32) - (dx * cy as f32) + (bx as f32 * ay as f32)
-        - (by as f32 * ax as f32))
-        .abs();
-    let distance = numerator / length_sq.sqrt();
+    let mut dmax = 0.0;
+    let mut index = 0;
+    let end = points.len() - 1;
+    let line_start = (points[0].0, points[0].1);
+    let line_end = (points[end].0, points[end].1);
 
-    distance <= 1.5
+    for i in 1..end {
+        let p = (points[i].0, points[i].1);
+        let dist = perpendicular_distance(p, line_start, line_end);
+        if dist > dmax {
+            index = i;
+            dmax = dist;
+        }
+    }
+
+    if dmax > epsilon {
+        let mut results1 = rdp_simplify(&points[0..=index], epsilon);
+        let results2 = rdp_simplify(&points[index..], epsilon);
+        results1.pop();
+        results1.extend(results2);
+        results1
+    } else {
+        vec![points[0], points[end]]
+    }
 }
 
 fn find_best_easing(points: &[(u16, u16, Instant)]) -> StandardEasing {
@@ -537,8 +565,8 @@ impl MouseSegmentTracker {
 
         let last_point = *self.points.last().unwrap();
 
-        // 1. If paused for more than 1s, break to a new segment
-        if now.duration_since(last_point.2) > Duration::from_secs(1) {
+        // 1. If paused for more than 500ms, break to a new segment
+        if now.duration_since(last_point.2) > Duration::from_millis(500) {
             let ev = self.flush();
             self.points.push((col, row, now));
             return ev;
@@ -551,21 +579,6 @@ impl MouseSegmentTracker {
             return None;
         }
 
-        // 3. Collinearity validation
-        if self.points.len() >= 2 {
-            let start = self.points[0];
-            let end = (col, row);
-
-            for &p in &self.points[1..] {
-                if !is_collinear(start.0, start.1, end.0, end.1, p.0, p.1) {
-                    let ev = self.flush();
-                    self.points.push(last_point);
-                    self.points.push((col, row, now));
-                    return ev;
-                }
-            }
-        }
-
         self.points.push((col, row, now));
         None
     }
@@ -576,8 +589,14 @@ impl MouseSegmentTracker {
             return None;
         }
 
-        let start = self.points.first().unwrap();
-        let end = self.points.last().unwrap();
+        let simplified = rdp_simplify(&self.points, 1.5);
+        if simplified.len() < 2 {
+            self.points.clear();
+            return None;
+        }
+
+        let start = simplified.first().unwrap();
+        let end = simplified.last().unwrap();
         let duration = end.2.duration_since(start.2);
         let delay = if duration < Duration::from_millis(50) {
             Duration::from_millis(50)
@@ -585,45 +604,33 @@ impl MouseSegmentTracker {
             duration
         };
 
-        let start_col = if self.track_pixels {
-            (start.0 as u32 / self.cell_width) as u16
-        } else {
-            start.0
-        };
-        let start_row = if self.track_pixels {
-            (start.1 as u32 / self.cell_height) as u16
-        } else {
-            start.1
-        };
-        let end_col = if self.track_pixels {
-            (end.0 as u32 / self.cell_width) as u16
-        } else {
-            end.0
-        };
-        let end_row = if self.track_pixels {
-            (end.1 as u32 / self.cell_height) as u16
-        } else {
-            end.1
-        };
+        let mut coords = Vec::with_capacity(simplified.len());
+        for p in &simplified {
+            let col = if self.track_pixels {
+                (p.0 as u32 / self.cell_width) as u16
+            } else {
+                p.0
+            };
+            let row = if self.track_pixels {
+                (p.1 as u32 / self.cell_height) as u16
+            } else {
+                p.1
+            };
+            coords.push((col, row));
+        }
 
         let best_easing = find_best_easing(&self.points);
 
         let ev = if self.is_drag {
             Some(Event::MouseDrag {
-                start_col,
-                start_row,
-                end_col,
-                end_row,
+                coords,
                 mods: self.mods,
                 delay,
                 easing: Some(best_easing),
             })
         } else {
             Some(Event::MouseMove {
-                start_col,
-                start_row,
-                end_col,
-                end_row,
+                coords,
                 mods: self.mods,
                 delay,
                 easing: Some(best_easing),
@@ -1245,10 +1252,7 @@ pub fn record(
                                                                 });
                                                             } else {
                                                                 recorded_events.push(Event::MouseDrag {
-                                                                    start_col: drag_start_col,
-                                                                    start_row: drag_start_row,
-                                                                    end_col: col,
-                                                                    end_row: pty_row,
+                                                                    coords: vec![(drag_start_col, drag_start_row), (col, pty_row)],
                                                                     mods: ev_mods,
                                                                     delay: Duration::from_millis(50),
                                                                     easing: Some(StandardEasing::InOutElastic),

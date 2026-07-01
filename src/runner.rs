@@ -882,25 +882,31 @@ fn build_timeline(
                 });
             }
             Event::MouseDrag {
-                start_col,
-                start_row,
-                end_col,
-                end_row,
+                coords,
                 mods,
                 delay,
                 easing,
             } => {
                 let per = scale(*delay);
-                let points = generate_line_points(
-                    *start_col as i16,
-                    *start_row as i16,
-                    *end_col as i16,
-                    *end_row as i16,
-                );
+                let points = generate_spline_points(coords);
                 if !points.is_empty() {
+                    let total_dur = per * (points.len() - 1) as u32;
+                    let start_cursor = cursor;
+
+                    use easing_function::Easing;
+                    let ease_func = easing.unwrap_or(StandardEasing::InOutCubic);
+
+                    let mut times = Vec::with_capacity(points.len());
+                    for j in 0..points.len() {
+                        let f = j as f32 / (points.len() - 1) as f32;
+                        let f_eased = ease_func.ease(f);
+                        let t_offset = total_dur.mul_f32(f_eased);
+                        times.push(start_cursor + t_offset);
+                    }
+
                     let (x0, y0) = points[0];
                     out.push(Scheduled {
-                        at: cursor,
+                        at: start_cursor,
                         event: Event::MouseInput {
                             action: crate::script::MouseAction::Press,
                             button: Some(crate::script::MouseButton::Left),
@@ -911,31 +917,37 @@ fn build_timeline(
                         },
                     });
 
+                    for j in 0..points.len() - 1 {
+                        let (sx, sy) = points[j];
+                        let (ex, ey) = points[j + 1];
+                        mouse_segments.push(MouseSegment {
+                            start_time: times[j],
+                            end_time: times[j + 1],
+                            start_col: sx as f32,
+                            start_row: sy as f32,
+                            end_col: ex as f32,
+                            end_row: ey as f32,
+                            state: crate::recording::MouseState::Dragging,
+                            easing: None,
+                        });
+                    }
+
+                    let t_last = *times.last().unwrap();
+                    let (x_last, y_last) = *points.last().unwrap();
                     mouse_segments.push(MouseSegment {
-                        start_time: cursor,
-                        end_time: cursor + (points.len() - 1) as u32 * per,
-                        start_col: *start_col as f32,
-                        start_row: *start_row as f32,
-                        end_col: *end_col as f32,
-                        end_row: *end_row as f32,
-                        state: crate::recording::MouseState::Dragging,
-                        easing: *easing,
-                    });
-                    mouse_segments.push(MouseSegment {
-                        start_time: cursor + (points.len() - 1) as u32 * per,
-                        end_time: cursor + points.len() as u32 * per,
-                        start_col: *end_col as f32,
-                        start_row: *end_row as f32,
-                        end_col: *end_col as f32,
-                        end_row: *end_row as f32,
+                        start_time: t_last,
+                        end_time: t_last + per,
+                        start_col: x_last as f32,
+                        start_row: y_last as f32,
+                        end_col: x_last as f32,
+                        end_row: y_last as f32,
                         state: crate::recording::MouseState::Clicking,
                         easing: None,
                     });
 
-                    for &(x, y) in points.iter().skip(1) {
-                        cursor += per;
+                    for (j, &(x, y)) in points.iter().enumerate().skip(1) {
                         out.push(Scheduled {
-                            at: cursor,
+                            at: times[j],
                             event: Event::MouseInput {
                                 action: crate::script::MouseAction::Motion,
                                 button: Some(crate::script::MouseButton::Left),
@@ -946,15 +958,15 @@ fn build_timeline(
                             },
                         });
                     }
-                    let (x1, y1) = *points.last().unwrap();
-                    cursor += per;
+
+                    cursor = t_last + per;
                     out.push(Scheduled {
                         at: cursor,
                         event: Event::MouseInput {
                             action: crate::script::MouseAction::Release,
                             button: Some(crate::script::MouseButton::Left),
-                            col: x1,
-                            row: y1,
+                            col: x_last,
+                            row: y_last,
                             pixel_coords: None,
                             mods: *mods,
                         },
@@ -962,25 +974,31 @@ fn build_timeline(
                 }
             }
             Event::MouseMove {
-                start_col,
-                start_row,
-                end_col,
-                end_row,
+                coords,
                 mods,
                 delay,
                 easing,
             } => {
                 let per = scale(*delay);
-                let points = generate_line_points(
-                    *start_col as i16,
-                    *start_row as i16,
-                    *end_col as i16,
-                    *end_row as i16,
-                );
+                let points = generate_spline_points(coords);
                 if !points.is_empty() {
+                    let total_dur = per * (points.len() - 1) as u32;
+                    let start_cursor = cursor;
+
+                    use easing_function::Easing;
+                    let ease_func = easing.unwrap_or(StandardEasing::InOutCubic);
+
+                    let mut times = Vec::with_capacity(points.len());
+                    for j in 0..points.len() {
+                        let f = j as f32 / (points.len() - 1) as f32;
+                        let f_eased = ease_func.ease(f);
+                        let t_offset = total_dur.mul_f32(f_eased);
+                        times.push(start_cursor + t_offset);
+                    }
+
                     let (x0, y0) = points[0];
                     out.push(Scheduled {
-                        at: cursor,
+                        at: start_cursor,
                         event: Event::MouseInput {
                             action: crate::script::MouseAction::Motion,
                             button: None,
@@ -991,21 +1009,24 @@ fn build_timeline(
                         },
                     });
 
-                    mouse_segments.push(MouseSegment {
-                        start_time: cursor,
-                        end_time: cursor + (points.len() - 1) as u32 * per,
-                        start_col: *start_col as f32,
-                        start_row: *start_row as f32,
-                        end_col: *end_col as f32,
-                        end_row: *end_row as f32,
-                        state: crate::recording::MouseState::Moving,
-                        easing: *easing,
-                    });
+                    for j in 0..points.len() - 1 {
+                        let (sx, sy) = points[j];
+                        let (ex, ey) = points[j + 1];
+                        mouse_segments.push(MouseSegment {
+                            start_time: times[j],
+                            end_time: times[j + 1],
+                            start_col: sx as f32,
+                            start_row: sy as f32,
+                            end_col: ex as f32,
+                            end_row: ey as f32,
+                            state: crate::recording::MouseState::Moving,
+                            easing: None,
+                        });
+                    }
 
-                    for &(x, y) in points.iter().skip(1) {
-                        cursor += per;
+                    for (j, &(x, y)) in points.iter().enumerate().skip(1) {
                         out.push(Scheduled {
-                            at: cursor,
+                            at: times[j],
                             event: Event::MouseInput {
                                 action: crate::script::MouseAction::Motion,
                                 button: None,
@@ -1016,6 +1037,8 @@ fn build_timeline(
                             },
                         });
                     }
+
+                    cursor = *times.last().unwrap();
                 }
             }
             Event::MouseInput { .. }
@@ -1066,6 +1089,71 @@ fn generate_line_points(x0: i16, y0: i16, x1: i16, y1: i16) -> Vec<(u16, u16)> {
         }
     }
     points
+}
+
+fn generate_spline_points(coords: &[(u16, u16)]) -> Vec<(u16, u16)> {
+    if coords.is_empty() {
+        return Vec::new();
+    }
+    if coords.len() == 1 {
+        return vec![coords[0]];
+    }
+    if coords.len() == 2 {
+        return generate_line_points(
+            coords[0].0 as i16,
+            coords[0].1 as i16,
+            coords[1].0 as i16,
+            coords[1].1 as i16,
+        );
+    }
+
+    let mut out = Vec::new();
+    let m = coords.len();
+
+    for i in 0..m - 1 {
+        let p1 = coords[i];
+        let p2 = coords[i + 1];
+        let p0 = if i == 0 { p1 } else { coords[i - 1] };
+        let p3 = if i == m - 2 { p2 } else { coords[i + 2] };
+
+        let dx = p2.0 as f32 - p1.0 as f32;
+        let dy = p2.1 as f32 - p1.1 as f32;
+        let dist = (dx * dx + dy * dy).sqrt();
+        let steps = (dist * 2.0).ceil() as usize;
+        let steps = steps.max(5);
+
+        for step in 0..steps {
+            let u = step as f32 / steps as f32;
+
+            let x = 0.5
+                * ((2.0 * p1.0 as f32)
+                    + (-(p0.0 as f32) + (p2.0 as f32)) * u
+                    + (2.0 * p0.0 as f32 - 5.0 * p1.0 as f32 + 4.0 * p2.0 as f32 - p3.0 as f32)
+                        * u.powi(2)
+                    + (-(p0.0 as f32) + 3.0 * p1.0 as f32 - 3.0 * p2.0 as f32 + p3.0 as f32)
+                        * u.powi(3));
+            let y = 0.5
+                * ((2.0 * p1.1 as f32)
+                    + (-(p0.1 as f32) + (p2.1 as f32)) * u
+                    + (2.0 * p0.1 as f32 - 5.0 * p1.1 as f32 + 4.0 * p2.1 as f32 - p3.1 as f32)
+                        * u.powi(2)
+                    + (-(p0.1 as f32) + 3.0 * p1.1 as f32 - 3.0 * p2.1 as f32 + p3.1 as f32)
+                        * u.powi(3));
+
+            let rounded_x = x.round() as u16;
+            let rounded_y = y.round() as u16;
+            if out.is_empty() || out.last().unwrap() != &(rounded_x, rounded_y) {
+                out.push((rounded_x, rounded_y));
+            }
+        }
+    }
+
+    let final_pt = *coords.last().unwrap();
+    if out.is_empty() || out.last().unwrap() != &final_pt {
+        out.push(final_pt);
+    }
+
+    out
 }
 
 fn map_mods_to_ghostty(mods: crate::script::ModSet) -> libghostty_vt::key::Mods {

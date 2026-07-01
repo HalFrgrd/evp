@@ -349,12 +349,9 @@ fn parse_line(
         }
         h if h == "MouseDrag" || h.starts_with("MouseDrag@") => {
             let (delay, easing) = parse_mouse_config(h, "MouseDrag", script.settings.typing_speed)?;
-            let (start_col, start_row, end_col, end_row) = parse_drag_coords(rest)?;
+            let coords = parse_multi_coords(rest)?;
             script.events.push(Event::MouseDrag {
-                start_col,
-                start_row,
-                end_col,
-                end_row,
+                coords,
                 mods: mouse_mods,
                 delay,
                 easing,
@@ -362,12 +359,9 @@ fn parse_line(
         }
         h if h == "MouseMove" || h.starts_with("MouseMove@") => {
             let (delay, easing) = parse_mouse_config(h, "MouseMove", script.settings.typing_speed)?;
-            let (start_col, start_row, end_col, end_row) = parse_drag_coords(rest)?;
+            let coords = parse_multi_coords(rest)?;
             script.events.push(Event::MouseMove {
-                start_col,
-                start_row,
-                end_col,
-                end_row,
+                coords,
                 mods: mouse_mods,
                 delay,
                 easing,
@@ -441,23 +435,23 @@ fn parse_coords(rest: &[String]) -> Result<(u16, u16)> {
     Ok((col, row))
 }
 
-fn parse_drag_coords(rest: &[String]) -> Result<(u16, u16, u16, u16)> {
-    if rest.len() < 4 {
-        bail!("Mouse drag/move expects <start_col> <start_row> <end_col> <end_row>");
+fn parse_multi_coords(rest: &[String]) -> Result<Vec<(u16, u16)>> {
+    if rest.len() < 4 || rest.len() % 2 != 0 {
+        bail!(
+            "Mouse drag/move expects an even number of coordinates (at least 4, e.g. <x1> <y1> <x2> <y2> ...)"
+        );
     }
-    let start_col = rest[0]
-        .parse::<u16>()
-        .map_err(|_| anyhow!("Invalid start column `{}`", rest[0]))?;
-    let start_row = rest[1]
-        .parse::<u16>()
-        .map_err(|_| anyhow!("Invalid start row `{}`", rest[1]))?;
-    let end_col = rest[2]
-        .parse::<u16>()
-        .map_err(|_| anyhow!("Invalid end column `{}`", rest[2]))?;
-    let end_row = rest[3]
-        .parse::<u16>()
-        .map_err(|_| anyhow!("Invalid end row `{}`", rest[3]))?;
-    Ok((start_col, start_row, end_col, end_row))
+    let mut coords = Vec::with_capacity(rest.len() / 2);
+    for chunk in rest.chunks_exact(2) {
+        let x = chunk[0]
+            .parse::<u16>()
+            .map_err(|_| anyhow!("Invalid coordinate `{}`", chunk[0]))?;
+        let y = chunk[1]
+            .parse::<u16>()
+            .map_err(|_| anyhow!("Invalid coordinate `{}`", chunk[1]))?;
+        coords.push((x, y));
+    }
+    Ok(coords)
 }
 
 fn parse_scroll(rest: &[String]) -> Result<(u16, u16, ScrollDirection)> {
@@ -1364,11 +1358,11 @@ mod tests {
         ));
         assert!(matches!(
             &s.events[4],
-            Event::MouseDrag { start_col: 10, start_row: 10, end_col: 20, end_row: 20, mods, delay, easing: None } if *delay == Duration::from_millis(50) && *mods == ModSet::default()
+            Event::MouseDrag { coords, mods, delay, easing: None } if *delay == Duration::from_millis(50) && *mods == ModSet::default() && coords == &vec![(10, 10), (20, 20)]
         ));
         assert!(matches!(
             &s.events[5],
-            Event::MouseMove { start_col: 30, start_row: 30, end_col: 40, end_row: 40, mods, delay, easing: None } if *delay == Duration::from_millis(50) && *mods == ModSet::default()
+            Event::MouseMove { coords, mods, delay, easing: None } if *delay == Duration::from_millis(50) && *mods == ModSet::default() && coords == &vec![(30, 30), (40, 40)]
         ));
         assert!(matches!(
             &s.events[6],
@@ -1384,7 +1378,7 @@ mod tests {
         ));
         assert!(matches!(
             &s.events[9],
-            Event::MouseDrag { start_col: 10, start_row: 20, end_col: 30, end_row: 40, mods, .. } if mods.ctrl && mods.alt && !mods.shift
+            Event::MouseDrag { coords, mods, .. } if mods.ctrl && mods.alt && !mods.shift && coords == &vec![(10, 20), (30, 40)]
         ));
         assert!(matches!(
             &s.events[10],
@@ -1401,11 +1395,11 @@ mod tests {
         assert_eq!(s_easing.events.len(), 2);
         assert!(matches!(
             &s_easing.events[0],
-            Event::MouseMove { start_col: 10, start_row: 10, end_col: 20, end_row: 20, delay, easing: Some(StandardEasing::InOutElastic), .. } if *delay == Duration::from_millis(100)
+            Event::MouseMove { coords, delay, easing: Some(StandardEasing::InOutElastic), .. } if *delay == Duration::from_millis(100) && coords == &vec![(10, 10), (20, 20)]
         ));
         assert!(matches!(
             &s_easing.events[1],
-            Event::MouseDrag { start_col: 30, start_row: 30, end_col: 40, end_row: 40, delay, easing: Some(StandardEasing::InOutQuadradic), .. } if *delay == Duration::from_millis(50)
+            Event::MouseDrag { coords, delay, easing: Some(StandardEasing::InOutQuadradic), .. } if *delay == Duration::from_millis(50) && coords == &vec![(30, 30), (40, 40)]
         ));
     }
 
@@ -1455,19 +1449,13 @@ mod tests {
                 delay: Duration::from_millis(50),
             },
             Event::MouseDrag {
-                start_col: 1,
-                start_row: 2,
-                end_col: 3,
-                end_row: 4,
+                coords: vec![(1, 2), (3, 4)],
                 mods: ModSet::default(),
                 delay: Duration::from_millis(50),
                 easing: None,
             },
             Event::MouseMove {
-                start_col: 5,
-                start_row: 6,
-                end_col: 7,
-                end_row: 8,
+                coords: vec![(5, 6), (7, 8)],
                 mods: ModSet {
                     alt: true,
                     ..ModSet::default()
@@ -1580,25 +1568,19 @@ mod tests {
         assert!(matches!(
             &parsed.events[5],
             Event::MouseDrag {
-                start_col: 1,
-                start_row: 2,
-                end_col: 3,
-                end_row: 4,
+                coords,
                 mods,
                 ..
-            } if *mods == ModSet::default()
+            } if *mods == ModSet::default() && coords == &vec![(1, 2), (3, 4)]
         ));
         assert!(matches!(
             &parsed.events[6],
             Event::MouseMove {
-                start_col: 5,
-                start_row: 6,
-                end_col: 7,
-                end_row: 8,
+                coords,
                 mods,
                 easing: Some(StandardEasing::InOutElastic),
                 ..
-            } if mods.alt && !mods.ctrl
+            } if mods.alt && !mods.ctrl && coords == &vec![(5, 6), (7, 8)]
         ));
         assert!(matches!(
             &parsed.events[7],
