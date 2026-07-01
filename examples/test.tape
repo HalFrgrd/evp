@@ -7,7 +7,7 @@
 Output evp-test.gif
 Output evp-test.svg
 
-Set Shell bash --norc
+Set Shell env -i bash --noprofile --norc
 Set Width 900
 Set Height 360
 Set FontSize 20
