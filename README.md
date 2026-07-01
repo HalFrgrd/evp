@@ -65,7 +65,7 @@ This yields exceptionally small GIF file sizes.
 > [!TIP]
 > No `sudo` required!
 ```bash
-curl -sSfL https://raw.githubusercontent.com/HalFrgrd/evp/master/install.sh | sh
+curl -sSfL https://github.com/HalFrgrd/evp/releases/latest/download/install.sh | sh
 ```
 
 After installing, you can:

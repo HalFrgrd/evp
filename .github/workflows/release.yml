@@ -46,6 +46,7 @@ jobs:
         run: |
           tag="${{ steps.tag.outputs.name }}"
           gh release create "$tag" --draft --verify-tag --title "$tag"
+          gh release upload "$tag" install.sh
     outputs:
       version: ${{ steps.tag.outputs.name }}
 

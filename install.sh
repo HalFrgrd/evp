@@ -3,7 +3,7 @@
 # release.
 #
 # Usage:
-#   curl -sSfL https://raw.githubusercontent.com/HalFrgrd/evp/master/install.sh | sh
+#   curl -sSfL https://github.com/HalFrgrd/evp/releases/latest/download/install.sh | sh
 #
 # Override the version (default `latest`):
 #   curl -sSfL .../install.sh | EVP_VERSION=v0.2.0 sh
@@ -13,8 +13,24 @@
 
 set -eu
 
+expand_path() {
+    case "$1" in
+        '~/'*) echo "${HOME}/${1#~/}" ;;
+        '~')   echo "${HOME}" ;;
+        *)     echo "$1" ;;
+    esac
+}
+
 REPO="HalFrgrd/evp"
-INSTALL_DIR="${EVP_INSTALL_DIR:-$PWD}"
+if [ -n "${EVP_INSTALL_DIR:-}" ]; then
+    INSTALL_DIR="$(expand_path "$EVP_INSTALL_DIR")"
+else
+    if [ -w "/usr/local/bin" ]; then
+        INSTALL_DIR="/usr/local/bin"
+    else
+        INSTALL_DIR="${HOME}/.local/bin"
+    fi
+fi
 VERSION_OVERRIDE="${EVP_VERSION:-}"
 
 say()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
