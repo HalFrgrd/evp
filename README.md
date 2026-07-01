@@ -170,9 +170,9 @@ Click 10 20                         # Left click at column 10, row 20
 Shift+Click 10 20                   # Shift + Left click at column 10, row 20
 Ctrl+RightClick 10 20               # Ctrl + Right click at column 10, row 20
 DoubleClick 10 20                   # Double click at column 10, row 20
-MouseMove@100ms 0 0 10 10           # Move cursor from (0,0) to (10,10) using default sigmoid (EaseInOutCubic) easing
-MouseMove@100ms@EaseInOutElastic 0 0 10 10 # Move cursor with EaseInOutElastic easing curve override
-Shift+Ctrl+MouseDrag@EaseInOutQuad 0 0 10 10 # Left click and drag with EaseInOutQuad holding Shift+Ctrl
+MouseMove@1.2s 0 0 10 15 30 10 40 40     # Move cursor along a smooth Catmull-Rom spline curve passing through (0,0), (10,15), (30,10), and (40,40)
+MouseMove@1.2s@EaseInOutElastic 0 0 10 15 40 40 # Move cursor along a spline curve with EaseInOutElastic easing curve override
+Shift+Ctrl+MouseDrag@EaseInOutQuad 0 0 10 15 40 40 # Left click and drag along a spline curve holding Shift+Ctrl
 Ctrl+MouseScroll 10 20 Up           # Scroll mouse wheel Up at column 10, row 20 holding Ctrl
 
 # --- Wait / Synchronization ---

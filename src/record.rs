@@ -1392,7 +1392,7 @@ pub fn record(
                             click_here_cells = cells;
                         }
 
-                        // Send to background renderer
+                        // Send directly to background renderer
                         let _send_timer = crate::telemetry::ScopeTimer::new("record_send_frame");
                         let _ = renderer_tx.try_send(frame);
                     }

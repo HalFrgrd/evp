@@ -173,7 +173,7 @@ pub struct MouseSegment {
     pub easing: Option<StandardEasing>,
 }
 
-fn resolve_mouse_position(
+pub(crate) fn resolve_mouse_position(
     recorded_at: Duration,
     segments: &[MouseSegment],
 ) -> Option<(f32, f32, crate::recording::MouseState)> {
@@ -651,12 +651,12 @@ pub fn apply_theme(terminal: &mut Terminal<'_, '_>, theme: &crate::Theme) -> Res
 // Timeline construction
 // ---------------------------------------------------------------------------
 
-struct Scheduled {
-    at: Duration,
-    event: Event,
+pub(crate) struct Scheduled {
+    pub(crate) at: Duration,
+    pub(crate) event: Event,
 }
 
-fn build_timeline(
+pub(crate) fn build_timeline(
     events: &[Event],
     settings: &Settings,
 ) -> (Vec<Scheduled>, Vec<MouseSegment>, Duration) {
