@@ -763,39 +763,39 @@ pub fn record(
 
     // Query if SGRPixelsMouse is supported (DEC private mode 1016)
     let mut supports_sgr_pixels = false;
-    if write!(
-        host_terminal,
-        "{}",
-        Csi::Mode(Mode::QueryDecPrivateMode(DecPrivateMode::Code(
-            DecPrivateModeCode::SGRPixelsMouse
-        )))
-    )
-    .is_ok()
-        && host_terminal.flush().is_ok()
-    {
-        // Wait up to 300ms for a response
-        if let Ok(true) = host_terminal.poll(
-            |event| {
-                matches!(
-                    event,
-                    termina::Event::Csi(Csi::Mode(Mode::ReportDecPrivateMode {
-                        mode: DecPrivateMode::Code(DecPrivateModeCode::SGRPixelsMouse),
-                        ..
-                    }))
-                )
-            },
-            Some(Duration::from_millis(300)),
-        ) {
-            if let Ok(termina::Event::Csi(Csi::Mode(Mode::ReportDecPrivateMode {
-                setting, ..
-            }))) = host_terminal.read(|_| true)
-            {
-                if setting != DecModeSetting::NotRecognized {
-                    supports_sgr_pixels = true;
-                }
-            }
-        }
-    }
+    // if write!(
+    //     host_terminal,
+    //     "{}",
+    //     Csi::Mode(Mode::QueryDecPrivateMode(DecPrivateMode::Code(
+    //         DecPrivateModeCode::SGRPixelsMouse
+    //     )))
+    // )
+    // .is_ok()
+    //     && host_terminal.flush().is_ok()
+    // {
+    //     // Wait up to 300ms for a response
+    //     if let Ok(true) = host_terminal.poll(
+    //         |event| {
+    //             matches!(
+    //                 event,
+    //                 termina::Event::Csi(Csi::Mode(Mode::ReportDecPrivateMode {
+    //                     mode: DecPrivateMode::Code(DecPrivateModeCode::SGRPixelsMouse),
+    //                     ..
+    //                 }))
+    //             )
+    //         },
+    //         Some(Duration::from_millis(300)),
+    //     ) {
+    //         if let Ok(termina::Event::Csi(Csi::Mode(Mode::ReportDecPrivateMode {
+    //             setting, ..
+    //         }))) = host_terminal.read(|_| true)
+    //         {
+    //             if setting != DecModeSetting::NotRecognized {
+    //                 supports_sgr_pixels = true;
+    //             }
+    //         }
+    //     }
+    // }
 
     write!(
         host_terminal,
