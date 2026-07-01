@@ -76,6 +76,17 @@ fn cli_styles() -> clap::builder::Styles {
         )
 }
 
+fn get_theme_names() -> &'static [&'static str] {
+    static THEMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    THEMES.get_or_init(|| {
+        let names = evp::style::Theme::preset_names().unwrap_or_default();
+        names
+            .into_iter()
+            .map(|s| Box::leak(s.into_boxed_str()) as &'static str)
+            .collect()
+    })
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "evp",
@@ -135,8 +146,11 @@ enum Commands {
         #[arg(long)]
         shell: Option<String>,
         /// Predefined color theme to apply (e.g. "Catppuccin Mocha").
-        #[arg(long)]
+        #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(get_theme_names()))]
         theme: Option<String>,
+        /// Framerate for the recording (in FPS).
+        #[arg(long, default_value = "50")]
+        fps: u64,
     },
 }
 
@@ -401,6 +415,7 @@ fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()
             rows,
             shell,
             theme,
+            fps,
         } => {
             init_tracing(cli, evp_start);
             log_build_info_debug();
@@ -415,7 +430,7 @@ fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()
                 }
             }
 
-            evp::record(tape, shell, cols, rows, theme, output_override)?;
+            evp::record(tape, shell, cols, rows, theme, output_override, fps)?;
             Ok(())
         }
     }
@@ -563,12 +578,14 @@ mod tests {
                 rows,
                 shell,
                 theme,
+                fps,
             }) => {
                 assert_eq!(cli.output, vec![PathBuf::from("my_demo.tape")]);
                 assert_eq!(cols, &Some(100));
                 assert_eq!(rows, &Some(40));
                 assert_eq!(shell, &Some("zsh".to_string()));
                 assert_eq!(theme, &Some("Catppuccin Mocha".to_string()));
+                assert_eq!(fps, &50);
             }
             _ => panic!("Expected Commands::Record, got {:?}", cli.command),
         }

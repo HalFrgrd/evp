@@ -14,7 +14,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::Paragraph,
 };
-use tracing::info;
+use tracing::{info, warn};
 use unicode_width::UnicodeWidthChar;
 
 use crate::keys::KeyTranslator;
@@ -95,7 +95,7 @@ fn encode_mouse_event(
     Ok(buf[..len].to_vec())
 }
 
-fn map_termina_key(event: termina::event::KeyEvent) -> (NamedKey, ModSet) {
+fn map_termina_key(event: termina::event::KeyEvent) -> Option<(NamedKey, ModSet)> {
     let key = match event.code {
         termina::event::KeyCode::Char(c) => NamedKey::Char(c),
         termina::event::KeyCode::Enter => NamedKey::Enter,
@@ -112,7 +112,18 @@ fn map_termina_key(event: termina::event::KeyEvent) -> (NamedKey, ModSet) {
         termina::event::KeyCode::PageDown => NamedKey::PageDown,
         termina::event::KeyCode::Home => NamedKey::Home,
         termina::event::KeyCode::End => NamedKey::End,
-        _ => NamedKey::Char(' '),
+        termina::event::KeyCode::Modifier(m) => match m {
+            termina::event::ModifierKeyCode::LeftShift
+            | termina::event::ModifierKeyCode::RightShift => NamedKey::Shift,
+            termina::event::ModifierKeyCode::LeftControl
+            | termina::event::ModifierKeyCode::RightControl => NamedKey::Control,
+            termina::event::ModifierKeyCode::LeftAlt
+            | termina::event::ModifierKeyCode::RightAlt => NamedKey::Alt,
+            termina::event::ModifierKeyCode::LeftSuper
+            | termina::event::ModifierKeyCode::RightSuper => NamedKey::Super,
+            _ => return None,
+        },
+        _ => return None,
     };
 
     let mods = ModSet {
@@ -122,7 +133,7 @@ fn map_termina_key(event: termina::event::KeyEvent) -> (NamedKey, ModSet) {
         super_key: event.modifiers.contains(termina::event::Modifiers::SUPER),
     };
 
-    (key, mods)
+    Some((key, mods))
 }
 
 fn map_termina_mods(modifiers: termina::event::Modifiers) -> ModSet {
@@ -696,6 +707,7 @@ pub fn record(
     override_rows: Option<u16>,
     theme_name: Option<String>,
     output_override: Option<PathBuf>,
+    fps: u64,
 ) -> Result<()> {
     // 1. Resolve geometry
     use termina::Terminal as TerminaTerminalTrait;
@@ -829,6 +841,7 @@ pub fn record(
     let mut settings = Settings::default();
     settings.cols = Some(cols);
     settings.rows = Some(rows);
+    settings.framerate = fps as u32;
     if let Some(sh) = &shell {
         settings.shell = Some(sh.clone());
     }
@@ -989,7 +1002,9 @@ pub fn record(
                                         }
                                     }
 
-                                    let (named_key, mods) = map_termina_key(key_event);
+                                    let Some((named_key, mods)) = map_termina_key(key_event) else {
+                                        continue;
+                                    };
                                     let key_spec = KeySpec { key: named_key, mods };
                                     let action = if key_event.kind == termina::event::KeyEventKind::Release {
                                         KeyAction::Release
@@ -1368,6 +1383,10 @@ pub fn record(
                 }
             }
         }
+
+        // Wait 50ms and discard any remaining terminal input events
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        while event_rx.try_recv().is_ok() {}
     }
 
     drop(_guard);
@@ -1394,6 +1413,13 @@ pub fn record(
 
     std::fs::write(&tape_path, tape_content)
         .with_context(|| format!("writing tape file to {}", tape_path.display()))?;
+
+    if let Err(e) = crate::script::parse_path(&tape_path) {
+        warn!(
+            "Generated tape file `{}` is invalid: {e:#}",
+            tape_path.display()
+        );
+    }
 
     // Drop the renderer tx to signal EOF, then await completion
     drop(renderer_tx);

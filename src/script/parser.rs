@@ -1486,6 +1486,34 @@ mod tests {
                 },
                 delay: Duration::from_millis(50),
             },
+            Event::Key {
+                key: KeySpec {
+                    key: NamedKey::Control,
+                    mods: ModSet {
+                        ctrl: true,
+                        alt: false,
+                        shift: false,
+                        super_key: false,
+                    },
+                },
+                action: KeyAction::Press,
+                count: 1,
+                delay: Duration::from_millis(50),
+            },
+            Event::Key {
+                key: KeySpec {
+                    key: NamedKey::Alt,
+                    mods: ModSet {
+                        ctrl: false,
+                        alt: true,
+                        shift: false,
+                        super_key: false,
+                    },
+                },
+                action: KeyAction::Press,
+                count: 1,
+                delay: Duration::from_millis(50),
+            },
         ];
 
         let serialized = write_tape_script(
@@ -1513,6 +1541,8 @@ mod tests {
         assert!(serialized.contains("MouseDrag 1 2 3 4"));
         assert!(serialized.contains("Alt+MouseMove@EaseInOutElastic 5 6 7 8"));
         assert!(serialized.contains("Ctrl+Shift+MouseScroll 9 10 Up"));
+        assert!(serialized.contains("\nCtrl\n"));
+        assert!(serialized.contains("\nAlt\n"));
 
         // Round-trip parse check!
         let parsed = parse(&serialized).unwrap();
@@ -1526,7 +1556,7 @@ mod tests {
         );
 
         // Verify events matches
-        assert_eq!(parsed.events.len(), 8);
+        assert_eq!(parsed.events.len(), 10);
         assert!(matches!(
             &parsed.events[0],
             Event::Type { text, delay } if text == "echo \\\"hello\\\"" && *delay == Duration::from_millis(100)
@@ -1573,6 +1603,14 @@ mod tests {
         assert!(matches!(
             &parsed.events[7],
             Event::MouseScroll { col: 9, row: 10, direction: ScrollDirection::Up, mods, delay } if *delay == Duration::from_millis(50) && mods.ctrl && mods.shift
+        ));
+        assert!(matches!(
+            &parsed.events[8],
+            Event::Key { key, .. } if key.key == NamedKey::Control && !key.mods.ctrl
+        ));
+        assert!(matches!(
+            &parsed.events[9],
+            Event::Key { key, .. } if key.key == NamedKey::Alt && !key.mods.alt
         ));
     }
 }

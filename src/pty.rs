@@ -232,6 +232,23 @@ impl Pty {
                 let raw_flags = fcntl::fcntl(&fd, fcntl::F_GETFL)?;
                 let flags = OFlag::from_bits_retain(raw_flags) | OFlag::O_NONBLOCK;
                 fcntl::fcntl(&fd, fcntl::F_SETFL(flags))?;
+
+                // Wait a tiny bit to check if child failed to exec or exited immediately
+                std::thread::sleep(std::time::Duration::from_millis(15));
+                match nix::sys::wait::waitpid(child, Some(nix::sys::wait::WaitPidFlag::WNOHANG)) {
+                    Ok(nix::sys::wait::WaitStatus::Exited(_, status)) => {
+                        if status == 127 {
+                            bail!(
+                                "shell program failed to launch (command not found or exited with 127)"
+                            );
+                        }
+                    }
+                    Ok(nix::sys::wait::WaitStatus::Signaled(_, sig, _)) => {
+                        bail!("shell program crashed immediately (signaled {})", sig);
+                    }
+                    _ => {}
+                }
+
                 Ok((Self(fd), Child::Active(child)))
             }
         }

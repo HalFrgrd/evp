@@ -173,6 +173,10 @@ pub fn write_tape_script(
                         NamedKey::PageDown => "PageDown".to_string(),
                         NamedKey::Home => "Home".to_string(),
                         NamedKey::End => "End".to_string(),
+                        NamedKey::Shift => "Shift".to_string(),
+                        NamedKey::Control => "Ctrl".to_string(),
+                        NamedKey::Alt => "Alt".to_string(),
+                        NamedKey::Super => "Super".to_string(),
                         NamedKey::Char(c) => {
                             if c.is_alphabetic() {
                                 c.to_ascii_uppercase().to_string()
@@ -185,9 +189,19 @@ pub fn write_tape_script(
 
                     let mut cmd = spec_parts.join("+");
                     if !cmd.is_empty() {
-                        cmd.push('+');
+                        if (cmd == "Ctrl" && key_name == "Ctrl")
+                            || (cmd == "Alt" && key_name == "Alt")
+                            || (cmd == "Shift" && key_name == "Shift")
+                            || (cmd == "Super" && key_name == "Super")
+                        {
+                            cmd = key_name;
+                        } else {
+                            cmd.push('+');
+                            cmd.push_str(&key_name);
+                        }
+                    } else {
+                        cmd = key_name;
                     }
-                    cmd.push_str(&key_name);
 
                     if *count > 1 {
                         tape_content.push_str(&format!("{} {}\n", cmd, count));
