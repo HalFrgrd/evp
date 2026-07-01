@@ -34,15 +34,23 @@ fn encode_mouse_event(
     button: Option<MouseButton>,
     col: u16,
     row: u16,
+    pixel_coords: Option<(u16, u16)>,
     terminal: &Terminal<'_, '_>,
     cell_width_px: u32,
     cell_height_px: u32,
     cols: u16,
     rows: u16,
 ) -> Result<Vec<u8>> {
-    let x = (col as f32 * cell_width_px as f32) + (cell_width_px as f32 / 2.0);
-    let y = (row as f32 * cell_height_px as f32) + (cell_height_px as f32 / 2.0);
-    let pos = libghostty_vt::mouse::Position { x, y };
+    let pos = if let Some((x_px, y_px)) = pixel_coords {
+        libghostty_vt::mouse::Position {
+            x: x_px as f32,
+            y: y_px as f32,
+        }
+    } else {
+        let x = (col as f32 * cell_width_px as f32) + (cell_width_px as f32 / 2.0);
+        let y = (row as f32 * cell_height_px as f32) + (cell_height_px as f32 / 2.0);
+        libghostty_vt::mouse::Position { x, y }
+    };
 
     let mut encoder = libghostty_vt::mouse::Encoder::new()?;
     encoder.set_options_from_terminal(terminal);
@@ -583,8 +591,45 @@ pub fn record(
         .context("entering raw mode")?;
     use std::io::Write;
     use termina::escape::csi::{
-        Csi, DecPrivateMode, DecPrivateModeCode, Keyboard, KittyKeyboardFlags, Mode,
+        Csi, DecModeSetting, DecPrivateMode, DecPrivateModeCode, Keyboard, KittyKeyboardFlags, Mode,
     };
+
+    // Query if SGRPixelsMouse is supported (DEC private mode 1016)
+    let mut supports_sgr_pixels = false;
+    if write!(
+        host_terminal,
+        "{}",
+        Csi::Mode(Mode::QueryDecPrivateMode(DecPrivateMode::Code(
+            DecPrivateModeCode::SGRPixelsMouse
+        )))
+    )
+    .is_ok()
+        && host_terminal.flush().is_ok()
+    {
+        // Wait up to 100ms for a response
+        if let Ok(true) = host_terminal.poll(
+            |event| {
+                matches!(
+                    event,
+                    termina::Event::Csi(Csi::Mode(Mode::ReportDecPrivateMode {
+                        mode: DecPrivateMode::Code(DecPrivateModeCode::SGRPixelsMouse),
+                        ..
+                    }))
+                )
+            },
+            Some(Duration::from_millis(100)),
+        ) {
+            if let Ok(termina::Event::Csi(Csi::Mode(Mode::ReportDecPrivateMode {
+                setting, ..
+            }))) = host_terminal.read(|_| true)
+            {
+                if setting != DecModeSetting::NotRecognized {
+                    supports_sgr_pixels = true;
+                }
+            }
+        }
+    }
+
     write!(
         host_terminal,
         "{}",
@@ -613,13 +658,24 @@ pub fn record(
             DecPrivateModeCode::AnyEventMouse
         )))
     )?;
-    write!(
-        host_terminal,
-        "{}",
-        Csi::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
-            DecPrivateModeCode::SGRMouse
-        )))
-    )?;
+
+    if supports_sgr_pixels {
+        write!(
+            host_terminal,
+            "{}",
+            Csi::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::SGRPixelsMouse
+            )))
+        )?;
+    } else {
+        write!(
+            host_terminal,
+            "{}",
+            Csi::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::SGRMouse
+            )))
+        )?;
+    }
     write!(
         host_terminal,
         "{}",
@@ -849,9 +905,20 @@ pub fn record(
                                     }
                                 }
                                 termina::Event::Mouse(mouse_event) => {
-                                    host_mouse_pos = Some((mouse_event.column, mouse_event.row));
+                                    let col = if supports_sgr_pixels {
+                                        (mouse_event.column as u32 / cfg.cell_width_px) as u16
+                                    } else {
+                                        mouse_event.column
+                                    };
+                                    let row = if supports_sgr_pixels {
+                                        (mouse_event.row as u32 / cfg.cell_height_px) as u16
+                                    } else {
+                                        mouse_event.row
+                                    };
 
-                                    let is_click_here = click_here_cells.contains(&(mouse_event.column, mouse_event.row));
+                                    host_mouse_pos = Some((col, row));
+
+                                    let is_click_here = click_here_cells.contains(&(col, row));
 
                                     if is_click_here {
                                         if let termina::event::MouseEventKind::Down(termina::event::MouseButton::Left) = mouse_event.kind {
@@ -890,7 +957,7 @@ pub fn record(
                                     }
 
                                     // If we moved off "click here" to another part of the header/divider, redraw to clear hover
-                                    if mouse_event.row < header_height + 1 {
+                                    if row < header_height + 1 {
                                         let elapsed = start_time.elapsed();
                                         if let Ok((mut frame, _)) = capture(
                                             &mut render_state,
@@ -915,13 +982,10 @@ pub fn record(
                                     }
 
                                     if let Some((action, button)) = map_termina_mouse(mouse_event.kind) {
-                                            let col = mouse_event.column;
-                                            let row = mouse_event.row;
-
                                             // Translate row coordinate: subtract header rows and divider row
-                                            let row = row - (header_height + 1);
+                                            let pty_row = row.saturating_sub(header_height + 1);
 
-                                            if col >= cols || row >= rows {
+                                            if col >= cols || pty_row >= rows {
                                                 continue;
                                             }
 
@@ -952,7 +1016,18 @@ pub fn record(
                                             } else {
                                                 MouseState::Moving
                                             };
-                                            current_mouse_pos = Some((col as f32, row as f32, mouse_state));
+
+                                            let cell_x = if supports_sgr_pixels {
+                                                mouse_event.column as f32 / cfg.cell_width_px as f32
+                                            } else {
+                                                col as f32
+                                            };
+                                            let cell_y = if supports_sgr_pixels {
+                                                (mouse_event.row as f32 / cfg.cell_height_px as f32) - (header_height + 1) as f32
+                                            } else {
+                                                pty_row as f32
+                                            };
+                                            current_mouse_pos = Some((cell_x, cell_y, mouse_state));
 
                                             // 1. If it's movement (Motion / Drag), feed to segment tracker
                                             let is_drag = action == MouseAction::Motion && is_dragging;
@@ -980,12 +1055,12 @@ pub fn record(
                                                 }
 
                                                 if let Some(ref mut tracker) = active_tracker {
-                                                    if let Some(ev) = tracker.add_point(col, row, now) {
+                                                    if let Some(ev) = tracker.add_point(col, pty_row, now) {
                                                         recorded_events.push(ev);
                                                     }
                                                 }
                                                 current_mouse_col = col;
-                                                current_mouse_row = row;
+                                                current_mouse_row = pty_row;
                                                 last_event_time = now;
                                             } else {
                                                 // 2. Otherwise (Press / Release / Scroll), flush movement segment first
@@ -1007,15 +1082,15 @@ pub fn record(
                                                     MouseAction::Press => {
                                                         if button == Some(MouseButton::Left) {
                                                             drag_start_col = col;
-                                                            drag_start_row = row;
+                                                            drag_start_row = pty_row;
                                                         }
                                                     }
                                                     MouseAction::Release => {
                                                         if button == Some(MouseButton::Left) {
-                                                            if col == drag_start_col && row == drag_start_row {
+                                                            if col == drag_start_col && pty_row == drag_start_row {
                                                                 recorded_events.push(Event::Click {
                                                                     col,
-                                                                    row,
+                                                                    row: pty_row,
                                                                     mods: ev_mods,
                                                                     delay: Duration::from_millis(50),
                                                                 });
@@ -1024,7 +1099,7 @@ pub fn record(
                                                                     start_col: drag_start_col,
                                                                     start_row: drag_start_row,
                                                                     end_col: col,
-                                                                    end_row: row,
+                                                                    end_row: pty_row,
                                                                     mods: ev_mods,
                                                                     delay: Duration::from_millis(50),
                                                                     easing: None,
@@ -1033,14 +1108,14 @@ pub fn record(
                                                         } else if button == Some(MouseButton::Right) {
                                                             recorded_events.push(Event::RightClick {
                                                                 col,
-                                                                row,
+                                                                row: pty_row,
                                                                 mods: ev_mods,
                                                                 delay: Duration::from_millis(50),
                                                             });
                                                         } else if button == Some(MouseButton::WheelUp) {
                                                             recorded_events.push(Event::MouseScroll {
                                                                 col,
-                                                                row,
+                                                                row: pty_row,
                                                                 direction: crate::script::ScrollDirection::Up,
                                                                 mods: ev_mods,
                                                                 delay: Duration::from_millis(50),
@@ -1048,26 +1123,37 @@ pub fn record(
                                                         } else if button == Some(MouseButton::WheelDown) {
                                                             recorded_events.push(Event::MouseScroll {
                                                                 col,
-                                                                row,
+                                                                row: pty_row,
                                                                 direction: crate::script::ScrollDirection::Down,
                                                                 mods: ev_mods,
                                                                 delay: Duration::from_millis(50),
                                                             });
                                                         }
                                                         current_mouse_col = col;
-                                                        current_mouse_row = row;
+                                                        current_mouse_row = pty_row;
                                                     }
                                                     _ => {}
                                                 }
                                                 last_event_time = now;
                                             }
 
+                                            let pixel_coords = if supports_sgr_pixels {
+                                                let y_offset_px = (header_height + 1) as u32 * cfg.cell_height_px;
+                                                Some((
+                                                    mouse_event.column,
+                                                    mouse_event.row.saturating_sub(y_offset_px as u16),
+                                                ))
+                                            } else {
+                                                None
+                                            };
+
                                             // Encode and transmit mouse coordinates to the PTY
                                             if let Ok(bytes) = encode_mouse_event(
                                                 action,
                                                 button,
                                                 col,
-                                                row,
+                                                pty_row,
+                                                pixel_coords,
                                                 &terminal,
                                                 cfg.cell_width_px,
                                                 cfg.cell_height_px,
@@ -1076,8 +1162,8 @@ pub fn record(
                                             ) {
                                                 pty.write(&bytes);
                                             }
-                                        }
                                     }
+                                }
                                 termina::Event::Paste(text) => {
                                     flush_char_buffer(&mut char_buffer, &mut recorded_events, &mut last_event_time);
                                     let now = Instant::now();
