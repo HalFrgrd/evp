@@ -187,24 +187,7 @@ Wait+Screen@1s /regex/              # Wait scanning full screen with 1s timeout 
 
 ## Examples
 
-I use EVP for all my projects like [flyline](https://github.com/HalFrgrd/flyline) or [flycomp](https://github.com/HalFrgrd/flycomp).
-
-### Dynamic window title bar
-
-You can enable a window bar styled with macOS-like window controls and dynamically update the title displayed at the center of the bar.
-Your program will need to use [OSC 2 or OSC 0](https://man7.org/linux/man-pages/man4/console_codes.4.html) to set the title.
-For instance:
-
-```elixir
-# Enable window bar styling
-Set WindowBar Rings
-
-# Set a dynamic terminal title via ANSI OSC sequence
-Type "printf '\033]2;My Dynamic Terminal Title\007'"
-Enter
-```
-
-![Dynamic Window Title Bar Demo](https://github.com/HalFrgrd/evp/releases/download/assets/window_title.gif)
+See [examples.md](examples.md) for a showcase of pre-rendered GIF animations demonstrating custom themes, layout controls, mouse input scripting, and window title bars.
 
 ## Serving SVGs / SVGZs
 
