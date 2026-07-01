@@ -581,7 +581,12 @@ fn rasterize_raw_frame_idx(
                         let (font_idx, font) = font_set.select_for_char(cell.flags, ch);
                         let glyph_id: GlyphId = font.glyph_id(ch);
 
-                        let glyph_scale = if font_idx == 0 {
+                        let is_primary = Some(font_idx) == font_set.regular.first().copied()
+                            || Some(font_idx) == font_set.bold.first().copied()
+                            || Some(font_idx) == font_set.italic.first().copied()
+                            || Some(font_idx) == font_set.bold_italic.first().copied();
+
+                        let glyph_scale = if is_primary {
                             scale
                         } else {
                             let cell_ratio = cell_w as f32 / cell_h as f32;
@@ -594,7 +599,7 @@ fn rasterize_raw_frame_idx(
                             PxScale::from(scale.x * scale_factor)
                         };
 
-                        let char_baseline = if font_idx == 0 {
+                        let char_baseline = if is_primary {
                             pen_y_baseline
                         } else {
                             let font_scaled = font.as_scaled(glyph_scale);
