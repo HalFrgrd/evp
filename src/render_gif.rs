@@ -586,7 +586,7 @@ fn rasterize_raw_frame_idx(
                             || Some(font_idx) == font_set.italic.first().copied()
                             || Some(font_idx) == font_set.bold_italic.first().copied();
 
-                        let glyph_scale = if is_primary {
+                        let mut glyph_scale = if is_primary {
                             scale
                         } else {
                             let cell_ratio = cell_w as f32 / cell_h as f32;
@@ -599,7 +599,7 @@ fn rasterize_raw_frame_idx(
                             PxScale::from(scale.x * scale_factor)
                         };
 
-                        let char_baseline = if is_primary {
+                        let mut char_baseline = if is_primary {
                             pen_y_baseline
                         } else {
                             let font_scaled = font.as_scaled(glyph_scale);
@@ -608,6 +608,24 @@ fn rasterize_raw_frame_idx(
                                 (font_scaled.ascent() + font_scaled.descent()) / 2.0;
                             (cell_center_y + glyph_center_y) as i32
                         };
+
+                        if is_box_drawing(ch) {
+                            let scaled = font.as_scaled(scale);
+                            let advance = scaled.h_advance(glyph_id);
+                            let bbox_w = cell_w as f32;
+                            let bbox_h = cell_h as f32;
+
+                            let glyph_w = advance.max(1.0);
+                            let glyph_h = (scaled.ascent() - scaled.descent()).max(1.0);
+
+                            // We want the box drawing character to exactly fill the cell width and height,
+                            // so we stretch it accordingly.
+                            glyph_scale.x = scale.x * (bbox_w / glyph_w);
+                            glyph_scale.y = scale.y * (bbox_h / glyph_h);
+
+                            let stretched_scaled = font.as_scaled(glyph_scale);
+                            char_baseline = (y as f32 + stretched_scaled.ascent()).round() as i32;
+                        }
 
                         let cache_key = GlyphCacheKey {
                             font_idx: font_idx as u16,
