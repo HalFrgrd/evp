@@ -55,7 +55,7 @@ Sleep 1.5s
 Type "exit"
 Sleep 500ms
 Enter
-Wait+Line /> /
+Wait+Line />/
 
 Sleep 1s
 # 2. Show ls -l demo*
@@ -92,7 +92,7 @@ Sleep 500ms
 Type " 24"
 Sleep 500ms
 Escape
-Sleep 1s
+Sleep 500ms
 
 Type ":wq"
 Sleep 500ms
@@ -103,7 +103,7 @@ Sleep 1s
 Type "evp demo.tape"
 Sleep 500ms
 Enter
-Wait+Line /> /
+Wait+Line /progress 100/
 
 Sleep 1.5s
 
