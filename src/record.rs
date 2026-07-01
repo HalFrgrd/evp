@@ -35,7 +35,7 @@ fn encode_mouse_event(
     button: Option<MouseButton>,
     col: u16,
     row: u16,
-    pixel_coords: Option<(u16, u16)>,
+    pixel_coords: Option<(f32, f32)>,
     terminal: &Terminal<'_, '_>,
     cell_width_px: u32,
     cell_height_px: u32,
@@ -43,10 +43,7 @@ fn encode_mouse_event(
     rows: u16,
 ) -> Result<Vec<u8>> {
     let pos = if let Some((x_px, y_px)) = pixel_coords {
-        libghostty_vt::mouse::Position {
-            x: x_px as f32,
-            y: y_px as f32,
-        }
+        libghostty_vt::mouse::Position { x: x_px, y: y_px }
     } else {
         let x = (col as f32 * cell_width_px as f32) + (cell_width_px as f32 / 2.0);
         let y = (row as f32 * cell_height_px as f32) + (cell_height_px as f32 / 2.0);
@@ -758,40 +755,73 @@ pub fn record(
     crate::telemetry::SUSPEND_LOGGING.store(true, std::sync::atomic::Ordering::SeqCst);
     use std::io::Write;
     use termina::escape::csi::{
-        Csi, DecModeSetting, DecPrivateMode, DecPrivateModeCode, Keyboard, KittyKeyboardFlags, Mode,
+        Csi, DecPrivateMode, DecPrivateModeCode, Keyboard, KittyKeyboardFlags, Mode,
     };
 
     // Query if SGRPixelsMouse is supported (DEC private mode 1016)
+    // and query cell dimensions (CSI 16 t / CSI 14 t)
     let mut supports_sgr_pixels = false;
-    if write!(
-        host_terminal,
-        "{}",
-        Csi::Mode(Mode::QueryDecPrivateMode(DecPrivateMode::Code(
-            DecPrivateModeCode::SGRPixelsMouse
-        )))
-    )
-    .is_ok()
-        && host_terminal.flush().is_ok()
+    let mut host_cell_width = 10u32;
+    let mut host_cell_height = 20u32;
+    let mut cell_size_queried = false;
+
     {
-        // Wait up to 300ms for a response
-        if let Ok(true) = host_terminal.poll(
-            |event| {
-                matches!(
-                    event,
-                    termina::Event::Csi(Csi::Mode(Mode::ReportDecPrivateMode {
-                        mode: DecPrivateMode::Code(DecPrivateModeCode::SGRPixelsMouse),
-                        ..
-                    }))
-                )
-            },
-            Some(Duration::from_millis(300)),
-        ) {
-            if let Ok(termina::Event::Csi(Csi::Mode(Mode::ReportDecPrivateMode {
-                setting, ..
-            }))) = host_terminal.read(|_| true)
-            {
-                if setting != DecModeSetting::NotRecognized {
-                    supports_sgr_pixels = true;
+        use std::os::fd::AsFd;
+        let stdin = std::io::stdin();
+        let mut stdout = std::io::stdout();
+        // Query SGRPixels (1016), CSI 16t (cell size), CSI 14t (window size)
+        if write!(stdout, "\x1b[?1016$p\x1b[16t\x1b[14t").is_ok() && stdout.flush().is_ok() {
+            let mut poll_fds = [nix::poll::PollFd::new(
+                stdin.as_fd(),
+                nix::poll::PollFlags::POLLIN,
+            )];
+            if let Ok(n) = nix::poll::poll(&mut poll_fds, 300u16) {
+                if n > 0 {
+                    let mut buf = [0u8; 256];
+                    if let Ok(bytes_read) = nix::unistd::read(stdin.as_fd(), &mut buf) {
+                        let response = String::from_utf8_lossy(&buf[..bytes_read]);
+
+                        // 1. Check SGRPixels support
+                        if response.contains("?1016;1$y")
+                            || response.contains("?1016;2$y")
+                            || response.contains("?1016;3$y")
+                        {
+                            supports_sgr_pixels = true;
+                        }
+
+                        // 2. Try parsing cell size: \x1b[6;height;widtht
+                        let cell_re = regex::Regex::new(r"\[6;(\d+);(\d+)t").unwrap();
+                        if let Some(caps) = cell_re.captures(&response) {
+                            if let (Ok(h), Ok(w)) = (caps[1].parse::<u32>(), caps[2].parse::<u32>())
+                            {
+                                if w > 0 && h > 0 {
+                                    host_cell_width = w;
+                                    host_cell_height = h;
+                                    cell_size_queried = true;
+                                }
+                            }
+                        } else {
+                            // 3. Fallback to parsing window size: \x1b[4;height;widtht
+                            let win_re = regex::Regex::new(r"\[4;(\d+);(\d+)t").unwrap();
+                            if let Some(caps) = win_re.captures(&response) {
+                                if let (Ok(h), Ok(w)) =
+                                    (caps[1].parse::<u32>(), caps[2].parse::<u32>())
+                                {
+                                    if w > 0
+                                        && h > 0
+                                        && actual_host_cols > 0
+                                        && actual_host_rows > 0
+                                    {
+                                        host_cell_width =
+                                            (w as f32 / actual_host_cols as f32).round() as u32;
+                                        host_cell_height =
+                                            (h as f32 / actual_host_rows as f32).round() as u32;
+                                        cell_size_queried = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -878,6 +908,10 @@ pub fn record(
     }
 
     let cfg = derive_options(&settings);
+    if !cell_size_queried {
+        host_cell_width = cfg.cell_width_px;
+        host_cell_height = cfg.cell_height_px;
+    }
     let pty_size = PtySize {
         cols,
         rows,
@@ -1077,14 +1111,14 @@ pub fn record(
                                 }
                                 termina::Event::Mouse(mouse_event) => {
                                     let col = if supports_sgr_pixels {
-                                        (mouse_event.column as u32 / cfg.cell_width_px) as u16
+                                        (mouse_event.column.saturating_sub(1) as u32 / host_cell_width) as u16
                                     } else {
-                                        mouse_event.column
+                                        mouse_event.column.saturating_sub(1)
                                     };
                                     let row = if supports_sgr_pixels {
-                                        (mouse_event.row as u32 / cfg.cell_height_px) as u16
+                                        (mouse_event.row.saturating_sub(1) as u32 / host_cell_height) as u16
                                     } else {
-                                        mouse_event.row
+                                        mouse_event.row.saturating_sub(1)
                                     };
 
                                     host_mouse_pos = Some((col, row));
@@ -1163,6 +1197,18 @@ pub fn record(
                                             // Translate row coordinate: subtract header rows and divider row
                                             let pty_row = row.saturating_sub(header_height + 1);
 
+                                            let y_offset_px = (header_height + 1) as u32 * host_cell_height;
+                                            let tracker_x = if supports_sgr_pixels {
+                                                mouse_event.column.saturating_sub(1)
+                                            } else {
+                                                col
+                                            };
+                                            let tracker_y = if supports_sgr_pixels {
+                                                mouse_event.row.saturating_sub(1).saturating_sub(y_offset_px as u16)
+                                            } else {
+                                                pty_row
+                                            };
+
                                             if col >= cols || pty_row >= rows {
                                                 continue;
                                             }
@@ -1196,12 +1242,13 @@ pub fn record(
                                             };
 
                                             let cell_x = if supports_sgr_pixels {
-                                                mouse_event.column as f32 / cfg.cell_width_px as f32
+                                                mouse_event.column.saturating_sub(1) as f32 / host_cell_width as f32
                                             } else {
                                                 col as f32
                                             };
                                             let cell_y = if supports_sgr_pixels {
-                                                (mouse_event.row as f32 / cfg.cell_height_px as f32) - (header_height + 1) as f32
+                                                let y_offset_px = (header_height + 1) as u32 * host_cell_height;
+                                                mouse_event.row.saturating_sub(1).saturating_sub(y_offset_px as u16) as f32 / host_cell_height as f32
                                             } else {
                                                 pty_row as f32
                                             };
@@ -1226,14 +1273,11 @@ pub fn record(
 
                                                 if start_new {
                                                     let tracker_mods = map_termina_mods(mouse_event.modifiers);
-                                                    let mut tracker = MouseSegmentTracker::new(is_drag, tracker_mods, supports_sgr_pixels, cfg.cell_width_px, cfg.cell_height_px);
+                                                    let mut tracker = MouseSegmentTracker::new(is_drag, tracker_mods, supports_sgr_pixels, host_cell_width, host_cell_height);
                                                     // Initialize segment starting point at the previous mouse coords
                                                     tracker.points.push((current_mouse_col, current_mouse_row, last_event_time));
                                                     active_tracker = Some(tracker);
                                                 }
-
-                                                let tracker_x = if supports_sgr_pixels { mouse_event.column } else { col };
-                                                let tracker_y = if supports_sgr_pixels { mouse_event.row } else { pty_row };
 
                                                 if let Some(ref mut tracker) = active_tracker {
                                                     if let Some(ev) = tracker.add_point(tracker_x, tracker_y, now) {
@@ -1307,8 +1351,8 @@ pub fn record(
                                                                 delay: Duration::from_millis(50),
                                                             });
                                                         }
-                                                        current_mouse_col = if supports_sgr_pixels { mouse_event.column } else { col };
-                                                        current_mouse_row = if supports_sgr_pixels { mouse_event.row } else { pty_row };
+                                                        current_mouse_col = tracker_x;
+                                                        current_mouse_row = tracker_y;
                                                     }
                                                     _ => {}
                                                 }
@@ -1316,14 +1360,17 @@ pub fn record(
                                             }
 
                                             let pixel_coords = if supports_sgr_pixels {
-                                                let y_offset_px = (header_height + 1) as u32 * cfg.cell_height_px;
-                                                Some((
-                                                    mouse_event.column,
-                                                    mouse_event.row.saturating_sub(y_offset_px as u16),
-                                                ))
-                                            } else {
-                                                None
-                                            };
+                                                 let y_offset_px = (header_height + 1) as u32 * host_cell_height;
+                                                 let host_rel_x = mouse_event.column.saturating_sub(1) as f32;
+                                                 let host_rel_y = mouse_event.row.saturating_sub(1).saturating_sub(y_offset_px as u16) as f32;
+
+                                                 let guest_x = host_rel_x * cfg.cell_width_px as f32 / host_cell_width as f32;
+                                                 let guest_y = host_rel_y * cfg.cell_height_px as f32 / host_cell_height as f32;
+
+                                                 Some((guest_x, guest_y))
+                                             } else {
+                                                 None
+                                             };
 
                                             // Encode and transmit mouse coordinates to the PTY
                                             if let Ok(bytes) = encode_mouse_event(
