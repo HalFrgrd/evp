@@ -898,7 +898,12 @@ fn build_timeline(
                             .sqrt()
                         })
                         .sum();
-                    let total_dur = per * total_dist.ceil().max(1.0) as u32;
+                    let is_custom_delay = *delay != settings.typing_speed;
+                    let total_dur = if is_custom_delay {
+                        scale(*delay)
+                    } else {
+                        scale(*delay) * total_dist.ceil().max(1.0) as u32
+                    };
                     let start_cursor = cursor;
 
                     use easing_function::Easing;
@@ -997,7 +1002,6 @@ fn build_timeline(
                 delay,
                 easing,
             } => {
-                let per = scale(*delay);
                 let points = generate_spline_points_f32(coords);
                 if !points.is_empty() {
                     let total_dist: f32 = coords
@@ -1008,7 +1012,12 @@ fn build_timeline(
                             .sqrt()
                         })
                         .sum();
-                    let total_dur = per * total_dist.ceil().max(1.0) as u32;
+                    let is_custom_delay = *delay != settings.typing_speed;
+                    let total_dur = if is_custom_delay {
+                        scale(*delay)
+                    } else {
+                        scale(*delay) * total_dist.ceil().max(1.0) as u32
+                    };
                     let start_cursor = cursor;
 
                     use easing_function::Easing;
