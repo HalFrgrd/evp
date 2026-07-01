@@ -27,6 +27,7 @@ use crate::script::{
     Event, KeyAction, KeySpec, ModSet, MouseAction, MouseButton, NamedKey, Settings,
 };
 use crate::style::Theme;
+use easing_function::easings::StandardEasing;
 
 /// Dynamic mouse coordinate encoder using libghostty's mouse event protocol
 fn encode_mouse_event(
@@ -395,20 +396,125 @@ fn is_collinear(ax: u16, ay: u16, bx: u16, by: u16, cx: u16, cy: u16) -> bool {
     distance <= 1.5
 }
 
+fn find_best_easing(points: &[(u16, u16, Instant)]) -> StandardEasing {
+    if points.len() < 3 {
+        return StandardEasing::Linear;
+    }
+
+    let t0 = points.first().unwrap().2;
+    let tn = points.last().unwrap().2;
+    let total_duration = tn.duration_since(t0);
+    if total_duration.is_zero() {
+        return StandardEasing::Linear;
+    }
+
+    let p0 = (
+        points.first().unwrap().0 as f32,
+        points.first().unwrap().1 as f32,
+    );
+    let pn = (
+        points.last().unwrap().0 as f32,
+        points.last().unwrap().1 as f32,
+    );
+    let total_dist = ((pn.0 - p0.0).powi(2) + (pn.1 - p0.1).powi(2)).sqrt();
+    if total_dist < 0.001 {
+        return StandardEasing::Linear;
+    }
+
+    let candidates = [
+        StandardEasing::Linear,
+        StandardEasing::InSine,
+        StandardEasing::OutSine,
+        StandardEasing::InOutSine,
+        StandardEasing::InQuadradic,
+        StandardEasing::OutQuadradic,
+        StandardEasing::InOutQuadradic,
+        StandardEasing::InCubic,
+        StandardEasing::OutCubic,
+        StandardEasing::InOutCubic,
+        StandardEasing::InQuartic,
+        StandardEasing::OutQuartic,
+        StandardEasing::InOutQuartic,
+        StandardEasing::InQuintic,
+        StandardEasing::OutQuintic,
+        StandardEasing::InOutQuintic,
+        StandardEasing::InExponential,
+        StandardEasing::OutExponential,
+        StandardEasing::InOutExponential,
+        StandardEasing::InCircular,
+        StandardEasing::OutCircular,
+        StandardEasing::InOutCircular,
+        StandardEasing::InBack,
+        StandardEasing::OutBack,
+        StandardEasing::InOutBack,
+        StandardEasing::InElastic,
+        StandardEasing::OutElastic,
+        StandardEasing::InOutElastic,
+        StandardEasing::InBounce,
+        StandardEasing::OutBounce,
+        StandardEasing::InOutBounce,
+    ];
+
+    use easing_function::Easing;
+
+    let mut best_easing = StandardEasing::Linear;
+    let mut min_sse = f32::MAX;
+
+    for &easing in &candidates {
+        let mut sse = 0.0;
+        for &(x, y, time) in points {
+            let t = time.duration_since(t0).as_secs_f32() / total_duration.as_secs_f32();
+            let t = t.clamp(0.0, 1.0);
+
+            let dx = pn.0 - p0.0;
+            let dy = pn.1 - p0.1;
+            let px = x as f32 - p0.0;
+            let py = y as f32 - p0.1;
+            let u = if total_dist > 0.0 {
+                (px * dx + py * dy) / (total_dist * total_dist)
+            } else {
+                0.0
+            };
+            let u = u.clamp(0.0, 1.0);
+
+            let eased_t = easing.ease(t);
+            sse += (u - eased_t).powi(2);
+        }
+        if sse < min_sse {
+            min_sse = sse;
+            best_easing = easing;
+        }
+    }
+
+    best_easing
+}
+
 /// Accumulates a continuous sequence of mouse movements and flushes a single simplified
 /// MouseMove or MouseDrag event when collinearity is broken or a pause of >1s occurs.
 struct MouseSegmentTracker {
     points: Vec<(u16, u16, Instant)>,
     is_drag: bool,
     mods: ModSet,
+    track_pixels: bool,
+    cell_width: u32,
+    cell_height: u32,
 }
 
 impl MouseSegmentTracker {
-    fn new(is_drag: bool, mods: ModSet) -> Self {
+    fn new(
+        is_drag: bool,
+        mods: ModSet,
+        track_pixels: bool,
+        cell_width: u32,
+        cell_height: u32,
+    ) -> Self {
         Self {
             points: Vec::new(),
             is_drag,
             mods,
+            track_pixels,
+            cell_width,
+            cell_height,
         }
     }
 
@@ -468,25 +574,48 @@ impl MouseSegmentTracker {
             duration
         };
 
+        let start_col = if self.track_pixels {
+            (start.0 as u32 / self.cell_width) as u16
+        } else {
+            start.0
+        };
+        let start_row = if self.track_pixels {
+            (start.1 as u32 / self.cell_height) as u16
+        } else {
+            start.1
+        };
+        let end_col = if self.track_pixels {
+            (end.0 as u32 / self.cell_width) as u16
+        } else {
+            end.0
+        };
+        let end_row = if self.track_pixels {
+            (end.1 as u32 / self.cell_height) as u16
+        } else {
+            end.1
+        };
+
+        let best_easing = find_best_easing(&self.points);
+
         let ev = if self.is_drag {
             Some(Event::MouseDrag {
-                start_col: start.0,
-                start_row: start.1,
-                end_col: end.0,
-                end_row: end.1,
+                start_col,
+                start_row,
+                end_col,
+                end_row,
                 mods: self.mods,
                 delay,
-                easing: None,
+                easing: Some(best_easing),
             })
         } else {
             Some(Event::MouseMove {
-                start_col: start.0,
-                start_row: start.1,
-                end_col: end.0,
-                end_row: end.1,
+                start_col,
+                start_row,
+                end_col,
+                end_row,
                 mods: self.mods,
                 delay,
-                easing: None,
+                easing: Some(best_easing),
             })
         };
 
@@ -1048,19 +1177,22 @@ pub fn record(
 
                                                 if start_new {
                                                     let tracker_mods = map_termina_mods(mouse_event.modifiers);
-                                                    let mut tracker = MouseSegmentTracker::new(is_drag, tracker_mods);
+                                                    let mut tracker = MouseSegmentTracker::new(is_drag, tracker_mods, supports_sgr_pixels, cfg.cell_width_px, cfg.cell_height_px);
                                                     // Initialize segment starting point at the previous mouse coords
                                                     tracker.points.push((current_mouse_col, current_mouse_row, last_event_time));
                                                     active_tracker = Some(tracker);
                                                 }
 
+                                                let tracker_x = if supports_sgr_pixels { mouse_event.column } else { col };
+                                                let tracker_y = if supports_sgr_pixels { mouse_event.row } else { pty_row };
+
                                                 if let Some(ref mut tracker) = active_tracker {
-                                                    if let Some(ev) = tracker.add_point(col, pty_row, now) {
+                                                    if let Some(ev) = tracker.add_point(tracker_x, tracker_y, now) {
                                                         recorded_events.push(ev);
                                                     }
                                                 }
-                                                current_mouse_col = col;
-                                                current_mouse_row = pty_row;
+                                                current_mouse_col = tracker_x;
+                                                current_mouse_row = tracker_y;
                                                 last_event_time = now;
                                             } else {
                                                 // 2. Otherwise (Press / Release / Scroll), flush movement segment first
@@ -1102,7 +1234,7 @@ pub fn record(
                                                                     end_row: pty_row,
                                                                     mods: ev_mods,
                                                                     delay: Duration::from_millis(50),
-                                                                    easing: None,
+                                                                    easing: Some(StandardEasing::InOutElastic),
                                                                 });
                                                             }
                                                         } else if button == Some(MouseButton::Right) {
@@ -1129,8 +1261,8 @@ pub fn record(
                                                                 delay: Duration::from_millis(50),
                                                             });
                                                         }
-                                                        current_mouse_col = col;
-                                                        current_mouse_row = pty_row;
+                                                        current_mouse_col = if supports_sgr_pixels { mouse_event.column } else { col };
+                                                        current_mouse_row = if supports_sgr_pixels { mouse_event.row } else { pty_row };
                                                     }
                                                     _ => {}
                                                 }

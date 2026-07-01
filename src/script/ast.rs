@@ -211,6 +211,7 @@ pub enum Event {
         button: Option<MouseButton>,
         col: u16,
         row: u16,
+        pixel_coords: Option<(u16, u16)>,
         mods: ModSet,
     },
 }
