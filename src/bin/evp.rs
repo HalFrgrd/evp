@@ -11,7 +11,7 @@ use std::{
 use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{Shell as CompletionShell, generate};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace};
 use tracing_subscriber::EnvFilter;
 
 /// Embedded demo tape used by `run-sample-script`. Source lives in
@@ -330,7 +330,7 @@ fn run_script(cli: &Cli, script: &evp::Script, evp_start: Instant) -> Result<()>
     let mut sorted_timings: Vec<_> = timings.into_iter().collect();
     sorted_timings.sort_by_key(|(_, stats)| std::cmp::Reverse(stats.total_ms));
     for (name, stats) in sorted_timings {
-        info!(
+        trace!(
             scope = %name,
             total_ms = stats.total_ms,
             count = stats.count,
