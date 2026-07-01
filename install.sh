@@ -139,7 +139,7 @@ cat <<EOF
 
 Try it out:
 
-    ${RUN_CMD} run-sample-script
+    ${RUN_CMD} print-ref-script > demo.tape && ${RUN_CMD} demo.tape
     # → writes ./evp-test.gif (a small built-in demo)
 
 Or record your own terminal session:

@@ -14,7 +14,7 @@ use clap_complete::{Shell as CompletionShell, generate};
 use tracing::{debug, error, info, trace};
 use tracing_subscriber::EnvFilter;
 
-/// Embedded demo tape used by `run-sample-script`. Source lives in
+/// Embedded demo tape printed by `print-ref-script`. Source lives in
 /// `examples/test.tape` so it stays in sync with the rest of the demos.
 const EMBEDDED_TEST_TAPE: &str = include_str!("../../examples/test.tape");
 
@@ -128,9 +128,7 @@ enum Commands {
     Validate { tape: PathBuf },
     /// Print a shell completion script to stdout.
     Completion { shell: CompletionShell },
-    /// Run the built-in demo tape embedded in the binary.
-    #[command(name = "run-sample-script")]
-    RunSampleScript,
+
     /// Print the reference tape from README.md commented out, followed by the test script.
     #[command(name = "print-ref-script")]
     PrintRefScript,
@@ -396,15 +394,7 @@ fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()
             generate(shell, &mut cmd, "evp", &mut io::stdout());
             Ok(())
         }
-        Commands::RunSampleScript => {
-            init_tracing(cli, evp_start);
-            log_build_info_debug();
-            info!("running embedded test tape (run-sample-script)");
-            let script =
-                evp::parse_script(EMBEDDED_TEST_TAPE).context("parsing embedded test tape")?;
-            run_script(cli, &script, evp_start)?;
-            Ok(())
-        }
+
         Commands::PrintRefScript => {
             println!("{}", evp::script::write_reference_header().trim_end());
             println!("\n{}", EMBEDDED_TEST_TAPE);
@@ -540,12 +530,6 @@ mod tests {
                 shell: CompletionShell::Bash
             })
         ));
-    }
-
-    #[test]
-    fn parses_run_sample_script_subcommand() {
-        let cli = Cli::try_parse_from(["evp", "run-sample-script"]).unwrap();
-        assert!(matches!(cli.command, Some(Commands::RunSampleScript)));
     }
 
     #[test]

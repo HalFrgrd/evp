@@ -48,8 +48,8 @@ jobs:
       - name: Test subcommands on runner
         run: |
           chmod +x docker/build/evp
-          docker/build/evp print-ref-script > /dev/null
-          docker/build/evp run-sample-script --output test-ci.gif
+          docker/build/evp print-ref-script > test-ci.tape
+          docker/build/evp test-ci.tape --output test-ci.gif
 
   render-examples-matrix:
     name: Render Example (${{ matrix.example }})

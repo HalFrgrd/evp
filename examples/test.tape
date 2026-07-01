@@ -1,4 +1,4 @@
-# Built-in smoke test — runs via `evp run-sample-script`.
+# Built-in smoke test — generate via `evp print-ref-script > demo.tape` and run via `evp demo.tape`.
 #
 # Designed to work on any POSIX system: only `/bin/sh` builtins and
 # `printf` are used. Output goes to ./evp-test.gif and ./evp-test.svg
