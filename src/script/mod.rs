@@ -1,5 +1,6 @@
 //! VHS `.tape` script parsing.
 
+use easing_function::easings::StandardEasing;
 use std::path::Path;
 use std::time::Duration;
 
@@ -24,6 +25,51 @@ pub fn write_reference_header() -> String {
         header.push_str(&format!("# {}\n", line));
     }
     header
+}
+
+fn format_mouse_cmd(name: &str, delay: Duration, easing: Option<StandardEasing>) -> String {
+    let mut cmd = name.to_string();
+    let has_delay = delay != Duration::from_millis(50);
+    if has_delay {
+        cmd.push_str(&format!("@{}ms", delay.as_millis()));
+    }
+    if let Some(e) = easing {
+        let easing_name = match e {
+            StandardEasing::Linear => "Linear",
+            StandardEasing::InSine => "EaseInSine",
+            StandardEasing::OutSine => "EaseOutSine",
+            StandardEasing::InOutSine => "EaseInOutSine",
+            StandardEasing::InQuadradic => "EaseInQuad",
+            StandardEasing::OutQuadradic => "EaseOutQuad",
+            StandardEasing::InOutQuadradic => "EaseInOutQuad",
+            StandardEasing::InCubic => "EaseInCubic",
+            StandardEasing::OutCubic => "EaseOutCubic",
+            StandardEasing::InOutCubic => "EaseInOutCubic",
+            StandardEasing::InQuartic => "EaseInQuart",
+            StandardEasing::OutQuartic => "EaseOutQuart",
+            StandardEasing::InOutQuartic => "EaseInOutQuart",
+            StandardEasing::InQuintic => "EaseInQuint",
+            StandardEasing::OutQuintic => "EaseOutQuint",
+            StandardEasing::InOutQuintic => "EaseInOutQuint",
+            StandardEasing::InExponential => "EaseInExpo",
+            StandardEasing::OutExponential => "EaseOutExpo",
+            StandardEasing::InOutExponential => "EaseInOutExpo",
+            StandardEasing::InCircular => "EaseInCirc",
+            StandardEasing::OutCircular => "EaseOutCirc",
+            StandardEasing::InOutCircular => "EaseInOutCirc",
+            StandardEasing::InBack => "EaseInBack",
+            StandardEasing::OutBack => "EaseOutBack",
+            StandardEasing::InOutBack => "EaseInOutBack",
+            StandardEasing::InElastic => "EaseInElastic",
+            StandardEasing::OutElastic => "EaseOutElastic",
+            StandardEasing::InOutElastic => "EaseInOutElastic",
+            StandardEasing::InBounce => "EaseInBounce",
+            StandardEasing::OutBounce => "EaseOutBounce",
+            StandardEasing::InOutBounce => "EaseInOutBounce",
+        };
+        cmd.push_str(&format!("@{}", easing_name));
+    }
+    cmd
 }
 
 fn format_mods_prefix(mods: ModSet) -> String {
@@ -180,11 +226,13 @@ pub fn write_tape_script(
                 end_col,
                 end_row,
                 mods,
-                ..
+                delay,
+                easing,
             } => {
                 tape_content.push_str(&format!(
-                    "{}MouseDrag {} {} {} {}\n",
+                    "{}{} {} {} {} {}\n",
                     format_mods_prefix(*mods),
+                    format_mouse_cmd("MouseDrag", *delay, *easing),
                     start_col,
                     start_row,
                     end_col,
@@ -197,11 +245,13 @@ pub fn write_tape_script(
                 end_col,
                 end_row,
                 mods,
-                ..
+                delay,
+                easing,
             } => {
                 tape_content.push_str(&format!(
-                    "{}MouseMove {} {} {} {}\n",
+                    "{}{} {} {} {} {}\n",
                     format_mods_prefix(*mods),
+                    format_mouse_cmd("MouseMove", *delay, *easing),
                     start_col,
                     start_row,
                     end_col,

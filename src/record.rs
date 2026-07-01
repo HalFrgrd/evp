@@ -8,7 +8,7 @@ use libghostty_vt::{
 };
 use ratatui::{
     Terminal as RatatuiTerminal,
-    backend::CrosstermBackend,
+    backend::TerminaBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -27,6 +27,7 @@ use crate::script::{
     Event, KeyAction, KeySpec, ModSet, MouseAction, MouseButton, NamedKey, Settings,
 };
 use crate::style::Theme;
+use easing_function::easings::StandardEasing;
 
 /// Dynamic mouse coordinate encoder using libghostty's mouse event protocol
 fn encode_mouse_event(
@@ -34,15 +35,23 @@ fn encode_mouse_event(
     button: Option<MouseButton>,
     col: u16,
     row: u16,
+    pixel_coords: Option<(u16, u16)>,
     terminal: &Terminal<'_, '_>,
     cell_width_px: u32,
     cell_height_px: u32,
     cols: u16,
     rows: u16,
 ) -> Result<Vec<u8>> {
-    let x = (col as f32 * cell_width_px as f32) + (cell_width_px as f32 / 2.0);
-    let y = (row as f32 * cell_height_px as f32) + (cell_height_px as f32 / 2.0);
-    let pos = libghostty_vt::mouse::Position { x, y };
+    let pos = if let Some((x_px, y_px)) = pixel_coords {
+        libghostty_vt::mouse::Position {
+            x: x_px as f32,
+            y: y_px as f32,
+        }
+    } else {
+        let x = (col as f32 * cell_width_px as f32) + (cell_width_px as f32 / 2.0);
+        let y = (row as f32 * cell_height_px as f32) + (cell_height_px as f32 / 2.0);
+        libghostty_vt::mouse::Position { x, y }
+    };
 
     let mut encoder = libghostty_vt::mouse::Encoder::new()?;
     encoder.set_options_from_terminal(terminal);
@@ -86,83 +95,75 @@ fn encode_mouse_event(
     Ok(buf[..len].to_vec())
 }
 
-fn map_crossterm_key(event: crossterm::event::KeyEvent) -> (NamedKey, ModSet) {
+fn map_termina_key(event: termina::event::KeyEvent) -> (NamedKey, ModSet) {
     let key = match event.code {
-        crossterm::event::KeyCode::Char(c) => NamedKey::Char(c),
-        crossterm::event::KeyCode::Enter => NamedKey::Enter,
-        crossterm::event::KeyCode::Tab => NamedKey::Tab,
-        crossterm::event::KeyCode::Backspace => NamedKey::Backspace,
-        crossterm::event::KeyCode::Delete => NamedKey::Delete,
-        crossterm::event::KeyCode::Insert => NamedKey::Insert,
-        crossterm::event::KeyCode::Esc => NamedKey::Escape,
-        crossterm::event::KeyCode::Up => NamedKey::Up,
-        crossterm::event::KeyCode::Down => NamedKey::Down,
-        crossterm::event::KeyCode::Left => NamedKey::Left,
-        crossterm::event::KeyCode::Right => NamedKey::Right,
-        crossterm::event::KeyCode::PageUp => NamedKey::PageUp,
-        crossterm::event::KeyCode::PageDown => NamedKey::PageDown,
-        crossterm::event::KeyCode::Home => NamedKey::Home,
-        crossterm::event::KeyCode::End => NamedKey::End,
+        termina::event::KeyCode::Char(c) => NamedKey::Char(c),
+        termina::event::KeyCode::Enter => NamedKey::Enter,
+        termina::event::KeyCode::Tab => NamedKey::Tab,
+        termina::event::KeyCode::Backspace => NamedKey::Backspace,
+        termina::event::KeyCode::Delete => NamedKey::Delete,
+        termina::event::KeyCode::Insert => NamedKey::Insert,
+        termina::event::KeyCode::Escape => NamedKey::Escape,
+        termina::event::KeyCode::Up => NamedKey::Up,
+        termina::event::KeyCode::Down => NamedKey::Down,
+        termina::event::KeyCode::Left => NamedKey::Left,
+        termina::event::KeyCode::Right => NamedKey::Right,
+        termina::event::KeyCode::PageUp => NamedKey::PageUp,
+        termina::event::KeyCode::PageDown => NamedKey::PageDown,
+        termina::event::KeyCode::Home => NamedKey::Home,
+        termina::event::KeyCode::End => NamedKey::End,
         _ => NamedKey::Char(' '),
     };
 
     let mods = ModSet {
-        ctrl: event
-            .modifiers
-            .contains(crossterm::event::KeyModifiers::CONTROL),
-        alt: event
-            .modifiers
-            .contains(crossterm::event::KeyModifiers::ALT),
-        shift: event
-            .modifiers
-            .contains(crossterm::event::KeyModifiers::SHIFT),
-        super_key: event
-            .modifiers
-            .contains(crossterm::event::KeyModifiers::SUPER),
+        ctrl: event.modifiers.contains(termina::event::Modifiers::CONTROL),
+        alt: event.modifiers.contains(termina::event::Modifiers::ALT),
+        shift: event.modifiers.contains(termina::event::Modifiers::SHIFT),
+        super_key: event.modifiers.contains(termina::event::Modifiers::SUPER),
     };
 
     (key, mods)
 }
 
-fn map_crossterm_mods(modifiers: crossterm::event::KeyModifiers) -> ModSet {
+fn map_termina_mods(modifiers: termina::event::Modifiers) -> ModSet {
     ModSet {
-        ctrl: modifiers.contains(crossterm::event::KeyModifiers::CONTROL),
-        alt: modifiers.contains(crossterm::event::KeyModifiers::ALT),
-        shift: modifiers.contains(crossterm::event::KeyModifiers::SHIFT),
-        super_key: modifiers.contains(crossterm::event::KeyModifiers::SUPER),
+        ctrl: modifiers.contains(termina::event::Modifiers::CONTROL),
+        alt: modifiers.contains(termina::event::Modifiers::ALT),
+        shift: modifiers.contains(termina::event::Modifiers::SHIFT),
+        super_key: modifiers.contains(termina::event::Modifiers::SUPER),
     }
 }
 
-fn map_crossterm_mouse(
-    kind: crossterm::event::MouseEventKind,
+fn map_termina_mouse(
+    kind: termina::event::MouseEventKind,
 ) -> Option<(MouseAction, Option<MouseButton>)> {
     match kind {
-        crossterm::event::MouseEventKind::Down(btn) => {
+        termina::event::MouseEventKind::Down(btn) => {
             Some((MouseAction::Press, map_mouse_button(btn)))
         }
-        crossterm::event::MouseEventKind::Up(btn) => {
+        termina::event::MouseEventKind::Up(btn) => {
             Some((MouseAction::Release, map_mouse_button(btn)))
         }
-        crossterm::event::MouseEventKind::Drag(btn) => {
+        termina::event::MouseEventKind::Drag(btn) => {
             Some((MouseAction::Motion, map_mouse_button(btn)))
         }
-        crossterm::event::MouseEventKind::Moved => Some((MouseAction::Motion, None)),
-        crossterm::event::MouseEventKind::ScrollUp => {
+        termina::event::MouseEventKind::Moved => Some((MouseAction::Motion, None)),
+        termina::event::MouseEventKind::ScrollUp => {
             Some((MouseAction::Press, Some(MouseButton::WheelUp)))
         }
-        crossterm::event::MouseEventKind::ScrollDown => {
+        termina::event::MouseEventKind::ScrollDown => {
             Some((MouseAction::Press, Some(MouseButton::WheelDown)))
         }
-        crossterm::event::MouseEventKind::ScrollLeft
-        | crossterm::event::MouseEventKind::ScrollRight => None,
+        termina::event::MouseEventKind::ScrollLeft
+        | termina::event::MouseEventKind::ScrollRight => None,
     }
 }
 
-fn map_mouse_button(btn: crossterm::event::MouseButton) -> Option<MouseButton> {
+fn map_mouse_button(btn: termina::event::MouseButton) -> Option<MouseButton> {
     match btn {
-        crossterm::event::MouseButton::Left => Some(MouseButton::Left),
-        crossterm::event::MouseButton::Right => Some(MouseButton::Right),
-        crossterm::event::MouseButton::Middle => Some(MouseButton::Middle),
+        termina::event::MouseButton::Left => Some(MouseButton::Left),
+        termina::event::MouseButton::Right => Some(MouseButton::Right),
+        termina::event::MouseButton::Middle => Some(MouseButton::Middle),
     }
 }
 
@@ -260,7 +261,7 @@ fn layout_header(
 }
 
 fn draw_terminal_state(
-    ratatui_term: &mut RatatuiTerminal<CrosstermBackend<std::io::Stdout>>,
+    ratatui_term: &mut RatatuiTerminal<TerminaBackend<termina::PlatformTerminal>>,
     frame: &crate::recording::RawFrame,
     elapsed: Duration,
     host_mouse_pos: Option<(u16, u16)>,
@@ -395,20 +396,125 @@ fn is_collinear(ax: u16, ay: u16, bx: u16, by: u16, cx: u16, cy: u16) -> bool {
     distance <= 1.5
 }
 
+fn find_best_easing(points: &[(u16, u16, Instant)]) -> StandardEasing {
+    if points.len() < 3 {
+        return StandardEasing::Linear;
+    }
+
+    let t0 = points.first().unwrap().2;
+    let tn = points.last().unwrap().2;
+    let total_duration = tn.duration_since(t0);
+    if total_duration.is_zero() {
+        return StandardEasing::Linear;
+    }
+
+    let p0 = (
+        points.first().unwrap().0 as f32,
+        points.first().unwrap().1 as f32,
+    );
+    let pn = (
+        points.last().unwrap().0 as f32,
+        points.last().unwrap().1 as f32,
+    );
+    let total_dist = ((pn.0 - p0.0).powi(2) + (pn.1 - p0.1).powi(2)).sqrt();
+    if total_dist < 0.001 {
+        return StandardEasing::Linear;
+    }
+
+    let candidates = [
+        StandardEasing::Linear,
+        StandardEasing::InSine,
+        StandardEasing::OutSine,
+        StandardEasing::InOutSine,
+        StandardEasing::InQuadradic,
+        StandardEasing::OutQuadradic,
+        StandardEasing::InOutQuadradic,
+        StandardEasing::InCubic,
+        StandardEasing::OutCubic,
+        StandardEasing::InOutCubic,
+        StandardEasing::InQuartic,
+        StandardEasing::OutQuartic,
+        StandardEasing::InOutQuartic,
+        StandardEasing::InQuintic,
+        StandardEasing::OutQuintic,
+        StandardEasing::InOutQuintic,
+        StandardEasing::InExponential,
+        StandardEasing::OutExponential,
+        StandardEasing::InOutExponential,
+        StandardEasing::InCircular,
+        StandardEasing::OutCircular,
+        StandardEasing::InOutCircular,
+        StandardEasing::InBack,
+        StandardEasing::OutBack,
+        StandardEasing::InOutBack,
+        StandardEasing::InElastic,
+        StandardEasing::OutElastic,
+        StandardEasing::InOutElastic,
+        StandardEasing::InBounce,
+        StandardEasing::OutBounce,
+        StandardEasing::InOutBounce,
+    ];
+
+    use easing_function::Easing;
+
+    let mut best_easing = StandardEasing::Linear;
+    let mut min_sse = f32::MAX;
+
+    for &easing in &candidates {
+        let mut sse = 0.0;
+        for &(x, y, time) in points {
+            let t = time.duration_since(t0).as_secs_f32() / total_duration.as_secs_f32();
+            let t = t.clamp(0.0, 1.0);
+
+            let dx = pn.0 - p0.0;
+            let dy = pn.1 - p0.1;
+            let px = x as f32 - p0.0;
+            let py = y as f32 - p0.1;
+            let u = if total_dist > 0.0 {
+                (px * dx + py * dy) / (total_dist * total_dist)
+            } else {
+                0.0
+            };
+            let u = u.clamp(0.0, 1.0);
+
+            let eased_t = easing.ease(t);
+            sse += (u - eased_t).powi(2);
+        }
+        if sse < min_sse {
+            min_sse = sse;
+            best_easing = easing;
+        }
+    }
+
+    best_easing
+}
+
 /// Accumulates a continuous sequence of mouse movements and flushes a single simplified
 /// MouseMove or MouseDrag event when collinearity is broken or a pause of >1s occurs.
 struct MouseSegmentTracker {
     points: Vec<(u16, u16, Instant)>,
     is_drag: bool,
     mods: ModSet,
+    track_pixels: bool,
+    cell_width: u32,
+    cell_height: u32,
 }
 
 impl MouseSegmentTracker {
-    fn new(is_drag: bool, mods: ModSet) -> Self {
+    fn new(
+        is_drag: bool,
+        mods: ModSet,
+        track_pixels: bool,
+        cell_width: u32,
+        cell_height: u32,
+    ) -> Self {
         Self {
             points: Vec::new(),
             is_drag,
             mods,
+            track_pixels,
+            cell_width,
+            cell_height,
         }
     }
 
@@ -468,25 +574,48 @@ impl MouseSegmentTracker {
             duration
         };
 
+        let start_col = if self.track_pixels {
+            (start.0 as u32 / self.cell_width) as u16
+        } else {
+            start.0
+        };
+        let start_row = if self.track_pixels {
+            (start.1 as u32 / self.cell_height) as u16
+        } else {
+            start.1
+        };
+        let end_col = if self.track_pixels {
+            (end.0 as u32 / self.cell_width) as u16
+        } else {
+            end.0
+        };
+        let end_row = if self.track_pixels {
+            (end.1 as u32 / self.cell_height) as u16
+        } else {
+            end.1
+        };
+
+        let best_easing = find_best_easing(&self.points);
+
         let ev = if self.is_drag {
             Some(Event::MouseDrag {
-                start_col: start.0,
-                start_row: start.1,
-                end_col: end.0,
-                end_row: end.1,
+                start_col,
+                start_row,
+                end_col,
+                end_row,
                 mods: self.mods,
                 delay,
-                easing: None,
+                easing: Some(best_easing),
             })
         } else {
             Some(Event::MouseMove {
-                start_col: start.0,
-                start_row: start.1,
-                end_col: end.0,
-                end_row: end.1,
+                start_col,
+                start_row,
+                end_col,
+                end_row,
                 mods: self.mods,
                 delay,
-                easing: None,
+                easing: Some(best_easing),
             })
         };
 
@@ -497,36 +626,64 @@ impl MouseSegmentTracker {
 
 struct TerminalCapabilityGuard;
 
-impl TerminalCapabilityGuard {
-    fn new() -> Result<Self> {
-        crossterm::terminal::enable_raw_mode().context("enabling terminal raw mode")?;
-        crossterm::execute!(
-            std::io::stdout(),
-            crossterm::terminal::EnterAlternateScreen,
-            crossterm::event::EnableMouseCapture,
-            crossterm::event::EnableBracketedPaste,
-            crossterm::event::PushKeyboardEnhancementFlags(
-                crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                    | crossterm::event::KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-                    | crossterm::event::KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
-                    | crossterm::event::KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
-            )
-        )
-        .context("initializing host terminal capabilities")?;
-        Ok(Self)
-    }
-}
-
 impl Drop for TerminalCapabilityGuard {
     fn drop(&mut self) {
-        let _ = crossterm::execute!(
+        use std::io::Write;
+        use termina::Terminal;
+        use termina::escape::csi::{Csi, DecPrivateMode, DecPrivateModeCode, Keyboard, Mode};
+
+        let _ = write!(
             std::io::stdout(),
-            crossterm::event::PopKeyboardEnhancementFlags,
-            crossterm::event::DisableBracketedPaste,
-            crossterm::event::DisableMouseCapture,
-            crossterm::terminal::LeaveAlternateScreen
+            "{}",
+            Csi::Keyboard(Keyboard::PopFlags(1))
         );
-        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = write!(
+            std::io::stdout(),
+            "{}",
+            Csi::Mode(Mode::ResetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::BracketedPaste
+            )))
+        );
+        let _ = write!(
+            std::io::stdout(),
+            "{}",
+            Csi::Mode(Mode::ResetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::MouseTracking
+            )))
+        );
+        let _ = write!(
+            std::io::stdout(),
+            "{}",
+            Csi::Mode(Mode::ResetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::ButtonEventMouse
+            )))
+        );
+        let _ = write!(
+            std::io::stdout(),
+            "{}",
+            Csi::Mode(Mode::ResetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::AnyEventMouse
+            )))
+        );
+        let _ = write!(
+            std::io::stdout(),
+            "{}",
+            Csi::Mode(Mode::ResetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::SGRMouse
+            )))
+        );
+        let _ = write!(
+            std::io::stdout(),
+            "{}",
+            Csi::Mode(Mode::ResetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::ClearAndEnableAlternateScreen
+            )))
+        );
+        let _ = std::io::stdout().flush();
+
+        if let Ok(mut term) = termina::PlatformTerminal::new() {
+            let _ = term.enter_cooked_mode();
+        }
     }
 }
 
@@ -541,8 +698,14 @@ pub fn record(
     output_override: Option<PathBuf>,
 ) -> Result<()> {
     // 1. Resolve geometry
-    let (actual_host_cols, actual_host_rows) =
-        crossterm::terminal::size().context("getting host terminal size")?;
+    use termina::Terminal as TerminaTerminalTrait;
+    let mut host_terminal =
+        termina::PlatformTerminal::new().context("creating PlatformTerminal")?;
+    let ws = host_terminal
+        .get_dimensions()
+        .context("getting host terminal size")?;
+    let actual_host_cols = ws.cols;
+    let actual_host_rows = ws.rows;
 
     let mut cols = override_cols.unwrap_or(actual_host_cols);
     let mut rows = override_rows.unwrap_or(actual_host_rows.saturating_sub(2));
@@ -550,6 +713,118 @@ pub fn record(
     if rows == 0 {
         bail!("terminal height is too small for EVP recording");
     }
+
+    // Configure raw mode and terminal capabilities
+    host_terminal
+        .enter_raw_mode()
+        .context("entering raw mode")?;
+    use std::io::Write;
+    use termina::escape::csi::{
+        Csi, DecModeSetting, DecPrivateMode, DecPrivateModeCode, Keyboard, KittyKeyboardFlags, Mode,
+    };
+
+    // Query if SGRPixelsMouse is supported (DEC private mode 1016)
+    let mut supports_sgr_pixels = false;
+    if write!(
+        host_terminal,
+        "{}",
+        Csi::Mode(Mode::QueryDecPrivateMode(DecPrivateMode::Code(
+            DecPrivateModeCode::SGRPixelsMouse
+        )))
+    )
+    .is_ok()
+        && host_terminal.flush().is_ok()
+    {
+        // Wait up to 100ms for a response
+        if let Ok(true) = host_terminal.poll(
+            |event| {
+                matches!(
+                    event,
+                    termina::Event::Csi(Csi::Mode(Mode::ReportDecPrivateMode {
+                        mode: DecPrivateMode::Code(DecPrivateModeCode::SGRPixelsMouse),
+                        ..
+                    }))
+                )
+            },
+            Some(Duration::from_millis(100)),
+        ) {
+            if let Ok(termina::Event::Csi(Csi::Mode(Mode::ReportDecPrivateMode {
+                setting, ..
+            }))) = host_terminal.read(|_| true)
+            {
+                if setting != DecModeSetting::NotRecognized {
+                    supports_sgr_pixels = true;
+                }
+            }
+        }
+    }
+
+    write!(
+        host_terminal,
+        "{}",
+        Csi::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+            DecPrivateModeCode::ClearAndEnableAlternateScreen
+        )))
+    )?;
+    write!(
+        host_terminal,
+        "{}",
+        Csi::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+            DecPrivateModeCode::MouseTracking
+        )))
+    )?;
+    write!(
+        host_terminal,
+        "{}",
+        Csi::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+            DecPrivateModeCode::ButtonEventMouse
+        )))
+    )?;
+    write!(
+        host_terminal,
+        "{}",
+        Csi::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+            DecPrivateModeCode::AnyEventMouse
+        )))
+    )?;
+
+    if supports_sgr_pixels {
+        write!(
+            host_terminal,
+            "{}",
+            Csi::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::SGRPixelsMouse
+            )))
+        )?;
+    } else {
+        write!(
+            host_terminal,
+            "{}",
+            Csi::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::SGRMouse
+            )))
+        )?;
+    }
+    write!(
+        host_terminal,
+        "{}",
+        Csi::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+            DecPrivateModeCode::BracketedPaste
+        )))
+    )?;
+
+    let flags = KittyKeyboardFlags::DISAMBIGUATE_ESCAPE_CODES
+        | KittyKeyboardFlags::REPORT_EVENT_TYPES
+        | KittyKeyboardFlags::REPORT_ALTERNATE_KEYS
+        | KittyKeyboardFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES;
+    write!(
+        host_terminal,
+        "{}",
+        Csi::Keyboard(Keyboard::PushFlags(flags))
+    )?;
+    host_terminal.flush()?;
+
+    let _guard = TerminalCapabilityGuard;
 
     let mut settings = Settings::default();
     settings.cols = Some(cols);
@@ -607,10 +882,11 @@ pub fn record(
     let renderer_tx = renderer_handle.tx.clone();
 
     // 5. Setup channels and multi-threaded event polling
+    let reader = host_terminal.event_reader();
     let (event_tx, event_rx) = crossbeam_channel::unbounded();
     std::thread::spawn(move || {
         loop {
-            match crossterm::event::read() {
+            match reader.read(|_| true) {
                 Ok(event) => {
                     if event_tx.send(event).is_err() {
                         break;
@@ -664,12 +940,10 @@ pub fn record(
     let mut active_tracker: Option<MouseSegmentTracker> = None;
 
     {
-        // 6. Enter alternate screen buffer, raw mode, and enable host terminal capabilities
-        let _guard = TerminalCapabilityGuard::new()?;
-
-        let backend = CrosstermBackend::new(std::io::stdout());
+        let backend = TerminaBackend::new(host_terminal);
         let mut ratatui_term = RatatuiTerminal::new(backend)?;
-        ratatui_term.clear()?;
+        // Render an empty frame to synchronize ratatui buffer state without deadlocking on get_cursor_position
+        ratatui_term.draw(|_| {})?;
 
         // Mouse tracking variables
         let mut current_mouse_col = 0u16;
@@ -707,7 +981,7 @@ pub fn record(
                     match res {
                         Ok(event) => {
                             match event {
-                                crossterm::event::Event::Key(key_event) => {
+                                termina::Event::Key(key_event) => {
                                     // Interrupt and flush active mouse movement
                                     if let Some(mut tracker) = active_tracker.take() {
                                         if let Some(ev) = tracker.flush() {
@@ -715,9 +989,9 @@ pub fn record(
                                         }
                                     }
 
-                                    let (named_key, mods) = map_crossterm_key(key_event);
+                                    let (named_key, mods) = map_termina_key(key_event);
                                     let key_spec = KeySpec { key: named_key, mods };
-                                    let action = if key_event.kind == crossterm::event::KeyEventKind::Release {
+                                    let action = if key_event.kind == termina::event::KeyEventKind::Release {
                                         KeyAction::Release
                                     } else {
                                         KeyAction::Press
@@ -759,13 +1033,24 @@ pub fn record(
                                         pty.write(bytes);
                                     }
                                 }
-                                crossterm::event::Event::Mouse(mouse_event) => {
-                                    host_mouse_pos = Some((mouse_event.column, mouse_event.row));
+                                termina::Event::Mouse(mouse_event) => {
+                                    let col = if supports_sgr_pixels {
+                                        (mouse_event.column as u32 / cfg.cell_width_px) as u16
+                                    } else {
+                                        mouse_event.column
+                                    };
+                                    let row = if supports_sgr_pixels {
+                                        (mouse_event.row as u32 / cfg.cell_height_px) as u16
+                                    } else {
+                                        mouse_event.row
+                                    };
 
-                                    let is_click_here = click_here_cells.contains(&(mouse_event.column, mouse_event.row));
+                                    host_mouse_pos = Some((col, row));
+
+                                    let is_click_here = click_here_cells.contains(&(col, row));
 
                                     if is_click_here {
-                                        if let crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) = mouse_event.kind {
+                                        if let termina::event::MouseEventKind::Down(termina::event::MouseButton::Left) = mouse_event.kind {
                                             if let crate::pty::Child::Active(pid) = child {
                                                 let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGHUP);
                                                 std::thread::sleep(std::time::Duration::from_millis(100));
@@ -801,7 +1086,7 @@ pub fn record(
                                     }
 
                                     // If we moved off "click here" to another part of the header/divider, redraw to clear hover
-                                    if mouse_event.row < header_height + 1 {
+                                    if row < header_height + 1 {
                                         let elapsed = start_time.elapsed();
                                         if let Ok((mut frame, _)) = capture(
                                             &mut render_state,
@@ -825,14 +1110,11 @@ pub fn record(
                                         continue;
                                     }
 
-                                    if let Some((action, button)) = map_crossterm_mouse(mouse_event.kind) {
-                                            let col = mouse_event.column;
-                                            let row = mouse_event.row;
-
+                                    if let Some((action, button)) = map_termina_mouse(mouse_event.kind) {
                                             // Translate row coordinate: subtract header rows and divider row
-                                            let row = row - (header_height + 1);
+                                            let pty_row = row.saturating_sub(header_height + 1);
 
-                                            if col >= cols || row >= rows {
+                                            if col >= cols || pty_row >= rows {
                                                 continue;
                                             }
 
@@ -863,7 +1145,18 @@ pub fn record(
                                             } else {
                                                 MouseState::Moving
                                             };
-                                            current_mouse_pos = Some((col as f32, row as f32, mouse_state));
+
+                                            let cell_x = if supports_sgr_pixels {
+                                                mouse_event.column as f32 / cfg.cell_width_px as f32
+                                            } else {
+                                                col as f32
+                                            };
+                                            let cell_y = if supports_sgr_pixels {
+                                                (mouse_event.row as f32 / cfg.cell_height_px as f32) - (header_height + 1) as f32
+                                            } else {
+                                                pty_row as f32
+                                            };
+                                            current_mouse_pos = Some((cell_x, cell_y, mouse_state));
 
                                             // 1. If it's movement (Motion / Drag), feed to segment tracker
                                             let is_drag = action == MouseAction::Motion && is_dragging;
@@ -883,20 +1176,23 @@ pub fn record(
                                                 }
 
                                                 if start_new {
-                                                    let tracker_mods = map_crossterm_mods(mouse_event.modifiers);
-                                                    let mut tracker = MouseSegmentTracker::new(is_drag, tracker_mods);
+                                                    let tracker_mods = map_termina_mods(mouse_event.modifiers);
+                                                    let mut tracker = MouseSegmentTracker::new(is_drag, tracker_mods, supports_sgr_pixels, cfg.cell_width_px, cfg.cell_height_px);
                                                     // Initialize segment starting point at the previous mouse coords
                                                     tracker.points.push((current_mouse_col, current_mouse_row, last_event_time));
                                                     active_tracker = Some(tracker);
                                                 }
 
+                                                let tracker_x = if supports_sgr_pixels { mouse_event.column } else { col };
+                                                let tracker_y = if supports_sgr_pixels { mouse_event.row } else { pty_row };
+
                                                 if let Some(ref mut tracker) = active_tracker {
-                                                    if let Some(ev) = tracker.add_point(col, row, now) {
+                                                    if let Some(ev) = tracker.add_point(tracker_x, tracker_y, now) {
                                                         recorded_events.push(ev);
                                                     }
                                                 }
-                                                current_mouse_col = col;
-                                                current_mouse_row = row;
+                                                current_mouse_col = tracker_x;
+                                                current_mouse_row = tracker_y;
                                                 last_event_time = now;
                                             } else {
                                                 // 2. Otherwise (Press / Release / Scroll), flush movement segment first
@@ -911,22 +1207,22 @@ pub fn record(
                                                     recorded_events.push(Event::Sleep(current_idle));
                                                 }
 
-                                                let ev_mods = map_crossterm_mods(mouse_event.modifiers);
+                                                let ev_mods = map_termina_mods(mouse_event.modifiers);
 
                                                 // Process instantaneous mouse event
                                                 match action {
                                                     MouseAction::Press => {
                                                         if button == Some(MouseButton::Left) {
                                                             drag_start_col = col;
-                                                            drag_start_row = row;
+                                                            drag_start_row = pty_row;
                                                         }
                                                     }
                                                     MouseAction::Release => {
                                                         if button == Some(MouseButton::Left) {
-                                                            if col == drag_start_col && row == drag_start_row {
+                                                            if col == drag_start_col && pty_row == drag_start_row {
                                                                 recorded_events.push(Event::Click {
                                                                     col,
-                                                                    row,
+                                                                    row: pty_row,
                                                                     mods: ev_mods,
                                                                     delay: Duration::from_millis(50),
                                                                 });
@@ -935,23 +1231,23 @@ pub fn record(
                                                                     start_col: drag_start_col,
                                                                     start_row: drag_start_row,
                                                                     end_col: col,
-                                                                    end_row: row,
+                                                                    end_row: pty_row,
                                                                     mods: ev_mods,
                                                                     delay: Duration::from_millis(50),
-                                                                    easing: None,
+                                                                    easing: Some(StandardEasing::InOutElastic),
                                                                 });
                                                             }
                                                         } else if button == Some(MouseButton::Right) {
                                                             recorded_events.push(Event::RightClick {
                                                                 col,
-                                                                row,
+                                                                row: pty_row,
                                                                 mods: ev_mods,
                                                                 delay: Duration::from_millis(50),
                                                             });
                                                         } else if button == Some(MouseButton::WheelUp) {
                                                             recorded_events.push(Event::MouseScroll {
                                                                 col,
-                                                                row,
+                                                                row: pty_row,
                                                                 direction: crate::script::ScrollDirection::Up,
                                                                 mods: ev_mods,
                                                                 delay: Duration::from_millis(50),
@@ -959,26 +1255,37 @@ pub fn record(
                                                         } else if button == Some(MouseButton::WheelDown) {
                                                             recorded_events.push(Event::MouseScroll {
                                                                 col,
-                                                                row,
+                                                                row: pty_row,
                                                                 direction: crate::script::ScrollDirection::Down,
                                                                 mods: ev_mods,
                                                                 delay: Duration::from_millis(50),
                                                             });
                                                         }
-                                                        current_mouse_col = col;
-                                                        current_mouse_row = row;
+                                                        current_mouse_col = if supports_sgr_pixels { mouse_event.column } else { col };
+                                                        current_mouse_row = if supports_sgr_pixels { mouse_event.row } else { pty_row };
                                                     }
                                                     _ => {}
                                                 }
                                                 last_event_time = now;
                                             }
 
+                                            let pixel_coords = if supports_sgr_pixels {
+                                                let y_offset_px = (header_height + 1) as u32 * cfg.cell_height_px;
+                                                Some((
+                                                    mouse_event.column,
+                                                    mouse_event.row.saturating_sub(y_offset_px as u16),
+                                                ))
+                                            } else {
+                                                None
+                                            };
+
                                             // Encode and transmit mouse coordinates to the PTY
                                             if let Ok(bytes) = encode_mouse_event(
                                                 action,
                                                 button,
                                                 col,
-                                                row,
+                                                pty_row,
+                                                pixel_coords,
                                                 &terminal,
                                                 cfg.cell_width_px,
                                                 cfg.cell_height_px,
@@ -987,9 +1294,9 @@ pub fn record(
                                             ) {
                                                 pty.write(&bytes);
                                             }
-                                        }
                                     }
-                                crossterm::event::Event::Paste(text) => {
+                                }
+                                termina::Event::Paste(text) => {
                                     flush_char_buffer(&mut char_buffer, &mut recorded_events, &mut last_event_time);
                                     let now = Instant::now();
                                     let idle_duration = now.duration_since(last_event_time);
@@ -1003,7 +1310,9 @@ pub fn record(
                                     last_event_time = now;
                                     pty.write(text.as_bytes());
                                 }
-                                crossterm::event::Event::Resize(new_host_cols, new_host_rows) => {
+                                termina::Event::WindowResized(ws) => {
+                                    let new_host_cols = ws.cols;
+                                    let new_host_rows = ws.rows;
                                     let new_cols = new_host_cols;
                                     let new_rows = new_host_rows.saturating_sub(2);
                                     if new_rows > 0 {
@@ -1060,6 +1369,8 @@ pub fn record(
             }
         }
     }
+
+    drop(_guard);
 
     info!("interactive session finished; compiling recording in background...");
 

@@ -733,6 +733,7 @@ fn build_timeline(
                         button: Some(crate::script::MouseButton::Left),
                         col: *col,
                         row: *row,
+                        pixel_coords: None,
                         mods: *mods,
                     },
                 });
@@ -744,6 +745,7 @@ fn build_timeline(
                         button: Some(crate::script::MouseButton::Left),
                         col: *col,
                         row: *row,
+                        pixel_coords: None,
                         mods: *mods,
                     },
                 });
@@ -772,6 +774,7 @@ fn build_timeline(
                         button: Some(crate::script::MouseButton::Right),
                         col: *col,
                         row: *row,
+                        pixel_coords: None,
                         mods: *mods,
                     },
                 });
@@ -783,6 +786,7 @@ fn build_timeline(
                         button: Some(crate::script::MouseButton::Right),
                         col: *col,
                         row: *row,
+                        pixel_coords: None,
                         mods: *mods,
                     },
                 });
@@ -822,6 +826,7 @@ fn build_timeline(
                             button: Some(crate::script::MouseButton::Left),
                             col: *col,
                             row: *row,
+                            pixel_coords: None,
                             mods: *mods,
                         },
                     });
@@ -833,6 +838,7 @@ fn build_timeline(
                             button: Some(crate::script::MouseButton::Left),
                             col: *col,
                             row: *row,
+                            pixel_coords: None,
                             mods: *mods,
                         },
                     });
@@ -858,6 +864,7 @@ fn build_timeline(
                         button: Some(btn),
                         col: *col,
                         row: *row,
+                        pixel_coords: None,
                         mods: *mods,
                     },
                 });
@@ -869,6 +876,7 @@ fn build_timeline(
                         button: Some(btn),
                         col: *col,
                         row: *row,
+                        pixel_coords: None,
                         mods: *mods,
                     },
                 });
@@ -898,6 +906,7 @@ fn build_timeline(
                             button: Some(crate::script::MouseButton::Left),
                             col: x0,
                             row: y0,
+                            pixel_coords: None,
                             mods: *mods,
                         },
                     });
@@ -932,6 +941,7 @@ fn build_timeline(
                                 button: Some(crate::script::MouseButton::Left),
                                 col: x,
                                 row: y,
+                                pixel_coords: None,
                                 mods: *mods,
                             },
                         });
@@ -945,6 +955,7 @@ fn build_timeline(
                             button: Some(crate::script::MouseButton::Left),
                             col: x1,
                             row: y1,
+                            pixel_coords: None,
                             mods: *mods,
                         },
                     });
@@ -975,6 +986,7 @@ fn build_timeline(
                             button: None,
                             col: x0,
                             row: y0,
+                            pixel_coords: None,
                             mods: *mods,
                         },
                     });
@@ -999,6 +1011,7 @@ fn build_timeline(
                                 button: None,
                                 col: x,
                                 row: y,
+                                pixel_coords: None,
                                 mods: *mods,
                             },
                         });
@@ -1149,11 +1162,21 @@ fn execute_event(
             button,
             col,
             row,
+            pixel_coords,
             mods,
         } => {
-            let x = (*col as f32 * opts.cell_width_px as f32) + (opts.cell_width_px as f32 / 2.0);
-            let y = (*row as f32 * opts.cell_height_px as f32) + (opts.cell_height_px as f32 / 2.0);
-            let pos = libghostty_vt::mouse::Position { x, y };
+            let pos = if let Some((x_px, y_px)) = pixel_coords {
+                libghostty_vt::mouse::Position {
+                    x: *x_px as f32,
+                    y: *y_px as f32,
+                }
+            } else {
+                let x =
+                    (*col as f32 * opts.cell_width_px as f32) + (opts.cell_width_px as f32 / 2.0);
+                let y =
+                    (*row as f32 * opts.cell_height_px as f32) + (opts.cell_height_px as f32 / 2.0);
+                libghostty_vt::mouse::Position { x, y }
+            };
 
             let mut encoder = libghostty_vt::mouse::Encoder::new()?;
             encoder.set_options_from_terminal(terminal);

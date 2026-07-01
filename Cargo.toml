@@ -49,8 +49,8 @@ nix = { version = "0.31", features = ["term", "fs", "signal", "process", "user",
 # Pattern matching for `Wait /regex/`.
 regex = "1"
 shell-words = "1"
-crossterm = "0.29.0"
-ratatui = "0.29"
+termina = "0.3.3"
+ratatui = { version = "0.30.2", features = ["termina"] }
 
 # Image / GIF rendering with streaming support.
 gif = "0.14.2"

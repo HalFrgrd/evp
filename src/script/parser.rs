@@ -1473,7 +1473,7 @@ mod tests {
                     ..ModSet::default()
                 },
                 delay: Duration::from_millis(50),
-                easing: None,
+                easing: Some(StandardEasing::InOutElastic),
             },
             Event::MouseScroll {
                 col: 9,
@@ -1511,7 +1511,7 @@ mod tests {
         assert!(serialized.contains("Ctrl+Click 12 34"));
         assert!(serialized.contains("Shift+RightClick 56 78"));
         assert!(serialized.contains("MouseDrag 1 2 3 4"));
-        assert!(serialized.contains("Alt+MouseMove 5 6 7 8"));
+        assert!(serialized.contains("Alt+MouseMove@EaseInOutElastic 5 6 7 8"));
         assert!(serialized.contains("Ctrl+Shift+MouseScroll 9 10 Up"));
 
         // Round-trip parse check!
@@ -1566,6 +1566,7 @@ mod tests {
                 end_col: 7,
                 end_row: 8,
                 mods,
+                easing: Some(StandardEasing::InOutElastic),
                 ..
             } if mods.alt && !mods.ctrl
         ));
