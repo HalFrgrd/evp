@@ -209,6 +209,7 @@ fn layout_header(
     elapsed: Duration,
     show_dot: bool,
     is_hovered: bool,
+    mouse_event_info: Option<&str>,
 ) -> HeaderLayoutResult {
     let mut click_cells = Vec::new();
     let mut x = area.x;
@@ -236,14 +237,21 @@ fn layout_header(
         seconds_str
     );
     let click_text = "click here";
-    let suffix_text = ".";
+    let suffix_text = if mouse_event_info.is_some() {
+        ". "
+    } else {
+        "."
+    };
 
-    let parts = vec![
+    let mut parts = vec![
         (dot_text.to_string(), dot_style, false),
         (prefix_text, normal_style, false),
         (click_text.to_string(), click_style, true),
         (suffix_text.to_string(), normal_style, false),
     ];
+    if let Some(info) = mouse_event_info {
+        parts.push((info.to_string(), normal_style, false));
+    }
 
     for (text, style, is_click) in parts {
         for c in text.chars() {
@@ -276,6 +284,7 @@ fn draw_terminal_state(
     frame: &crate::recording::RawFrame,
     elapsed: Duration,
     host_mouse_pos: Option<(u16, u16)>,
+    mouse_event_info: Option<&str>,
 ) -> Result<(u16, Vec<(u16, u16)>)> {
     let mut click_cells = Vec::new();
     let mut header_height = 1u16;
@@ -285,13 +294,20 @@ fn draw_terminal_state(
 
         // 1. Dry run to calculate header height and hover state
         let is_hovered = if let Some((m_col, m_row)) = host_mouse_pos {
-            let dry_run = layout_header(None, f.area(), elapsed, show_dot, false);
+            let dry_run = layout_header(None, f.area(), elapsed, show_dot, false, mouse_event_info);
             dry_run.click_cells.contains(&(m_col, m_row))
         } else {
             false
         };
 
-        let dry_run = layout_header(None, f.area(), elapsed, show_dot, is_hovered);
+        let dry_run = layout_header(
+            None,
+            f.area(),
+            elapsed,
+            show_dot,
+            is_hovered,
+            mouse_event_info,
+        );
         header_height = dry_run.height;
 
         let chunks = Layout::default()
@@ -310,6 +326,7 @@ fn draw_terminal_state(
             elapsed,
             show_dot,
             is_hovered,
+            mouse_event_info,
         );
         click_cells = layout_res.click_cells;
 
@@ -756,7 +773,7 @@ pub fn record(
     .is_ok()
         && host_terminal.flush().is_ok()
     {
-        // Wait up to 100ms for a response
+        // Wait up to 300ms for a response
         if let Ok(true) = host_terminal.poll(
             |event| {
                 matches!(
@@ -767,7 +784,7 @@ pub fn record(
                     }))
                 )
             },
-            Some(Duration::from_millis(100)),
+            Some(Duration::from_millis(300)),
         ) {
             if let Ok(termina::Event::Csi(Csi::Mode(Mode::ReportDecPrivateMode {
                 setting, ..
@@ -976,6 +993,7 @@ pub fn record(
         let mut current_mouse_pos: Option<(f32, f32, MouseState)> = None;
         let mut last_mouse_move_time = start_time;
         let mut host_mouse_pos: Option<(u16, u16)> = None;
+        let mut mouse_event_info: Option<String> = None;
         let mut click_here_cells: Vec<(u16, u16)> = Vec::new();
         let mut header_height = 1u16;
 
@@ -1071,6 +1089,13 @@ pub fn record(
 
                                     host_mouse_pos = Some((col, row));
 
+                                    let info = if supports_sgr_pixels {
+                                        format!("MouseEvent: {}x{} (pixels)", mouse_event.column, mouse_event.row)
+                                    } else {
+                                        format!("MouseEvent: {}x{} (grid)", mouse_event.column, mouse_event.row)
+                                    };
+                                    mouse_event_info = Some(info);
+
                                     let is_click_here = click_here_cells.contains(&(col, row));
 
                                     if is_click_here {
@@ -1101,7 +1126,7 @@ pub fn record(
                                             None,
                                         ) {
                                             frame.mouse_cursor = current_mouse_pos;
-                                            if let Ok((height, cells)) = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos) {
+                                            if let Ok((height, cells)) = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos, mouse_event_info.as_deref()) {
                                                 header_height = height;
                                                 click_here_cells = cells;
                                             }
@@ -1126,7 +1151,7 @@ pub fn record(
                                             None,
                                         ) {
                                             frame.mouse_cursor = current_mouse_pos;
-                                            if let Ok((height, cells)) = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos) {
+                                            if let Ok((height, cells)) = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos, mouse_event_info.as_deref()) {
                                                 header_height = height;
                                                 click_here_cells = cells;
                                             }
@@ -1385,7 +1410,7 @@ pub fn record(
                         // Update host screen via Ratatui
                         let draw_res = {
                             let _draw_timer = crate::telemetry::ScopeTimer::new("record_draw_terminal_state");
-                            draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos)
+                            draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos, mouse_event_info.as_deref())
                         };
                         if let Ok((height, cells)) = draw_res {
                             header_height = height;

@@ -83,3 +83,7 @@ vergen-gitcl = { version = "10.0.0-beta.8", features = ["build", "cargo", "rustc
 # lto = "fat"
 # codegen-units = 1
 # strip = "symbols"
+
+[patch.crates-io]
+termina = { git = "https://github.com/HalFrgrd/termina.git" }
+
