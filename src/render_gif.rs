@@ -509,7 +509,84 @@ fn rasterize_raw_frame_idx(
         );
     }
 
-    let title_changed = prev.is_none() || curr.title != prev.unwrap().title;
+    // Restore margin/border/padding pixels under the mouse cursor areas (current and previous)
+    // to erase any pointer/ripple artifacts overlapping the margins or borders/padding.
+    // We do this before rendering cells and the window bar so that we don't accidentally
+    // overwrite newly rendered cells or window bar elements.
+    if prev.is_some() {
+        for mouse in &[curr.mouse_cursor, prev.and_then(|p| p.mouse_cursor)] {
+            if let Some((m_col, m_row, _)) = *mouse {
+                let cx =
+                    (cfg.content_x as f32 + m_col * cell_w as f32 + cell_w as f32 / 2.0) as i32;
+                let cy =
+                    (cfg.content_y as f32 + m_row * cell_h as f32 + cell_h as f32 / 2.0) as i32;
+
+                let x_min = (cx - MOUSE_RIPPLE_MAX_RADIUS).max(0) as u32;
+                let x_max = (cx + MOUSE_RIPPLE_MAX_RADIUS)
+                    .min(cfg.canvas_w as i32 - 1)
+                    .max(0) as u32;
+                let y_min = (cy - MOUSE_RIPPLE_MAX_RADIUS).max(0) as u32;
+                let y_max = (cy + MOUSE_RIPPLE_MAX_RADIUS)
+                    .min(cfg.canvas_h as i32 - 1)
+                    .max(0) as u32;
+
+                let radius = cfg
+                    .frame_style
+                    .border_radius_px
+                    .min(cfg.frame_w / 2)
+                    .min(cfg.frame_h / 2) as i64;
+
+                for py in y_min..=y_max {
+                    for px in x_min..=x_max {
+                        let in_frame = px >= cfg.frame_x
+                            && px < cfg.frame_x + cfg.frame_w
+                            && py >= cfg.frame_y
+                            && py < cfg.frame_y + cfg.frame_h;
+
+                        let is_margin = if !in_frame {
+                            true
+                        } else if radius > 0 {
+                            !inside_rounded_rect(px, py, cfg, radius)
+                        } else {
+                            false
+                        };
+
+                        let i = (py * cfg.canvas_w + px) as usize;
+                        if i < buf.len() {
+                            if is_margin {
+                                buf[i] = margin_idx;
+                            } else {
+                                // Check if this pixel is outside the terminal cells area
+                                let in_cells = px >= cfg.content_x
+                                    && px < cfg.content_x + curr.cols as u32 * cell_w
+                                    && py >= cfg.content_y
+                                    && py < cfg.content_y + curr.rows as u32 * cell_h;
+
+                                if !in_cells {
+                                    buf[i] = default_bg_idx;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut title_changed = prev.is_none() || curr.title != prev.unwrap().title;
+    if !title_changed && cfg.frame_style.window_bar.enabled() {
+        for mouse in &[curr.mouse_cursor, prev.and_then(|p| p.mouse_cursor)] {
+            if let Some((_, m_row, _)) = *mouse {
+                let cy =
+                    (cfg.content_y as f32 + m_row * cell_h as f32 + cell_h as f32 / 2.0) as i32;
+                let y_min = cy - MOUSE_RIPPLE_MAX_RADIUS;
+                if y_min < (cfg.frame_y + cfg.bar_h) as i32 {
+                    title_changed = true;
+                    break;
+                }
+            }
+        }
+    }
     if title_changed {
         if cfg.frame_style.window_bar.enabled() {
             fill_rect_idx(
@@ -712,53 +789,7 @@ fn rasterize_raw_frame_idx(
         }
     }
 
-    // Restore margin/border pixels under the mouse cursor areas (current and previous)
-    // to erase any pointer/ripple artifacts overlapping the margins or borders
-    for mouse in &[curr.mouse_cursor, prev.and_then(|p| p.mouse_cursor)] {
-        if let Some((m_col, m_row, _)) = *mouse {
-            let cx = (cfg.content_x as f32 + m_col * cell_w as f32 + cell_w as f32 / 2.0) as i32;
-            let cy = (cfg.content_y as f32 + m_row * cell_h as f32 + cell_h as f32 / 2.0) as i32;
-
-            let x_min = (cx - MOUSE_RIPPLE_MAX_RADIUS).max(0) as u32;
-            let x_max = (cx + MOUSE_RIPPLE_MAX_RADIUS)
-                .min(cfg.canvas_w as i32 - 1)
-                .max(0) as u32;
-            let y_min = (cy - MOUSE_RIPPLE_MAX_RADIUS).max(0) as u32;
-            let y_max = (cy + MOUSE_RIPPLE_MAX_RADIUS)
-                .min(cfg.canvas_h as i32 - 1)
-                .max(0) as u32;
-
-            let radius = cfg
-                .frame_style
-                .border_radius_px
-                .min(cfg.frame_w / 2)
-                .min(cfg.frame_h / 2) as i64;
-
-            for py in y_min..=y_max {
-                for px in x_min..=x_max {
-                    let in_frame = px >= cfg.frame_x
-                        && px < cfg.frame_x + cfg.frame_w
-                        && py >= cfg.frame_y
-                        && py < cfg.frame_y + cfg.frame_h;
-
-                    let is_margin = if !in_frame {
-                        true
-                    } else if radius > 0 {
-                        !inside_rounded_rect(px, py, cfg, radius)
-                    } else {
-                        false
-                    };
-
-                    if is_margin {
-                        let i = (py * cfg.canvas_w + px) as usize;
-                        if i < buf.len() {
-                            buf[i] = margin_idx;
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // Margin, border, and padding restoration is now handled at the start of rasterize_raw_frame_idx.
 
     if let Some((m_col, m_row, m_state)) = curr.mouse_cursor {
         use crate::recording::MouseState;
