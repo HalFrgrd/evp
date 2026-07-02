@@ -996,6 +996,8 @@ pub fn record(
         let mut mouse_event_info: Option<String> = None;
         let mut click_here_cells: Vec<(u16, u16)> = Vec::new();
         let mut header_height = 1u16;
+        let mut active_pointer_shape = crate::recording::PointerShape::Default;
+        let mut osc22_parser = crate::recording::Osc22Parser::new();
 
         let mut render_state = RenderState::new()?;
         let mut row_it = RowIterator::new()?;
@@ -1010,6 +1012,11 @@ pub fn record(
                         Ok(data) => {
                             if data.is_empty() {
                                 break; // EOF
+                            }
+                            for &b in &data {
+                                if let Some(shape) = osc22_parser.feed(b) {
+                                    active_pointer_shape = shape;
+                                }
                             }
                             // Feed output to libghostty VT parser
                             terminal.vt_write(&data);
@@ -1406,6 +1413,7 @@ pub fn record(
                         }
                         // Inject mouse pointer into the frame so the GIF compiler renders it
                         frame.mouse_cursor = current_mouse_pos;
+                        frame.pointer_shape = active_pointer_shape;
 
                         // Update host screen via Ratatui
                         let draw_res = {

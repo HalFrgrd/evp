@@ -335,6 +335,8 @@ pub fn run_with_raw_frame_consumers(
     // `Some(Some(pos))` = cursor was visible at `pos`.
     let mut last_cursor_moved_at: Option<Duration> = None;
     let mut prev_cursor_pos: Option<(u16, u16)> = None;
+    let mut osc22_parser = crate::recording::Osc22Parser::new();
+    let mut active_pointer_shape = crate::recording::PointerShape::Default;
 
     // Wait‑for state. When we're inside a `Wait`, all later events stall
     // until the regex matches or the timeout elapses.
@@ -355,7 +357,7 @@ pub fn run_with_raw_frame_consumers(
 
     loop {
         // 1. Drain everything currently available from the PTY.
-        match pty.drain_into(&mut terminal) {
+        match pty.drain_into(&mut terminal, &mut osc22_parser, &mut active_pointer_shape) {
             Ok(()) => {}
             Err(PtyError::EndOfStream) => {
                 debug!("pty closed");
@@ -455,6 +457,7 @@ pub fn run_with_raw_frame_consumers(
                         script.settings.theme.cursor_accent_rgb().ok().flatten(),
                     )?;
                     frame.mouse_cursor = resolve_mouse_position(recorded_at, &mouse_segments);
+                    frame.pointer_shape = active_pointer_shape;
                     if !pending_screenshots.is_empty() {
                         let shots = std::mem::take(&mut pending_screenshots);
                         for path in shots {
@@ -1427,6 +1430,7 @@ fn write_screenshot(frame: &RawFrame, script: &Script, path: &std::path::Path) -
                 cursor_color: frame.cursor_color,
                 cursor_accent: frame.cursor_accent,
                 mouse_cursor: frame.mouse_cursor,
+                pointer_shape: Some(frame.pointer_shape),
                 title: frame.title.clone(),
                 cells: frame.cells.clone(),
             }],
@@ -1679,6 +1683,7 @@ pub fn capture<'a>(
             cursor_color,
             cursor_accent,
             mouse_cursor: None,
+            pointer_shape: crate::recording::PointerShape::Default,
             title,
         },
         raw_cursor_pos,

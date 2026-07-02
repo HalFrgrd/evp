@@ -3337,6 +3337,7 @@ mod tests {
                 cursor_color: None,
                 cursor_accent: None,
                 mouse_cursor: None,
+                pointer_shape: None,
                 title: None,
                 cells,
             }],

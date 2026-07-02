@@ -55,6 +55,161 @@ pub enum MouseState {
     Dragging,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PointerShape {
+    #[default]
+    Default,
+    Text,
+    Pointer,
+    Grabbing,
+}
+
+impl PointerShape {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PointerShape::Default => "default",
+            PointerShape::Text => "text",
+            PointerShape::Pointer => "pointer",
+            PointerShape::Grabbing => "grabbing",
+        }
+    }
+}
+
+impl std::str::FromStr for PointerShape {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "default" => PointerShape::Default,
+            "text" => PointerShape::Text,
+            "pointer" => PointerShape::Pointer,
+            "grabbing" => PointerShape::Grabbing,
+            _ => PointerShape::Default,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for PointerShape {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(s.parse().unwrap_or(PointerShape::Default))
+    }
+}
+
+impl Serialize for PointerShape {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Osc22Parser {
+    state: ParserState,
+    buffer: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum ParserState {
+    #[default]
+    Ground,
+    Escape,
+    Osc,
+    IgnoreOsc,
+    IgnoreEsc,
+    Osc22Value,
+    EscSt,
+}
+
+impl Osc22Parser {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn feed(&mut self, byte: u8) -> Option<PointerShape> {
+        match self.state {
+            ParserState::Ground => {
+                if byte == 0x1b {
+                    self.state = ParserState::Escape;
+                } else if byte == 0x9d {
+                    self.state = ParserState::Osc;
+                    self.buffer.clear();
+                }
+            }
+            ParserState::Escape => {
+                if byte == b']' {
+                    self.state = ParserState::Osc;
+                    self.buffer.clear();
+                } else {
+                    self.state = ParserState::Ground;
+                }
+            }
+            ParserState::Osc => {
+                if byte.is_ascii_digit() {
+                    self.buffer.push(byte as char);
+                } else if byte == b';' {
+                    if self.buffer == "22" {
+                        self.state = ParserState::Osc22Value;
+                    } else {
+                        self.state = ParserState::IgnoreOsc;
+                    }
+                    self.buffer.clear();
+                } else if byte == 0x07 {
+                    self.state = ParserState::Ground;
+                } else if byte == 0x1b {
+                    self.state = ParserState::Escape;
+                } else {
+                    self.state = ParserState::IgnoreOsc;
+                }
+            }
+            ParserState::IgnoreOsc => {
+                if byte == 0x07 {
+                    self.state = ParserState::Ground;
+                } else if byte == 0x1b {
+                    self.state = ParserState::IgnoreEsc;
+                }
+            }
+            ParserState::IgnoreEsc => {
+                if byte == b'\\' {
+                    self.state = ParserState::Ground;
+                } else {
+                    self.state = ParserState::IgnoreOsc;
+                }
+            }
+            ParserState::Osc22Value => {
+                if byte == 0x07 {
+                    let shape = self.buffer.parse::<PointerShape>().ok();
+                    self.state = ParserState::Ground;
+                    self.buffer.clear();
+                    return shape;
+                } else if byte == 0x1b {
+                    self.state = ParserState::EscSt;
+                } else {
+                    if self.buffer.len() < 64 {
+                        self.buffer.push(byte as char);
+                    }
+                }
+            }
+            ParserState::EscSt => {
+                if byte == b'\\' {
+                    let shape = self.buffer.parse::<PointerShape>().ok();
+                    self.state = ParserState::Ground;
+                    self.buffer.clear();
+                    return shape;
+                } else {
+                    self.state = ParserState::Ground;
+                }
+            }
+        }
+        None
+    }
+}
+
 /// A complete terminal grid plus cursor state, captured at a single point
 /// in time. Produced by the runner thread and optionally shipped over channels
 /// to raw-frame consumers.
@@ -77,6 +232,8 @@ pub struct RawFrame {
     pub cursor_accent: Option<[u8; 3]>,
     #[serde(default)]
     pub mouse_cursor: Option<(f32, f32, MouseState)>,
+    #[serde(default)]
+    pub pointer_shape: PointerShape,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub title: Option<String>,
 }
@@ -92,6 +249,7 @@ impl RawFrame {
             && self.cursor_accent == other.cursor_accent
             && self.title == other.title
             && self.mouse_cursor == other.mouse_cursor
+            && self.pointer_shape == other.pointer_shape
             && self.cells == other.cells
     }
 }
@@ -121,6 +279,8 @@ pub enum Frame {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         mouse_cursor: Option<(f32, f32, MouseState)>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
+        pointer_shape: Option<PointerShape>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
         title: Option<String>,
         cells: Vec<CellSnap>,
     },
@@ -135,6 +295,8 @@ pub enum Frame {
         cursor_accent: Option<[u8; 3]>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         mouse_cursor: Option<(f32, f32, MouseState)>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        pointer_shape: Option<PointerShape>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         title: Option<String>,
         changes: Vec<CellChange>,
@@ -176,6 +338,14 @@ impl Frame {
     pub fn mouse_cursor(&self) -> Option<(f32, f32, MouseState)> {
         match self {
             Frame::Key { mouse_cursor, .. } | Frame::Diff { mouse_cursor, .. } => *mouse_cursor,
+        }
+    }
+
+    pub fn pointer_shape(&self) -> PointerShape {
+        match self {
+            Frame::Key { pointer_shape, .. } | Frame::Diff { pointer_shape, .. } => {
+                pointer_shape.unwrap_or(PointerShape::Default)
+            }
         }
     }
 }
@@ -253,6 +423,11 @@ impl RecordingBuilder {
                 cursor_color: frame.cursor_color,
                 cursor_accent: frame.cursor_accent,
                 mouse_cursor: frame.mouse_cursor,
+                pointer_shape: if frame.pointer_shape == PointerShape::Default {
+                    None
+                } else {
+                    Some(frame.pointer_shape)
+                },
                 title: frame.title.clone(),
                 cells: frame.cells.clone(),
             });
@@ -276,6 +451,11 @@ impl RecordingBuilder {
                 cursor_color: frame.cursor_color,
                 cursor_accent: frame.cursor_accent,
                 mouse_cursor: frame.mouse_cursor,
+                pointer_shape: if frame.pointer_shape == PointerShape::Default {
+                    None
+                } else {
+                    Some(frame.pointer_shape)
+                },
                 title: frame.title.clone(),
                 changes,
             });
@@ -324,6 +504,7 @@ impl Recording {
         let mut cursor_color;
         let mut cursor_accent;
         let mut mouse_cursor;
+        let mut pointer_shape;
         let mut title;
         match &self.frames[key_i] {
             Frame::Key {
@@ -334,6 +515,7 @@ impl Recording {
                 cursor_color: cc,
                 cursor_accent: ca,
                 mouse_cursor: mc,
+                pointer_shape: ps,
                 title: ttl,
                 cells: cs,
             } => {
@@ -345,6 +527,7 @@ impl Recording {
                 cursor_color = *cc;
                 cursor_accent = *ca;
                 mouse_cursor = *mc;
+                pointer_shape = ps.unwrap_or(PointerShape::Default);
                 title = ttl.clone();
             }
             Frame::Diff { .. } => unreachable!(),
@@ -362,6 +545,7 @@ impl Recording {
                     cursor_color: cc,
                     cursor_accent: ca,
                     mouse_cursor: mc,
+                    pointer_shape: ps,
                     title: ttl,
                     changes,
                 } => {
@@ -372,6 +556,7 @@ impl Recording {
                     cursor_color = *cc;
                     cursor_accent = *ca;
                     mouse_cursor = *mc;
+                    pointer_shape = ps.unwrap_or(PointerShape::Default);
                     title = ttl.clone();
                     for ch in changes {
                         if let Some(slot) = cells.get_mut(ch.idx as usize) {
@@ -393,6 +578,7 @@ impl Recording {
             cursor_color,
             cursor_accent,
             mouse_cursor,
+            pointer_shape,
             title,
         })
     }

@@ -16,6 +16,7 @@ use std::{
     process::Command,
 };
 
+use crate::recording::{Osc22Parser, PointerShape};
 use anyhow::{Context, Result, bail};
 use libghostty_vt::Terminal;
 use nix::{
@@ -271,12 +272,25 @@ impl Pty {
     }
 
     /// Drain all currently available output into the terminal's VT parser.
-    pub fn drain_into(&self, term: &mut Terminal<'_, '_>) -> Result<(), PtyError> {
+    pub fn drain_into(
+        &self,
+        term: &mut Terminal<'_, '_>,
+        parser: &mut Osc22Parser,
+        active_shape: &mut PointerShape,
+    ) -> Result<(), PtyError> {
         let mut buf = [0u8; 8192];
         loop {
             match nix::unistd::read(&self.0, &mut buf) {
                 Ok(0) => return Err(PtyError::EndOfStream),
-                Ok(n) => term.vt_write(&buf[..n]),
+                Ok(n) => {
+                    let bytes = &buf[..n];
+                    for &b in bytes {
+                        if let Some(shape) = parser.feed(b) {
+                            *active_shape = shape;
+                        }
+                    }
+                    term.vt_write(bytes);
+                }
                 Err(Errno::EAGAIN) => return Ok(()),
                 Err(Errno::EINTR) => continue,
                 Err(Errno::EIO) => return Err(PtyError::EndOfStream),
