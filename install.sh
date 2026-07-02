@@ -22,13 +22,51 @@ expand_path() {
 }
 
 REPO="HalFrgrd/evp"
+find_writable_path_dir() {
+    (
+        IFS=':'
+        for dir in $PATH; do
+            dir="${dir%/}"
+            if [ -n "$dir" ] && [ -d "$dir" ] && [ -w "$dir" ]; then
+                case "$dir" in
+                    /bin|/sbin|/usr/bin|/usr/sbin|/lib*|/opt|/usr/lib*)
+                        continue
+                        ;;
+                    *)
+                        echo "$dir"
+                        exit 0
+                        ;;
+                esac
+            fi
+        done
+        exit 1
+    )
+}
+
+is_in_path() {
+    (
+        IFS=':'
+        for dir in $PATH; do
+            dir_abs="$(cd "$dir" 2>/dev/null && pwd || true)"
+            if [ -n "$dir_abs" ] && [ "$dir_abs" = "$1" ]; then
+                exit 0
+            fi
+        done
+        exit 1
+    )
+}
+
 if [ -n "${EVP_INSTALL_DIR:-}" ]; then
     INSTALL_DIR="$(expand_path "$EVP_INSTALL_DIR")"
 else
-    if [ -w "/usr/local/bin" ]; then
-        INSTALL_DIR="/usr/local/bin"
+    if W_DIR="$(find_writable_path_dir)"; then
+        INSTALL_DIR="$W_DIR"
     else
-        INSTALL_DIR="${HOME}/.local/bin"
+        if [ -w "/usr/local/bin" ]; then
+            INSTALL_DIR="/usr/local/bin"
+        else
+            INSTALL_DIR="${HOME}/.local/bin"
+        fi
     fi
 fi
 VERSION_OVERRIDE="${EVP_VERSION:-}"
@@ -155,7 +193,9 @@ install -m 755 "${TMPDIR}/${STAGE}/evp" "${INSTALL_DIR}/evp"
 ABS_INSTALL_DIR=$(cd "$INSTALL_DIR" && pwd)
 ABS_PWD=$(pwd)
 
-if [ "$ABS_INSTALL_DIR" = "$ABS_PWD" ]; then
+if is_in_path "$ABS_INSTALL_DIR"; then
+    RUN_CMD="evp"
+elif [ "$ABS_INSTALL_DIR" = "$ABS_PWD" ]; then
     RUN_CMD="./evp"
 else
     RUN_CMD="${INSTALL_DIR}/evp"
