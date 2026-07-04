@@ -104,16 +104,16 @@ struct Cli {
     tape: Option<PathBuf>,
     /// Override the tape's `Output` directives. Repeat to write multiple
     /// outputs in one run (for example `--output out.gif --output out.svg`).
-    #[arg(short, long, global = true)]
+    #[arg(short, long)]
     output: Vec<PathBuf>,
     /// Do not embed base64 font data inside the generated SVG output.
-    #[arg(long = "no-embed-fonts", global = true)]
+    #[arg(long = "no-embed-fonts")]
     no_embed_fonts: bool,
     /// Do not use system fallback fonts. Fail if any rendered glyph is missing from the loaded/embedded fonts.
-    #[arg(long = "no-system-fonts", global = true)]
+    #[arg(long = "no-system-fonts")]
     no_system_fonts: bool,
     /// Mimic VHS behavior (only allow a single word for the shell, use VHS default shell options and prompt colors).
-    #[arg(long = "mimic-vhs", global = true)]
+    #[arg(long = "mimic-vhs")]
     mimic_vhs: bool,
     /// Explicit log level override.
     #[arg(long, value_enum, global = true)]
@@ -147,8 +147,11 @@ enum Commands {
         #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(get_theme_names()))]
         theme: Option<String>,
         /// Framerate for the recording (in FPS).
-        #[arg(long, default_value = "50")]
-        fps: u64,
+        #[arg(long, default_value = "50", alias = "fps")]
+        framerate: u64,
+        /// Override the output target paths (e.g. `--output demo.tape --output demo.gif`).
+        #[arg(short, long)]
+        output: Vec<PathBuf>,
     },
 }
 
@@ -411,14 +414,15 @@ fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()
             rows,
             shell,
             theme,
-            fps,
+            framerate,
+            output,
         } => {
             init_tracing(cli, evp_start);
             log_build_info_debug();
 
             let mut tape = PathBuf::from("demo.tape");
             let mut output_override = None;
-            for out in &cli.output {
+            for out in &output {
                 if out.extension().map_or(false, |ext| ext == "tape") {
                     tape = out.clone();
                 } else {
@@ -426,7 +430,8 @@ fn run_subcommand(command: Commands, cli: &Cli, evp_start: Instant) -> Result<()
                 }
             }
 
-            let record_res = evp::record(tape, shell, cols, rows, theme, output_override, fps);
+            let record_res =
+                evp::record(tape, shell, cols, rows, theme, output_override, framerate);
 
             let timings = evp::telemetry::get_timings();
             let mut sorted_timings: Vec<_> = timings.into_iter().collect();
@@ -617,14 +622,15 @@ mod tests {
                 rows,
                 shell,
                 theme,
-                fps,
+                framerate,
+                output,
             }) => {
-                assert_eq!(cli.output, vec![PathBuf::from("my_demo.tape")]);
+                assert_eq!(output, &vec![PathBuf::from("my_demo.tape")]);
                 assert_eq!(cols, &Some(100));
                 assert_eq!(rows, &Some(40));
                 assert_eq!(shell, &Some("zsh".to_string()));
                 assert_eq!(theme, &Some("Catppuccin Mocha".to_string()));
-                assert_eq!(fps, &50);
+                assert_eq!(framerate, &50);
             }
             _ => panic!("Expected Commands::Record, got {:?}", cli.command),
         }
