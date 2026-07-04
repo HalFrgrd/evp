@@ -197,6 +197,33 @@ fn flush_char_buffer(
     }
 }
 
+fn format_size(bytes: u64) -> String {
+    if bytes == 0 {
+        return "0B".to_string();
+    }
+    let units = ["B", "kB", "MB", "GB", "TB", "PB"];
+    let mut bytes_f = bytes as f64;
+    let mut i = 0;
+    while bytes_f >= 1000.0 && i < units.len() - 1 {
+        bytes_f /= 1000.0;
+        i += 1;
+    }
+
+    let formatted = if bytes_f >= 99.95 {
+        format!("{:.0}", bytes_f)
+    } else if bytes_f >= 9.995 {
+        format!("{:.1}", bytes_f)
+    } else {
+        format!("{:.2}", bytes_f)
+    };
+
+    if formatted.starts_with("1000") && i < units.len() - 1 {
+        format!("1.00{}", units[i + 1])
+    } else {
+        format!("{}{}", formatted, units[i])
+    }
+}
+
 /// Renders the host terminal state utilizing Ratatui's canvas drawing and text formatting backend
 struct HeaderLayoutResult {
     height: u16,
@@ -209,7 +236,8 @@ fn layout_header(
     elapsed: Duration,
     show_dot: bool,
     is_hovered: bool,
-    mouse_event_info: Option<&str>,
+    out_filename: &str,
+    out_size: u64,
 ) -> HeaderLayoutResult {
     let mut click_cells = Vec::new();
     let mut x = area.x;
@@ -232,26 +260,20 @@ fn layout_header(
 
     let dot_text = if show_dot { "●" } else { " " };
     let seconds_str = format!("{}s", elapsed.as_secs());
+    let size_str = format_size(out_size);
     let prefix_text = format!(
-        " EVP recording active ({}). To stop recording, exit the program or ",
-        seconds_str
+        " EVP recording active ({}) [{}: {}]. To stop recording, exit the program or ",
+        seconds_str, out_filename, size_str
     );
     let click_text = "click here";
-    let suffix_text = if mouse_event_info.is_some() {
-        ". "
-    } else {
-        "."
-    };
+    let suffix_text = ".";
 
-    let mut parts = vec![
+    let parts = vec![
         (dot_text.to_string(), dot_style, false),
         (prefix_text, normal_style, false),
         (click_text.to_string(), click_style, true),
         (suffix_text.to_string(), normal_style, false),
     ];
-    if let Some(info) = mouse_event_info {
-        parts.push((info.to_string(), normal_style, false));
-    }
 
     for (text, style, is_click) in parts {
         for c in text.chars() {
@@ -284,7 +306,8 @@ fn draw_terminal_state(
     frame: &crate::recording::RawFrame,
     elapsed: Duration,
     host_mouse_pos: Option<(u16, u16)>,
-    mouse_event_info: Option<&str>,
+    out_filename: &str,
+    out_size: u64,
 ) -> Result<(u16, Vec<(u16, u16)>)> {
     let mut click_cells = Vec::new();
     let mut header_height = 1u16;
@@ -294,7 +317,15 @@ fn draw_terminal_state(
 
         // 1. Dry run to calculate header height and hover state
         let is_hovered = if let Some((m_col, m_row)) = host_mouse_pos {
-            let dry_run = layout_header(None, f.area(), elapsed, show_dot, false, mouse_event_info);
+            let dry_run = layout_header(
+                None,
+                f.area(),
+                elapsed,
+                show_dot,
+                false,
+                out_filename,
+                out_size,
+            );
             dry_run.click_cells.contains(&(m_col, m_row))
         } else {
             false
@@ -306,17 +337,31 @@ fn draw_terminal_state(
             elapsed,
             show_dot,
             is_hovered,
-            mouse_event_info,
+            out_filename,
+            out_size,
         );
         header_height = dry_run.height;
 
+        let show_logs = f.area().height >= header_height + 1 + frame.rows + 1 + 3;
+        let constraints = if show_logs {
+            vec![
+                Constraint::Length(header_height), // Dynamic Header
+                Constraint::Length(1),             // Divider 1
+                Constraint::Length(frame.rows),    // Terminal body
+                Constraint::Length(1),             // Divider 2
+                Constraint::Min(0),                // Log panel
+            ]
+        } else {
+            vec![
+                Constraint::Length(header_height), // Dynamic Header
+                Constraint::Length(1),             // Divider 1
+                Constraint::Min(0),                // Terminal body
+            ]
+        };
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(header_height), // Dynamic Header
-                Constraint::Length(1),             // Divider
-                Constraint::Min(0),                // Terminal body
-            ])
+            .constraints(constraints)
             .split(f.area());
 
         // 2. Real draw run
@@ -326,7 +371,8 @@ fn draw_terminal_state(
             elapsed,
             show_dot,
             is_hovered,
-            mouse_event_info,
+            out_filename,
+            out_size,
         );
         click_cells = layout_res.click_cells;
 
@@ -394,6 +440,26 @@ fn draw_terminal_state(
             lines.push(Line::from(spans));
         }
         f.render_widget(Paragraph::new(lines), chunks[2]);
+
+        // 4.5 Render log panel if visible
+        if show_logs {
+            let divider_line2 = "─".repeat(chunks[3].width as usize);
+            f.render_widget(Paragraph::new(divider_line2), chunks[3]);
+
+            let log_text = if let Ok(logs) = crate::telemetry::RECORDING_LOGS.lock() {
+                let max_lines = chunks[4].height as usize;
+                let start_idx = logs.len().saturating_sub(max_lines);
+                let lines_slice = &logs[start_idx..];
+                let joined = lines_slice.join("\n");
+                use ansi_to_tui::IntoText;
+                joined
+                    .into_text()
+                    .unwrap_or_else(|_| ratatui::text::Text::raw(joined))
+            } else {
+                ratatui::text::Text::raw("")
+            };
+            f.render_widget(Paragraph::new(log_text), chunks[4]);
+        }
 
         // 5. Update hardware cursor coordinate
         if let Some((ccol, crow)) = frame.cursor {
@@ -720,6 +786,11 @@ impl Drop for TerminalCapabilityGuard {
             let _ = term.enter_cooked_mode();
         }
         crate::telemetry::SUSPEND_LOGGING.store(false, std::sync::atomic::Ordering::SeqCst);
+        if let Ok(mut logs) = crate::telemetry::RECORDING_LOGS.lock() {
+            for log_line in logs.drain(..) {
+                eprintln!("{}", log_line);
+            }
+        }
     }
 }
 
@@ -758,11 +829,11 @@ pub fn record(
     crate::telemetry::SUSPEND_LOGGING.store(true, std::sync::atomic::Ordering::SeqCst);
     use std::io::Write;
     use termina::escape::csi::{
-        Csi, DecModeSetting, DecPrivateMode, DecPrivateModeCode, Keyboard, KittyKeyboardFlags, Mode,
+        Csi, DecPrivateMode, DecPrivateModeCode, Keyboard, KittyKeyboardFlags, Mode,
     };
 
     // Query if SGRPixelsMouse is supported (DEC private mode 1016)
-    let mut supports_sgr_pixels = false;
+    let supports_sgr_pixels = false;
     // if write!(
     //     host_terminal,
     //     "{}",
@@ -899,6 +970,16 @@ pub fn record(
     terminal.resize(cols, rows, cfg.cell_width_px, cfg.cell_height_px)?;
     terminal.on_pty_write(|_t, data| pty.write(data))?;
 
+    terminal.on_title_changed(|term| {
+        if let Ok(title) = term.title() {
+            info!("Program changed window title to: {:?}", title);
+        }
+    })?;
+
+    let mut osc_22_parser = crate::runner::Osc22Parser::new();
+    let mut state_tracker = crate::runner::TerminalStateTracker::new();
+    state_tracker.update_and_log(&terminal);
+
     apply_theme(&mut terminal, &settings.theme)?;
 
     let mut translator = KeyTranslator::new()?;
@@ -985,6 +1066,10 @@ pub fn record(
         ratatui_term.draw(|_| {})?;
 
         // Mouse tracking variables
+        let out_filename = out_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("output.gif");
         let mut current_mouse_col = 0u16;
         let mut current_mouse_row = 0u16;
         let mut is_dragging = false;
@@ -993,7 +1078,6 @@ pub fn record(
         let mut current_mouse_pos: Option<(f32, f32, MouseState)> = None;
         let mut last_mouse_move_time = start_time;
         let mut host_mouse_pos: Option<(u16, u16)> = None;
-        let mut mouse_event_info: Option<String> = None;
         let mut click_here_cells: Vec<(u16, u16)> = Vec::new();
         let mut header_height = 1u16;
 
@@ -1011,8 +1095,14 @@ pub fn record(
                             if data.is_empty() {
                                 break; // EOF
                             }
+                            for &b in &data {
+                                osc_22_parser.feed(b, |shape| {
+                                    info!("Program changed mouse pointer shape to: {:?}", shape);
+                                });
+                            }
                             // Feed output to libghostty VT parser
                             terminal.vt_write(&data);
+                            state_tracker.update_and_log(&terminal);
                         }
                         Err(_) => break,
                     }
@@ -1089,13 +1179,6 @@ pub fn record(
 
                                     host_mouse_pos = Some((col, row));
 
-                                    let info = if supports_sgr_pixels {
-                                        format!("MouseEvent: {}x{} (pixels)", mouse_event.column, mouse_event.row)
-                                    } else {
-                                        format!("MouseEvent: {}x{} (grid)", mouse_event.column, mouse_event.row)
-                                    };
-                                    mouse_event_info = Some(info);
-
                                     let is_click_here = click_here_cells.contains(&(col, row));
 
                                     if is_click_here {
@@ -1126,7 +1209,8 @@ pub fn record(
                                             None,
                                         ) {
                                             frame.mouse_cursor = current_mouse_pos;
-                                            if let Ok((height, cells)) = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos, mouse_event_info.as_deref()) {
+                                            let out_size = std::fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
+                                            if let Ok((height, cells)) = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos, out_filename, out_size) {
                                                 header_height = height;
                                                 click_here_cells = cells;
                                             }
@@ -1151,7 +1235,8 @@ pub fn record(
                                             None,
                                         ) {
                                             frame.mouse_cursor = current_mouse_pos;
-                                            if let Ok((height, cells)) = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos, mouse_event_info.as_deref()) {
+                                            let out_size = std::fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
+                                            if let Ok((height, cells)) = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos, out_filename, out_size) {
                                                 header_height = height;
                                                 click_here_cells = cells;
                                             }
@@ -1410,7 +1495,8 @@ pub fn record(
                         // Update host screen via Ratatui
                         let draw_res = {
                             let _draw_timer = crate::telemetry::ScopeTimer::new("record_draw_terminal_state");
-                            draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos, mouse_event_info.as_deref())
+                            let out_size = std::fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
+                            draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos, out_filename, out_size)
                         };
                         if let Ok((height, cells)) = draw_res {
                             header_height = height;
@@ -1475,4 +1561,24 @@ pub fn record(
         "recording completed successfully"
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_size;
+
+    #[test]
+    fn test_format_size() {
+        assert_eq!(format_size(0), "0B");
+        assert_eq!(format_size(999), "999B");
+        assert_eq!(format_size(1000), "1.00kB");
+        assert_eq!(format_size(1050), "1.05kB");
+        assert_eq!(format_size(9880), "9.88kB");
+        assert_eq!(format_size(34600), "34.6kB");
+        assert_eq!(format_size(105000), "105kB");
+        assert_eq!(format_size(999000), "999kB");
+        assert_eq!(format_size(999900), "1.00MB");
+        assert_eq!(format_size(1000000), "1.00MB");
+        assert_eq!(format_size(34600000), "34.6MB");
+    }
 }

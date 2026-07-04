@@ -292,6 +292,16 @@ pub fn run_with_raw_frame_consumers(
     // waiting for a response.
     terminal.on_pty_write(|_t, data| pty.write(data))?;
 
+    terminal.on_title_changed(|term| {
+        if let Ok(title) = term.title() {
+            info!("Program changed window title to: {:?}", title);
+        }
+    })?;
+
+    let mut osc_22_parser = Osc22Parser::new();
+    let mut state_tracker = TerminalStateTracker::new();
+    state_tracker.update_and_log(&terminal);
+
     apply_theme(&mut terminal, &script.settings.theme)?;
 
     let mut translator = KeyTranslator::new()?;
@@ -355,7 +365,14 @@ pub fn run_with_raw_frame_consumers(
 
     loop {
         // 1. Drain everything currently available from the PTY.
-        match pty.drain_into(&mut terminal) {
+        let mut pty_data_handler = |data: &[u8]| {
+            for &b in data {
+                osc_22_parser.feed(b, |shape| {
+                    info!("Program changed mouse pointer shape to: {:?}", shape);
+                });
+            }
+        };
+        match pty.drain_into(&mut terminal, &mut pty_data_handler) {
             Ok(()) => {}
             Err(PtyError::EndOfStream) => {
                 debug!("pty closed");
@@ -363,6 +380,8 @@ pub fn run_with_raw_frame_consumers(
             }
             Err(e) => return Err(anyhow::anyhow!(e)),
         }
+
+        state_tracker.update_and_log(&terminal);
 
         let now = start.elapsed();
 
@@ -1744,6 +1763,280 @@ impl std::fmt::Debug for WaitState {
 // `_re` is used at runtime through `matches_wait`.
 fn _silence_warnings(w: &WaitState) -> &Regex {
     &w.re
+}
+
+// ---------------------------------------------------------------------------
+// Escape sequence and terminal mode logging helpers
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Default, Clone)]
+pub struct Osc22Parser {
+    state: ParserState,
+    buffer: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum ParserState {
+    #[default]
+    Ground,
+    Esc,
+    Osc,
+    Osc2,
+    Osc22,
+    Osc22Semi,
+    CollectEsc,
+}
+
+impl Osc22Parser {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn feed(&mut self, byte: u8, mut on_shape: impl FnMut(String)) {
+        match self.state {
+            ParserState::Ground => {
+                if byte == 0x1b {
+                    self.state = ParserState::Esc;
+                } else if byte == 0x9d {
+                    self.state = ParserState::Osc;
+                }
+            }
+            ParserState::Esc => {
+                if byte == b']' {
+                    self.state = ParserState::Osc;
+                } else {
+                    self.state = ParserState::Ground;
+                }
+            }
+            ParserState::Osc => {
+                if byte == b'2' {
+                    self.state = ParserState::Osc2;
+                } else {
+                    self.state = ParserState::Ground;
+                }
+            }
+            ParserState::Osc2 => {
+                if byte == b'2' {
+                    self.state = ParserState::Osc22;
+                } else {
+                    self.state = ParserState::Ground;
+                }
+            }
+            ParserState::Osc22 => {
+                if byte == b';' {
+                    self.state = ParserState::Osc22Semi;
+                    self.buffer.clear();
+                } else {
+                    self.state = ParserState::Ground;
+                }
+            }
+            ParserState::Osc22Semi => {
+                if byte == 0x07 {
+                    if let Ok(shape) = String::from_utf8(self.buffer.clone()) {
+                        on_shape(shape);
+                    }
+                    self.state = ParserState::Ground;
+                } else if byte == 0x1b {
+                    self.state = ParserState::CollectEsc;
+                } else {
+                    self.buffer.push(byte);
+                }
+            }
+            ParserState::CollectEsc => {
+                if byte == b'\\' {
+                    if let Ok(shape) = String::from_utf8(self.buffer.clone()) {
+                        on_shape(shape);
+                    }
+                    self.state = ParserState::Ground;
+                } else {
+                    self.buffer.push(0x1b);
+                    if byte == 0x1b {
+                        // stay in CollectEsc
+                    } else {
+                        self.buffer.push(byte);
+                        self.state = ParserState::Osc22Semi;
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn format_kitty_flags(flags: libghostty_vt::key::KittyKeyFlags) -> String {
+    if flags.is_empty() || flags == libghostty_vt::key::KittyKeyFlags::DISABLED {
+        return "disabled".to_string();
+    }
+    let mut parts = Vec::new();
+    if flags.contains(libghostty_vt::key::KittyKeyFlags::DISAMBIGUATE) {
+        parts.push("DISAMBIGUATE");
+    }
+    if flags.contains(libghostty_vt::key::KittyKeyFlags::REPORT_EVENTS) {
+        parts.push("REPORT_EVENTS");
+    }
+    if flags.contains(libghostty_vt::key::KittyKeyFlags::REPORT_ALTERNATES) {
+        parts.push("REPORT_ALTERNATES");
+    }
+    if flags.contains(libghostty_vt::key::KittyKeyFlags::REPORT_ALL) {
+        parts.push("REPORT_ALL");
+    }
+    if flags.contains(libghostty_vt::key::KittyKeyFlags::REPORT_ASSOCIATED) {
+        parts.push("REPORT_ASSOCIATED");
+    }
+    if parts.is_empty() {
+        parts.push("UNKNOWN");
+    }
+    parts.join("+")
+}
+
+pub struct TerminalStateTracker {
+    prev_mouse_capture: Option<String>,
+    prev_kitty_flags: Option<libghostty_vt::key::KittyKeyFlags>,
+    prev_title: Option<String>,
+    prev_screen: Option<libghostty_vt::screen::Screen>,
+    prev_bracketed_paste: Option<bool>,
+    prev_cursor_visible: Option<bool>,
+}
+
+impl TerminalStateTracker {
+    pub fn new() -> Self {
+        Self {
+            prev_mouse_capture: None,
+            prev_kitty_flags: None,
+            prev_title: None,
+            prev_screen: None,
+            prev_bracketed_paste: None,
+            prev_cursor_visible: None,
+        }
+    }
+
+    pub fn update_and_log(&mut self, terminal: &libghostty_vt::Terminal<'_, '_>) {
+        use libghostty_vt::terminal::Mode;
+
+        // 1. Mouse capture
+        let x10 = terminal.mode(Mode::X10_MOUSE).unwrap_or(false);
+        let normal = terminal.mode(Mode::NORMAL_MOUSE).unwrap_or(false);
+        let button = terminal.mode(Mode::BUTTON_MOUSE).unwrap_or(false);
+        let any = terminal.mode(Mode::ANY_MOUSE).unwrap_or(false);
+
+        let base_mode = if any {
+            "Click+Drag+Move+Scroll"
+        } else if button {
+            "Click+Drag+Scroll"
+        } else if normal {
+            "Click+Scroll"
+        } else if x10 {
+            "Click (X10)"
+        } else {
+            "disabled"
+        };
+
+        let mouse_capture = if base_mode != "disabled" {
+            let mut format = None;
+            if terminal.mode(Mode::SGR_PIXELS_MOUSE).unwrap_or(false) {
+                format = Some("Pixel Coords");
+            } else if terminal.mode(Mode::SGR_MOUSE).unwrap_or(false) {
+                format = Some("SGR Coords");
+            } else if terminal.mode(Mode::URXVT_MOUSE).unwrap_or(false) {
+                format = Some("URXVT Coords");
+            } else if terminal.mode(Mode::UTF8_MOUSE).unwrap_or(false) {
+                format = Some("UTF-8 Coords");
+            }
+
+            if let Some(fmt) = format {
+                format!("{} ({}) events", base_mode, fmt)
+            } else {
+                format!("{} events", base_mode)
+            }
+        } else {
+            "disabled".to_string()
+        };
+
+        if self.prev_mouse_capture.as_ref() != Some(&mouse_capture) {
+            if self.prev_mouse_capture.is_some() {
+                info!("Program changed mouse capture to: {}", mouse_capture);
+            } else if mouse_capture != "disabled" {
+                info!("Program changed mouse capture to: {}", mouse_capture);
+            }
+            self.prev_mouse_capture = Some(mouse_capture);
+        }
+
+        // 2. Kitty keyboard protocol flags
+        if let Ok(flags) = terminal.kitty_keyboard_flags() {
+            if self.prev_kitty_flags != Some(flags) {
+                if self.prev_kitty_flags.is_some() {
+                    if flags.is_empty() || flags == libghostty_vt::key::KittyKeyFlags::DISABLED {
+                        info!("Program disabled kitty keyboard protocol");
+                    } else {
+                        info!(
+                            "Program enabled kitty keyboard protocol: {}",
+                            format_kitty_flags(flags)
+                        );
+                    }
+                } else if !flags.is_empty() && flags != libghostty_vt::key::KittyKeyFlags::DISABLED
+                {
+                    info!(
+                        "Program enabled kitty keyboard protocol: {}",
+                        format_kitty_flags(flags)
+                    );
+                }
+                self.prev_kitty_flags = Some(flags);
+            }
+        }
+
+        // 3. Window title
+        if let Ok(title) = terminal.title() {
+            let title_str = title.to_string();
+            if self.prev_title.as_ref() != Some(&title_str) {
+                if self.prev_title.is_some() {
+                    info!("Program changed window title to: {:?}", title_str);
+                }
+                self.prev_title = Some(title_str);
+            }
+        }
+
+        // 4. Screen buffer
+        if let Ok(screen) = terminal.active_screen() {
+            if self.prev_screen != Some(screen) {
+                if self.prev_screen.is_some() {
+                    let screen_name = match screen {
+                        libghostty_vt::screen::Screen::Primary => "Primary Screen",
+                        libghostty_vt::screen::Screen::Alternate => "Alternate Screen",
+                    };
+                    info!("Program changed screen buffer to: {}", screen_name);
+                }
+                self.prev_screen = Some(screen);
+            }
+        }
+
+        // 5. Bracketed paste
+        let bracketed_paste = terminal.mode(Mode::BRACKETED_PASTE).unwrap_or(false);
+        if self.prev_bracketed_paste != Some(bracketed_paste) {
+            if self.prev_bracketed_paste.is_some() {
+                info!(
+                    "Program changed bracketed paste mode to: {}",
+                    if bracketed_paste {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                );
+            }
+            self.prev_bracketed_paste = Some(bracketed_paste);
+        }
+
+        // 6. Cursor visible
+        if let Ok(visible) = terminal.is_cursor_visible() {
+            if self.prev_cursor_visible != Some(visible) {
+                if self.prev_cursor_visible.is_some() {
+                    info!(
+                        "Program changed cursor visibility to: {}",
+                        if visible { "visible" } else { "hidden" }
+                    );
+                }
+                self.prev_cursor_visible = Some(visible);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
