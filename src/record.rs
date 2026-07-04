@@ -353,13 +353,26 @@ fn draw_terminal_state(
         );
         header_height = dry_run.height;
 
+        let show_logs = f.area().height >= header_height + 1 + frame.rows + 1 + 3;
+        let constraints = if show_logs {
+            vec![
+                Constraint::Length(header_height), // Dynamic Header
+                Constraint::Length(1),             // Divider 1
+                Constraint::Length(frame.rows),    // Terminal body
+                Constraint::Length(1),             // Divider 2
+                Constraint::Min(0),                // Log panel
+            ]
+        } else {
+            vec![
+                Constraint::Length(header_height), // Dynamic Header
+                Constraint::Length(1),             // Divider 1
+                Constraint::Min(0),                // Terminal body
+            ]
+        };
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(header_height), // Dynamic Header
-                Constraint::Length(1),             // Divider
-                Constraint::Min(0),                // Terminal body
-            ])
+            .constraints(constraints)
             .split(f.area());
 
         // 2. Real draw run
@@ -439,6 +452,26 @@ fn draw_terminal_state(
             lines.push(Line::from(spans));
         }
         f.render_widget(Paragraph::new(lines), chunks[2]);
+
+        // 4.5 Render log panel if visible
+        if show_logs {
+            let divider_line2 = "─".repeat(chunks[3].width as usize);
+            f.render_widget(Paragraph::new(divider_line2), chunks[3]);
+
+            let log_text = if let Ok(logs) = crate::telemetry::RECORDING_LOGS.lock() {
+                let max_lines = chunks[4].height as usize;
+                let start_idx = logs.len().saturating_sub(max_lines);
+                let lines_slice = &logs[start_idx..];
+                let joined = lines_slice.join("\n");
+                use ansi_to_tui::IntoText;
+                joined
+                    .into_text()
+                    .unwrap_or_else(|_| ratatui::text::Text::raw(joined))
+            } else {
+                ratatui::text::Text::raw("")
+            };
+            f.render_widget(Paragraph::new(log_text), chunks[4]);
+        }
 
         // 5. Update hardware cursor coordinate
         if let Some((ccol, crow)) = frame.cursor {
@@ -765,6 +798,11 @@ impl Drop for TerminalCapabilityGuard {
             let _ = term.enter_cooked_mode();
         }
         crate::telemetry::SUSPEND_LOGGING.store(false, std::sync::atomic::Ordering::SeqCst);
+        if let Ok(mut logs) = crate::telemetry::RECORDING_LOGS.lock() {
+            for log_line in logs.drain(..) {
+                eprintln!("{}", log_line);
+            }
+        }
     }
 }
 
@@ -803,11 +841,11 @@ pub fn record(
     crate::telemetry::SUSPEND_LOGGING.store(true, std::sync::atomic::Ordering::SeqCst);
     use std::io::Write;
     use termina::escape::csi::{
-        Csi, DecModeSetting, DecPrivateMode, DecPrivateModeCode, Keyboard, KittyKeyboardFlags, Mode,
+        Csi, DecPrivateMode, DecPrivateModeCode, Keyboard, KittyKeyboardFlags, Mode,
     };
 
     // Query if SGRPixelsMouse is supported (DEC private mode 1016)
-    let mut supports_sgr_pixels = false;
+    let supports_sgr_pixels = false;
     // if write!(
     //     host_terminal,
     //     "{}",

@@ -458,6 +458,12 @@ struct LogWriter;
 impl std::io::Write for LogWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if evp::telemetry::SUSPEND_LOGGING.load(std::sync::atomic::Ordering::Relaxed) {
+            let string_val = String::from_utf8_lossy(buf).to_string();
+            if let Ok(mut logs) = evp::telemetry::RECORDING_LOGS.lock() {
+                for line in string_val.lines() {
+                    logs.push(line.to_string());
+                }
+            }
             Ok(buf.len())
         } else {
             std::io::stderr().write(buf)

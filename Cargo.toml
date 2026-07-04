@@ -51,6 +51,7 @@ regex = "1"
 shell-words = "1"
 termina = "0.3.3"
 ratatui = { version = "0.30.2", features = ["termina"] }
+ansi-to-tui = "8.0.1"
 
 # Image / GIF rendering with streaming support.
 gif = "0.14.2"
