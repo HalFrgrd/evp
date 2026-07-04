@@ -197,6 +197,33 @@ fn flush_char_buffer(
     }
 }
 
+fn format_size(bytes: u64) -> String {
+    if bytes == 0 {
+        return "0B".to_string();
+    }
+    let units = ["B", "kB", "MB", "GB", "TB", "PB"];
+    let mut bytes_f = bytes as f64;
+    let mut i = 0;
+    while bytes_f >= 1000.0 && i < units.len() - 1 {
+        bytes_f /= 1000.0;
+        i += 1;
+    }
+
+    let formatted = if bytes_f >= 99.95 {
+        format!("{:.0}", bytes_f)
+    } else if bytes_f >= 9.995 {
+        format!("{:.1}", bytes_f)
+    } else {
+        format!("{:.2}", bytes_f)
+    };
+
+    if formatted.starts_with("1000") && i < units.len() - 1 {
+        format!("1.00{}", units[i + 1])
+    } else {
+        format!("{}{}", formatted, units[i])
+    }
+}
+
 /// Renders the host terminal state utilizing Ratatui's canvas drawing and text formatting backend
 struct HeaderLayoutResult {
     height: u16,
@@ -210,6 +237,8 @@ fn layout_header(
     show_dot: bool,
     is_hovered: bool,
     mouse_event_info: Option<&str>,
+    out_filename: &str,
+    out_size: u64,
 ) -> HeaderLayoutResult {
     let mut click_cells = Vec::new();
     let mut x = area.x;
@@ -232,9 +261,10 @@ fn layout_header(
 
     let dot_text = if show_dot { "●" } else { " " };
     let seconds_str = format!("{}s", elapsed.as_secs());
+    let size_str = format_size(out_size);
     let prefix_text = format!(
-        " EVP recording active ({}). To stop recording, exit the program or ",
-        seconds_str
+        " EVP recording active ({}) [{}: {}]. To stop recording, exit the program or ",
+        seconds_str, out_filename, size_str
     );
     let click_text = "click here";
     let suffix_text = if mouse_event_info.is_some() {
@@ -285,6 +315,8 @@ fn draw_terminal_state(
     elapsed: Duration,
     host_mouse_pos: Option<(u16, u16)>,
     mouse_event_info: Option<&str>,
+    out_filename: &str,
+    out_size: u64,
 ) -> Result<(u16, Vec<(u16, u16)>)> {
     let mut click_cells = Vec::new();
     let mut header_height = 1u16;
@@ -294,7 +326,16 @@ fn draw_terminal_state(
 
         // 1. Dry run to calculate header height and hover state
         let is_hovered = if let Some((m_col, m_row)) = host_mouse_pos {
-            let dry_run = layout_header(None, f.area(), elapsed, show_dot, false, mouse_event_info);
+            let dry_run = layout_header(
+                None,
+                f.area(),
+                elapsed,
+                show_dot,
+                false,
+                mouse_event_info,
+                out_filename,
+                out_size,
+            );
             dry_run.click_cells.contains(&(m_col, m_row))
         } else {
             false
@@ -307,6 +348,8 @@ fn draw_terminal_state(
             show_dot,
             is_hovered,
             mouse_event_info,
+            out_filename,
+            out_size,
         );
         header_height = dry_run.height;
 
@@ -327,6 +370,8 @@ fn draw_terminal_state(
             show_dot,
             is_hovered,
             mouse_event_info,
+            out_filename,
+            out_size,
         );
         click_cells = layout_res.click_cells;
 
@@ -899,6 +944,16 @@ pub fn record(
     terminal.resize(cols, rows, cfg.cell_width_px, cfg.cell_height_px)?;
     terminal.on_pty_write(|_t, data| pty.write(data))?;
 
+    terminal.on_title_changed(|term| {
+        if let Ok(title) = term.title() {
+            info!("Program changed window title to: {:?}", title);
+        }
+    })?;
+
+    let mut osc_22_parser = crate::runner::Osc22Parser::new();
+    let mut state_tracker = crate::runner::TerminalStateTracker::new();
+    state_tracker.update_and_log(&terminal);
+
     apply_theme(&mut terminal, &settings.theme)?;
 
     let mut translator = KeyTranslator::new()?;
@@ -985,6 +1040,10 @@ pub fn record(
         ratatui_term.draw(|_| {})?;
 
         // Mouse tracking variables
+        let out_filename = out_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("output.gif");
         let mut current_mouse_col = 0u16;
         let mut current_mouse_row = 0u16;
         let mut is_dragging = false;
@@ -1011,8 +1070,14 @@ pub fn record(
                             if data.is_empty() {
                                 break; // EOF
                             }
+                            for &b in &data {
+                                osc_22_parser.feed(b, |shape| {
+                                    info!("Program changed mouse pointer shape to: {:?}", shape);
+                                });
+                            }
                             // Feed output to libghostty VT parser
                             terminal.vt_write(&data);
+                            state_tracker.update_and_log(&terminal);
                         }
                         Err(_) => break,
                     }
@@ -1126,7 +1191,8 @@ pub fn record(
                                             None,
                                         ) {
                                             frame.mouse_cursor = current_mouse_pos;
-                                            if let Ok((height, cells)) = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos, mouse_event_info.as_deref()) {
+                                            let out_size = std::fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
+                                            if let Ok((height, cells)) = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos, mouse_event_info.as_deref(), out_filename, out_size) {
                                                 header_height = height;
                                                 click_here_cells = cells;
                                             }
@@ -1151,7 +1217,8 @@ pub fn record(
                                             None,
                                         ) {
                                             frame.mouse_cursor = current_mouse_pos;
-                                            if let Ok((height, cells)) = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos, mouse_event_info.as_deref()) {
+                                            let out_size = std::fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
+                                            if let Ok((height, cells)) = draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos, mouse_event_info.as_deref(), out_filename, out_size) {
                                                 header_height = height;
                                                 click_here_cells = cells;
                                             }
@@ -1410,7 +1477,8 @@ pub fn record(
                         // Update host screen via Ratatui
                         let draw_res = {
                             let _draw_timer = crate::telemetry::ScopeTimer::new("record_draw_terminal_state");
-                            draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos, mouse_event_info.as_deref())
+                            let out_size = std::fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
+                            draw_terminal_state(&mut ratatui_term, &frame, elapsed, host_mouse_pos, mouse_event_info.as_deref(), out_filename, out_size)
                         };
                         if let Ok((height, cells)) = draw_res {
                             header_height = height;
@@ -1475,4 +1543,24 @@ pub fn record(
         "recording completed successfully"
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_size;
+
+    #[test]
+    fn test_format_size() {
+        assert_eq!(format_size(0), "0B");
+        assert_eq!(format_size(999), "999B");
+        assert_eq!(format_size(1000), "1.00kB");
+        assert_eq!(format_size(1050), "1.05kB");
+        assert_eq!(format_size(9880), "9.88kB");
+        assert_eq!(format_size(34600), "34.6kB");
+        assert_eq!(format_size(105000), "105kB");
+        assert_eq!(format_size(999000), "999kB");
+        assert_eq!(format_size(999900), "1.00MB");
+        assert_eq!(format_size(1000000), "1.00MB");
+        assert_eq!(format_size(34600000), "34.6MB");
+    }
 }

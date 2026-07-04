@@ -271,12 +271,19 @@ impl Pty {
     }
 
     /// Drain all currently available output into the terminal's VT parser.
-    pub fn drain_into(&self, term: &mut Terminal<'_, '_>) -> Result<(), PtyError> {
+    pub fn drain_into<F>(&self, term: &mut Terminal<'_, '_>, mut on_data: F) -> Result<(), PtyError>
+    where
+        F: FnMut(&[u8]),
+    {
         let mut buf = [0u8; 8192];
         loop {
             match nix::unistd::read(&self.0, &mut buf) {
                 Ok(0) => return Err(PtyError::EndOfStream),
-                Ok(n) => term.vt_write(&buf[..n]),
+                Ok(n) => {
+                    let data = &buf[..n];
+                    on_data(data);
+                    term.vt_write(data);
+                }
                 Err(Errno::EAGAIN) => return Ok(()),
                 Err(Errno::EINTR) => continue,
                 Err(Errno::EIO) => return Err(PtyError::EndOfStream),
