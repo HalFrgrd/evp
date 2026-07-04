@@ -10,6 +10,9 @@
 
 </div>
 
+> [!WARNING]
+> EVP is still a work in progress and there will be breaking changes without warning.
+
 You create a `.tape` file and run `evp demo.tape` to produce smooth, high quality, portable GIF or SVG demos.
 EVP is a rewrite of [VHS](https://github.com/charmbracelet/vhs) with some key improvements.
 
@@ -43,21 +46,6 @@ EVP is extends [VHS](https://github.com/charmbracelet/vhs) in these ways:
 - Coming soon: resize support
 - Coming soon: snapshot process metrics to help debug interactive use
 - Coming soon: key event name overlay
-
-## Technology
-EVP runs a shell inside an embedded [libghostty](https://ghostty.org) terminal.
-This allows us to support advanced terminal features in a headless environment such as: complex key combinations; key press and key release events; mouse input support; legacy escape codes: Kitty image protocol (comming soon!).
-
-The SVG animations use [SMIL](https://developer.mozilla.org/en-US/docs/Web/SVG/Guides/SVG_animation_with_SMIL).
-Fonts are embedded into the SVG using [this method](https://stackoverflow.com/questions/79680618/how-to-embed-a-font-inside-a-svg-file).
-A custom optimizer reduces the file size and complexity.
-All the text on one terminal row is rendered inside of a `<text>` span which helps the browser copy the right text when you select and copy from the SVG.
-
-GIF rendering: a 256 color palette is setup at the start and reused for nearly all frames.
-Only minimal diffs between frames are written to the file.
-This yields exceptionally small GIF file sizes.
-
-
 ## Install and Usage
 
 ### Quick install: `install.sh`
@@ -101,6 +89,20 @@ After installing, you can:
 ### Using EVP in CI
 For automated rendering in workflows, pipelines, or containers, see [EVP in CI](evp_in_ci.md).
 
+
+
+## Technology
+EVP runs a shell inside an embedded [libghostty](https://ghostty.org) terminal.
+This allows us to support advanced terminal features in a headless environment such as: complex key combinations; key press and key release events; mouse input support; legacy escape codes: Kitty image protocol (comming soon!).
+
+The SVG animations use [SMIL](https://developer.mozilla.org/en-US/docs/Web/SVG/Guides/SVG_animation_with_SMIL).
+Fonts are embedded into the SVG using [this method](https://stackoverflow.com/questions/79680618/how-to-embed-a-font-inside-a-svg-file).
+A custom optimizer reduces the file size and complexity.
+All the text on one terminal row is rendered inside of a `<text>` span which helps the browser copy the right text when you select and copy from the SVG.
+
+GIF rendering: a 256 color palette is setup at the start and reused for nearly all frames.
+Only minimal diffs between frames are written to the file.
+This yields exceptionally small GIF file sizes.
 
 
 ## Script Reference
