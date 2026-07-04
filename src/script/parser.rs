@@ -497,6 +497,11 @@ fn apply_set(rest: &[String], s: &mut Settings) -> Result<()> {
         "MarginFill" => s.margin_fill = parse_hex_color(&set_scalar_strict(rest, key)?)?,
         "WindowBar" => s.window_bar = WindowBarStyle::parse(&set_scalar_strict(rest, key)?)?,
         "WindowBarSize" => s.window_bar_size = set_scalar_strict(rest, key)?.parse()?,
+        "WindowBarTitle" => s.window_bar_title = Some(set_value(rest, key)?),
+        "WindowBarFontFamily" => s.window_bar_font_family = Some(set_value(rest, key)?),
+        "WindowBarFontSize" => {
+            s.window_bar_font_size = Some(set_scalar_strict(rest, key)?.parse()?)
+        }
         "BorderRadius" => s.border_radius = set_scalar_strict(rest, key)?.parse()?,
         "LineHeight" => s.line_height = set_scalar_strict(rest, key)?.parse()?,
         "Framerate" | "FrameRate" | "FPS" => s.framerate = set_scalar_strict(rest, key)?.parse()?,
@@ -1401,6 +1406,26 @@ mod tests {
             &s_easing.events[1],
             Event::MouseDrag { coords, delay, easing: Some(StandardEasing::InOutQuadradic), .. } if *delay == Duration::from_millis(50) && coords == &vec![(30, 30), (40, 40)]
         ));
+    }
+
+    #[test]
+    fn test_window_bar_settings_parsing() {
+        let src = r#"
+            Output out.gif
+            Set WindowBarTitle "My Custom Title Bar"
+            Set WindowBarFontFamily "JetBrains Mono"
+            Set WindowBarFontSize 14.5
+        "#;
+        let s = parse(src).unwrap();
+        assert_eq!(
+            s.settings.window_bar_title.as_deref(),
+            Some("My Custom Title Bar")
+        );
+        assert_eq!(
+            s.settings.window_bar_font_family.as_deref(),
+            Some("JetBrains Mono")
+        );
+        assert_eq!(s.settings.window_bar_font_size, Some(14.5));
     }
 
     #[test]

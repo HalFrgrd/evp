@@ -48,6 +48,9 @@ fn main() -> anyhow::Result<()> {
         frame_style: FrameStyle::default(),
         no_system_fonts: false,
         theme: evp::Theme::vhs_default(),
+        window_bar_title: None,
+        window_bar_font_family: None,
+        window_bar_font_size: None,
     };
 
     let mut render_ms_total = 0u128;

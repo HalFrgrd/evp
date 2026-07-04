@@ -137,6 +137,9 @@ pub struct RenderOptions {
     pub frame_style: FrameStyle,
     pub no_system_fonts: bool,
     pub theme: Theme,
+    pub window_bar_title: Option<String>,
+    pub window_bar_font_family: Option<String>,
+    pub window_bar_font_size: Option<f32>,
 }
 
 impl Default for RenderOptions {
@@ -149,6 +152,9 @@ impl Default for RenderOptions {
             frame_style: FrameStyle::default(),
             no_system_fonts: false,
             theme: Theme::vhs_default(),
+            window_bar_title: None,
+            window_bar_font_family: None,
+            window_bar_font_size: None,
         }
     }
 }

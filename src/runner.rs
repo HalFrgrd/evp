@@ -1393,6 +1393,9 @@ fn write_screenshot(frame: &RawFrame, script: &Script, path: &std::path::Path) -
             },
             no_system_fonts: false,
             theme: script.settings.theme.clone(),
+            window_bar_title: script.settings.window_bar_title.clone(),
+            window_bar_font_family: script.settings.window_bar_font_family.clone(),
+            window_bar_font_size: script.settings.window_bar_font_size,
         };
         crate::render_gif::render_png_frame(frame, &render_opts, path)
             .with_context(|| format!("writing screenshot {}", path.display()))
@@ -1402,6 +1405,9 @@ fn write_screenshot(frame: &RawFrame, script: &Script, path: &std::path::Path) -
             font_path: script.settings.font_family.clone(),
             font_size: script.settings.font_size,
             is_screenshot: true,
+            window_bar_title: script.settings.window_bar_title.clone(),
+            window_bar_font_family: script.settings.window_bar_font_family.clone(),
+            window_bar_font_size: script.settings.window_bar_font_size,
             ..Default::default()
         };
         let s = crate::render_svg::render_svg_frame_to_string(frame, cfg, &svg_opts)?;

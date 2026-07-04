@@ -994,6 +994,9 @@ pub fn record(
         frame_style: cfg.frame_style.clone(),
         no_system_fonts: false,
         theme: settings.theme.clone(),
+        window_bar_title: settings.window_bar_title.clone(),
+        window_bar_font_family: settings.window_bar_font_family.clone(),
+        window_bar_font_size: settings.window_bar_font_size,
     };
     let backend = renderer::RendererBackend::for_path(&out_path, &render_opts, true, false)?;
 

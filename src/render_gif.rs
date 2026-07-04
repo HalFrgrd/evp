@@ -151,23 +151,13 @@ pub fn spawn_gif_stream(
     cfg.char_height_px = char_height_px;
     cfg.ascent_px = ascent_px;
 
-    let no_system_fonts = opts.no_system_fonts;
-    let theme = opts.theme.clone();
     let (tx, rx): (Sender<RawFrame>, Receiver<RawFrame>) =
         bounded(RAW_FRAME_CONSUMER_CHANNEL_CAPACITY);
+    let opts_clone = opts.clone();
     let join = thread::Builder::new()
         .name("evp-gif-stream".into())
         .spawn(move || {
-            run_gif_stream_worker(
-                rx,
-                output,
-                font_set,
-                scale,
-                baseline,
-                cfg,
-                no_system_fonts,
-                theme,
-            )
+            run_gif_stream_worker(rx, output, font_set, scale, baseline, cfg, opts_clone)
         })
         .expect("failed to spawn gif stream worker");
 
@@ -246,6 +236,13 @@ pub fn render_png_frame(frame: &RawFrame, opts: &RenderOptions, out: &Path) -> R
         opts.theme.background_rgb()?,
         opts.theme.foreground_rgb()?,
     );
+    let title_font_set = if let Some(ref path) = opts.window_bar_font_family {
+        load_font_family(Some(path))
+            .map(|l| l.font_set)
+            .unwrap_or_else(|_| font_set.clone())
+    } else {
+        font_set.clone()
+    };
     let mut index_buf = vec![TRANSPARENT_COLOR_INDEX; (cfg.canvas_w * cfg.canvas_h) as usize];
     rasterize_raw_frame_idx(
         &mut index_buf,
@@ -253,11 +250,14 @@ pub fn render_png_frame(frame: &RawFrame, opts: &RenderOptions, out: &Path) -> R
         frame,
         None,
         &font_set,
+        &title_font_set,
         scale,
         baseline,
         cfg,
         &mut glyph_cache,
         &palette,
+        opts.window_bar_title.as_deref(),
+        opts.window_bar_font_size,
     );
     let mut rgb_buf = vec![0u8; (cfg.canvas_w * cfg.canvas_h * 3) as usize];
     for i in 0..index_buf.len() {
@@ -283,11 +283,13 @@ fn run_gif_stream_worker(
     scale: PxScale,
     baseline: u32,
     cfg: ViewportConfig,
-    no_system_fonts: bool,
-    theme: crate::Theme,
+    opts: RenderOptions,
 ) -> Result<()> {
     let _worker_timer = crate::telemetry::ScopeTimer::new("gif_worker_total");
     let start_time = std::time::Instant::now();
+
+    let no_system_fonts = opts.no_system_fonts;
+    let theme = opts.theme.clone();
 
     let base16 = theme.palette_rgb()?;
     let bg = theme.background_rgb()?;
@@ -300,6 +302,14 @@ fn run_gif_stream_worker(
         flattened_palette[i * 3 + 1] = palette[i][1];
         flattened_palette[i * 3 + 2] = palette[i][2];
     }
+
+    let title_font_set = if let Some(ref path) = opts.window_bar_font_family {
+        load_font_family(Some(path))
+            .map(|l| l.font_set)
+            .unwrap_or_else(|_| font_set.clone())
+    } else {
+        font_set.clone()
+    };
 
     let file = std::fs::File::create(&out).with_context(|| format!("create {}", out.display()))?;
     let mut encoder = gif::Encoder::new(
@@ -358,11 +368,14 @@ fn run_gif_stream_worker(
                 &frame,
                 prev_frame.as_ref(),
                 &font_set,
+                &title_font_set,
                 scale,
                 baseline,
                 cfg,
                 &mut glyph_cache,
                 &palette,
+                opts.window_bar_title.as_deref(),
+                opts.window_bar_font_size,
             );
         }
 
@@ -476,11 +489,14 @@ fn rasterize_raw_frame_idx(
     curr: &RawFrame,
     prev: Option<&RawFrame>,
     font_set: &FontSet,
+    title_font_set: &FontSet,
     scale: PxScale,
     baseline: u32,
     cfg: ViewportConfig,
     glyph_cache: &mut GlyphCache,
     palette: &[[u8; 3]; 256],
+    custom_title: Option<&str>,
+    custom_title_fs: Option<f32>,
 ) {
     let cell_w = cfg.cell_width_px.max(1);
     let cell_h = cfg.cell_height_px.max(1);
@@ -573,7 +589,9 @@ fn rasterize_raw_frame_idx(
         }
     }
 
-    let mut title_changed = prev.is_none() || curr.title != prev.unwrap().title;
+    let title = custom_title.or(curr.title.as_deref());
+    let prev_title = custom_title.or(prev.and_then(|p| p.title.as_deref()));
+    let mut title_changed = prev.is_none() || title != prev_title;
     if !title_changed && cfg.frame_style.window_bar.enabled() {
         for mouse in &[curr.mouse_cursor, prev.and_then(|p| p.mouse_cursor)] {
             if let Some((_, m_row, _)) = *mouse {
@@ -599,17 +617,18 @@ fn rasterize_raw_frame_idx(
                 default_bg_idx,
             );
             draw_window_bar_idx(buf, cfg.canvas_w, cfg, palette);
-            if let Some(ref title) = curr.title {
-                if !title.is_empty() {
-                    let title_fs = (cfg.bar_h as f32 * 0.765).max(17.0);
+            if let Some(t) = title {
+                if !t.is_empty() {
+                    let title_fs =
+                        custom_title_fs.unwrap_or_else(|| (cfg.bar_h as f32 * 0.765).max(17.0));
                     let title_scale = PxScale::from(title_fs);
-                    let text_w = string_width(title, font_set, title_scale);
+                    let text_w = string_width(t, title_font_set, title_scale);
 
                     let cx = cfg.frame_x as f32 + cfg.frame_w as f32 / 2.0;
                     let start_x = (cx - text_w / 2.0).max(cfg.frame_x as f32);
 
                     let cy = cfg.frame_y as f32 + cfg.bar_h as f32 / 2.0;
-                    let (_, font) = font_set.select_for_char(0, 'M');
+                    let (_, font) = title_font_set.select_for_char(0, 'M');
                     let scaled = font.as_scaled(title_scale);
                     let baseline_y = cy + (scaled.ascent() + scaled.descent()) / 2.0;
 
@@ -620,8 +639,8 @@ fn rasterize_raw_frame_idx(
                         cfg.canvas_w,
                         start_x as u32,
                         baseline_y as u32,
-                        title,
-                        font_set,
+                        t,
+                        title_font_set,
                         title_scale,
                         [142, 142, 147],
                         glyph_cache,

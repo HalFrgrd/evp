@@ -1,7 +1,14 @@
-# Example demonstrating the custom window bar title feature.
+# Example demonstrating the custom window bar title and font features.
 #
-# Runs a script that enables the window bar and sets a custom title using
-# OSC escape sequences (e.g., printf '\033]2;My Custom Title\007').
+# There are two ways to control the window bar title in EVP:
+#
+# 1. Static Custom Title & Font (configured directly in this script):
+#    Set WindowBarTitle "My Custom Title"
+#    Set WindowBarFontFamily "JetBrains Mono"
+#    Set WindowBarFontSize 15
+#
+# 2. Dynamic Title updates (using OSC escape sequences as shown below):
+#    printf '\033]2;My Custom Title\007'
 
 Output window_title.gif
 Output window_title.svg

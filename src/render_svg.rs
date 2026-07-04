@@ -228,6 +228,9 @@ pub struct SvgOptions {
     pub no_system_fonts: bool,
     /// Whether this is a static screenshot (disables all animation/SMIL elements).
     pub is_screenshot: bool,
+    pub window_bar_title: Option<String>,
+    pub window_bar_font_family: Option<String>,
+    pub window_bar_font_size: Option<f32>,
 }
 
 pub struct SvgStreamHandle {
@@ -266,6 +269,9 @@ impl Default for SvgOptions {
             embed_fonts: true,
             no_system_fonts: false,
             is_screenshot: false,
+            window_bar_title: None,
+            window_bar_font_family: None,
+            window_bar_font_size: None,
         }
     }
 }
@@ -1528,6 +1534,8 @@ pub struct SvgDoc {
     pub is_static: bool,
     pub bar_h: u32,
     pub title_segments: Vec<TitleSegment>,
+    pub window_bar_font_family: Option<String>,
+    pub window_bar_font_size: Option<f32>,
     pub cols: u32,
     pub rows: u32,
     pub framerate: u32,
@@ -2119,26 +2127,35 @@ impl SvgDoc {
         if !self.window_bar_circles.is_empty() && self.bar_h > 0 {
             let cx = self.frame_bg_x + self.frame_bg_w / 2;
             let cy = self.frame_bg_y + self.bar_h / 2;
-            let title_fs = (self.bar_h as f32 * 0.535).max(12.0);
+            let title_fs = self
+                .window_bar_font_size
+                .unwrap_or_else(|| (self.bar_h as f32 * 0.535).max(12.0));
+            let ff_attr = if let Some(ref ff) = self.window_bar_font_family {
+                format!(r#" font-family="{}""#, escape_attr(ff))
+            } else {
+                String::new()
+            };
             for segment in &self.title_segments {
                 let escaped_title = escape_text(&segment.title);
                 if self.is_static {
                     s.push_str(&format!(
-                        r##"<text x="{cx}" y="{cy}" fill="#626268" text-anchor="middle" dominant-baseline="central" font-size="{title_fs}" font-weight="normal">{escaped_title}</text>
+                        r##"<text x="{cx}" y="{cy}" fill="#626268" text-anchor="middle" dominant-baseline="central" font-size="{title_fs}"{ff_attr} font-weight="normal">{escaped_title}</text>
 "##,
                         cx = cx,
                         cy = cy,
                         title_fs = format_seconds(title_fs),
+                        ff_attr = ff_attr,
                         escaped_title = escaped_title,
                     ));
                 } else {
                     let set_str = visibility_set(segment.start_ms, segment.end_ms, total_ms);
                     s.push_str(&format!(
-                        r##"<text x="{cx}" y="{cy}" fill="#626268" text-anchor="middle" dominant-baseline="central" font-size="{title_fs}" font-weight="normal" class="h">{set_str}{escaped_title}</text>
+                        r##"<text x="{cx}" y="{cy}" fill="#626268" text-anchor="middle" dominant-baseline="central" font-size="{title_fs}"{ff_attr} font-weight="normal" class="h">{set_str}{escaped_title}</text>
 "##,
                         cx = cx,
                         cy = cy,
                         title_fs = format_seconds(title_fs),
+                        ff_attr = ff_attr,
                         set_str = set_str,
                         escaped_title = escaped_title,
                     ));
@@ -3136,7 +3153,13 @@ fn render_from_frames(
 
     let mut title_segments = Vec::new();
     let total_ms = (total_s * 1000.0).round() as u32;
-    if !frames.is_empty() {
+    if let Some(ref custom_title) = opts.window_bar_title {
+        title_segments.push(TitleSegment {
+            title: custom_title.clone(),
+            start_ms: 0,
+            end_ms: total_ms,
+        });
+    } else if !frames.is_empty() {
         let mut current_title = frames[0].title.as_deref().map(|s| s.to_string());
         let mut start_ms = 0u32;
         for i in 1..frames.len() {
@@ -3209,6 +3232,8 @@ fn render_from_frames(
         is_static: opts.is_screenshot,
         bar_h: cfg.bar_h,
         title_segments,
+        window_bar_font_family: opts.window_bar_font_family.clone(),
+        window_bar_font_size: opts.window_bar_font_size,
     };
 
     Ok(doc.to_svg())

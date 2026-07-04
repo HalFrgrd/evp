@@ -4,17 +4,28 @@ This page showcases various `.tape` example scripts and their output animations 
 
 ---
 
-## 1. Dynamic Window Title Bar
-Shows how to configure macOS-like window decoration controls and update the title dynamically at the center of the bar using standard ANSI OSC sequences.
+## 1. Window Title Bar & Custom Title/Fonts
+Shows how to configure macOS-like window decoration controls, set a custom static title bar and custom title font family/size directly in the tape script, or update the title dynamically at runtime.
 
 * **Tape**: [`examples/window_title.tape`](examples/window_title.tape)
 * **Demo**:
   ![Dynamic Window Title Bar Demo](https://github.com/HalFrgrd/evp/releases/download/assets/window_title.gif)
 
+### Static Custom Title & Font Configuration
 ```elixir
 # Enable window bar styling
 Set WindowBar Rings
 
+# Set a custom static window title
+Set WindowBarTitle "My Custom Title Bar"
+
+# Set custom window title font family and size
+Set WindowBarFontFamily "JetBrains Mono"
+Set WindowBarFontSize 15
+```
+
+### Dynamic Title Updates via PTY
+```elixir
 # Set a dynamic terminal title via ANSI OSC sequence
 Type "printf '\033]2;My Dynamic Terminal Title\007'"
 Enter
