@@ -80,16 +80,29 @@ ARCH="$(uname -m)"
 
 case "$OS" in
     Linux) os_tag="unknown-linux-musl" ;;
+    Darwin) os_tag="apple-darwin" ;;
+    FreeBSD) os_tag="unknown-freebsd" ;;
     *)
-        err "Unsupported OS: $OS. Only Linux prebuilt binaries are published today.
+        err "Unsupported OS: $OS. Only Linux, macOS, and FreeBSD prebuilt binaries are published today.
 Build from source instead: https://github.com/${REPO}#build-from-source"
         ;;
 esac
 
 case "$ARCH" in
     x86_64|amd64) arch_tag="x86_64" ;;
+    arm64|aarch64) arch_tag="aarch64" ;;
     *)
-        err "Unsupported architecture: $ARCH. Only x86_64 prebuilt binaries are published today.
+        err "Unsupported architecture: $ARCH. Only x86_64 and aarch64 prebuilt binaries are published today.
+Build from source instead: https://github.com/${REPO}#build-from-source"
+        ;;
+esac
+
+# Validate supported combinations
+case "${arch_tag}-${os_tag}" in
+    x86_64-unknown-linux-musl|aarch64-unknown-linux-musl|x86_64-apple-darwin|aarch64-apple-darwin|x86_64-unknown-freebsd)
+        ;;
+    *)
+        err "Unsupported target platform: ${arch_tag}-${os_tag}.
 Build from source instead: https://github.com/${REPO}#build-from-source"
         ;;
 esac
