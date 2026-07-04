@@ -1913,28 +1913,39 @@ impl TerminalStateTracker {
         use libghostty_vt::terminal::Mode;
 
         // 1. Mouse capture
+        let x10 = terminal.mode(Mode::X10_MOUSE).unwrap_or(false);
         let normal = terminal.mode(Mode::NORMAL_MOUSE).unwrap_or(false);
         let button = terminal.mode(Mode::BUTTON_MOUSE).unwrap_or(false);
         let any = terminal.mode(Mode::ANY_MOUSE).unwrap_or(false);
-        let pixels = terminal.mode(Mode::SGR_PIXELS_MOUSE).unwrap_or(false);
 
-        let mouse_capture = if any {
-            if pixels {
-                "Click+Drag+Move (Pixel Coords) events".to_string()
-            } else {
-                "Click+Drag+Move events".to_string()
-            }
+        let base_mode = if any {
+            "Click+Drag+Move+Scroll"
         } else if button {
-            if pixels {
-                "Click+Drag (Pixel Coords) events".to_string()
-            } else {
-                "Click+Drag events".to_string()
-            }
+            "Click+Drag+Scroll"
         } else if normal {
-            if pixels {
-                "Click (Pixel Coords) events".to_string()
+            "Click+Scroll"
+        } else if x10 {
+            "Click (X10)"
+        } else {
+            "disabled"
+        };
+
+        let mouse_capture = if base_mode != "disabled" {
+            let mut format = None;
+            if terminal.mode(Mode::SGR_PIXELS_MOUSE).unwrap_or(false) {
+                format = Some("Pixel Coords");
+            } else if terminal.mode(Mode::SGR_MOUSE).unwrap_or(false) {
+                format = Some("SGR Coords");
+            } else if terminal.mode(Mode::URXVT_MOUSE).unwrap_or(false) {
+                format = Some("URXVT Coords");
+            } else if terminal.mode(Mode::UTF8_MOUSE).unwrap_or(false) {
+                format = Some("UTF-8 Coords");
+            }
+
+            if let Some(fmt) = format {
+                format!("{} ({}) events", base_mode, fmt)
             } else {
-                "Click events".to_string()
+                format!("{} events", base_mode)
             }
         } else {
             "disabled".to_string()
