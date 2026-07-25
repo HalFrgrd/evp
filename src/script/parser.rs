@@ -69,10 +69,20 @@ fn strip_comment(s: &str) -> &str {
     // Comments are `#` to end-of-line, but only outside of quoted strings.
     let bytes = s.as_bytes();
     let mut quote: Option<u8> = None;
+    let mut escaped = false;
     for (i, &b) in bytes.iter().enumerate() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
         match quote {
-            Some(q) if b == q => quote = None,
-            Some(_) => {}
+            Some(q) => {
+                if b == b'\\' && q != b'`' {
+                    escaped = true;
+                } else if b == q {
+                    quote = None;
+                }
+            }
             None => match b {
                 b'"' | b'\'' | b'`' => quote = Some(b),
                 b'#' => return &s[..i],
@@ -99,28 +109,27 @@ fn tokenize(line: &str) -> Result<Vec<String>> {
             let mut s = String::from(quote);
             let mut closed = false;
             while let Some(c) = chars.next() {
+                // Only `"…"` and `'…'` honour `\<quote>` or `\\` as an escape
+                // so the user can embed the quote character or backslash itself.
+                // Other escape sequences (`\e`, `\n`, …) are passed through verbatim.
+                // Backticks are raw strings — `\` has no special meaning at all.
+                if quote != '`' && c == '\\' {
+                    if let Some(&next) = chars.peek() {
+                        if next == quote {
+                            s.push(next);
+                            chars.next();
+                            continue;
+                        } else if next == '\\' {
+                            s.push('\\');
+                            chars.next();
+                            continue;
+                        }
+                    }
+                }
                 s.push(c);
                 if c == quote {
                     closed = true;
                     break;
-                }
-                // Only `"…"` and `'…'` honour `\<quote>` as an escape so
-                // the user can embed the quote character itself. Other
-                // escape sequences (`\e`, `\n`, `\\`, …) are passed
-                // through verbatim and interpreted downstream by the
-                // event executor. Backticks are raw strings — `\` has no
-                // special meaning at all — which is what VHS does and is
-                // why tapes can write things like
-                //   Type `flyline … --fps 3 \`
-                // without the trailing `\` swallowing the closing
-                // backtick.
-                if quote != '`'
-                    && c == '\\'
-                    && let Some(&next) = chars.peek()
-                    && next == quote
-                {
-                    s.push(next);
-                    chars.next();
                 }
             }
             if !closed {
@@ -1572,7 +1581,7 @@ mod tests {
         assert_eq!(parsed.events.len(), 10);
         assert!(matches!(
             &parsed.events[0],
-            Event::Type { text, delay } if text == "echo \\\"hello\\\"" && *delay == Duration::from_millis(100)
+            Event::Type { text, delay } if text == "echo \"hello\"" && *delay == Duration::from_millis(100)
         ));
         assert!(matches!(
             &parsed.events[1],
@@ -1619,5 +1628,67 @@ mod tests {
             &parsed.events[9],
             Event::Key { key, .. } if key.key == NamedKey::Alt && !key.mods.alt
         ));
+    }
+
+    #[test]
+    fn type_parses_escaped_quotes() {
+        let src = r#"
+            Output out.gif
+            Type "echo \"First line"
+        "#;
+        let s = parse(src).unwrap();
+        assert_eq!(s.events.len(), 1);
+        match &s.events[0] {
+            Event::Type { text, .. } => {
+                assert_eq!(text, "echo \"First line");
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn strip_comment_handles_escaped_quotes() {
+        let src = r#"
+            Output out.gif
+            Type "echo \"First line # not comment" # real comment
+        "#;
+        let s = parse(src).unwrap();
+        assert_eq!(s.events.len(), 1);
+        match &s.events[0] {
+            Event::Type { text, .. } => {
+                assert_eq!(text, "echo \"First line # not comment");
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn type_parses_escaped_backslashes() {
+        let src = r#"
+            Output out.gif
+            Type "echo \\"
+            Type 'echo \\'
+            Type `echo \\`
+        "#;
+        let s = parse(src).unwrap();
+        assert_eq!(s.events.len(), 3);
+        match &s.events[0] {
+            Event::Type { text, .. } => {
+                assert_eq!(text, "echo \\");
+            }
+            _ => panic!(),
+        }
+        match &s.events[1] {
+            Event::Type { text, .. } => {
+                assert_eq!(text, "echo \\");
+            }
+            _ => panic!(),
+        }
+        match &s.events[2] {
+            Event::Type { text, .. } => {
+                assert_eq!(text, "echo \\\\");
+            }
+            _ => panic!(),
+        }
     }
 }
