@@ -11,6 +11,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     compress_embedded_fonts()?;
     extract_ref_script()?;
     update_readme_version()?;
+    compile_freebsd_compat()?;
 
     // Emit build/cargo/git/rustc metadata as VERGEN_* env vars for runtime
     // logging and rich --version output.
@@ -186,6 +187,17 @@ fn update_readme_version() -> Result<(), Box<dyn Error>> {
     if updated {
         let content = lines.join("\n") + "\n";
         fs::write(readme_path, content)?;
+    }
+    Ok(())
+}
+
+fn compile_freebsd_compat() -> Result<(), Box<dyn Error>> {
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("freebsd") {
+        println!("cargo:rerun-if-changed=src/freebsd_compat.c");
+        cc::Build::new()
+            .file("src/freebsd_compat.c")
+            .compile("freebsd_compat");
+        println!("cargo:rustc-link-arg=-Wl,--undefined=copy_file_range");
     }
     Ok(())
 }

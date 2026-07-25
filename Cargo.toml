@@ -72,6 +72,8 @@ easing-function = { version = "0.1.1", features = ["serde"] }
 
 [build-dependencies]
 vergen-gitcl = { version = "10.0.0-beta.8", features = ["build", "cargo", "rustc"] }
+cc = "1.0"
+
 
 # Release profile for distributed binaries. `lto = "fat"` lets the
 # linker inline across crate boundaries (notable for gifski, ab_glyph
