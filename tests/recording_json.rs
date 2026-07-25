@@ -37,7 +37,7 @@ Set Width 800
 Set Height 300
 Set FontSize 20
 Set Framerate 30
-Set Shell /bin/sh
+Set Shell env -i bash --noprofile --norc
 Sleep 500ms
 "#;
     let rec = record(tape);
@@ -96,7 +96,7 @@ Set Height 300
 Set FontSize 20
 Set TypingSpeed 20ms
 Set Framerate 30
-Set Shell /bin/sh
+Set Shell env -i bash --noprofile --norc
 Sleep 500ms
 Type "echo hello evp"
 Enter
@@ -127,7 +127,7 @@ Set Width 800
 Set Height 300
 Set FontSize 20
 Set Framerate 30
-Set Shell /bin/sh
+Set Shell env -i bash --noprofile --norc
 Sleep 500ms
 "#;
     let rec = record(tape);
@@ -162,7 +162,7 @@ Set Height 300
 Set FontSize 20
 Set TypingSpeed 20ms
 Set Framerate 30
-Set Shell /bin/sh
+Set Shell env -i bash --noprofile --norc
 Sleep 200ms
 Type "hi"
 Sleep 200ms
@@ -206,7 +206,7 @@ Set Height 300
 Set FontSize 20
 Set TypingSpeed 20ms
 Set Framerate 30
-Set Shell /bin/sh
+Set Shell env -i bash --noprofile --norc
 Sleep 200ms
 Type "json"
 Sleep 200ms
@@ -234,7 +234,7 @@ Set Height 300
 Set FontSize 20
 Set TypingSpeed 20ms
 Set Framerate 30
-Set Shell /bin/sh
+Set Shell env -i bash --noprofile --norc
 Sleep 300ms
 Type "echo before-visible"
 Enter
@@ -291,7 +291,7 @@ Set Height 300
 Set FontSize 20
 Set TypingSpeed 10ms
 Set Framerate 30
-Set Shell /bin/sh
+Set Shell env -i bash --noprofile --norc
 Set WaitTimeout 2s
 Sleep 200ms
 Type "printf wait-line-ok; sleep 1"
@@ -325,7 +325,7 @@ Set Height 300
 Set FontSize 20
 Set TypingSpeed 10ms
 Set Framerate 30
-Set Shell /bin/sh
+Set Shell env -i bash --noprofile --norc
 Set WaitTimeout 2s
 Sleep 200ms
 Type "printf sum+one; sleep 1"
@@ -359,7 +359,7 @@ Set Height 300
 Set FontSize 20
 Set TypingSpeed 10ms
 Set Framerate 30
-Set Shell /bin/sh
+Set Shell env -i bash --noprofile --norc
 Sleep 200ms
 Wait @400ms /__never_matches_wait_test__/
 Type "echo after-timeout"
@@ -403,7 +403,7 @@ Set Height 300
 Set FontSize 20
 Set TypingSpeed 10ms
 Set Framerate 30
-Set Shell /bin/sh
+Set Shell env -i bash --noprofile --norc
 Set WaitTimeout 5s
 Sleep 50ms
 Type "M=EVP; sleep 0.5; echo ${M}DONE"
@@ -443,7 +443,7 @@ Set Height 300
 Set FontSize 20
 Set TypingSpeed 10ms
 Set Framerate 30
-Set Shell /bin/sh
+Set Shell env -i bash --noprofile --norc
 Set WaitTimeout 5s
 Sleep 50ms
 Type "M=SCR; sleep 0.4; echo ${M}DONE"
@@ -479,7 +479,7 @@ Set Height 300
 Set FontSize 20
 Set TypingSpeed 10ms
 Set Framerate 30
-Set Shell /bin/sh
+Set Shell env -i bash --noprofile --norc
 Sleep 50ms
 Wait @600ms /__never_matches_wait_test_long__/
 Sleep 200ms
@@ -510,7 +510,7 @@ Set Height 300
 Set FontSize 20
 Set TypingSpeed 10ms
 Set Framerate 30
-Set Shell /bin/sh
+Set Shell env -i bash --noprofile --norc
 Sleep 200ms
 Hide
 Sleep 1s
@@ -558,7 +558,7 @@ Output out.gif
 Set Width 800
 Set Height 300
 Set FontSize 20
-Set Shell /bin/sh
+Set Shell env -i bash --noprofile --norc
 Sleep 200ms
 Screenshot {svg}
 Screenshot {svgz}
@@ -636,7 +636,7 @@ Set Height 300
 Set FontSize 20
 Set TypingSpeed 10ms
 Set Framerate 30
-Set Shell /bin/sh
+Set Shell env -i bash --noprofile --norc
 Sleep 50ms
 Hide
 Type "sleep 0.1; printf X; sleep 0.15; printf Y; sleep 0.15; printf Z; echo"
@@ -685,21 +685,21 @@ Output out.gif
 Set Width 800
 Set Height 300
 Set FontSize 20
-Set TypingSpeed 10ms
+Set TypingSpeed 50ms
 Set Framerate 30
-Set Shell /bin/sh
+Set Shell env -i bash --noprofile --norc
 Sleep 200ms
 Hide
 Type "echo first-hidden"
 Enter
-Sleep 500ms
+Sleep 100ms
 Show
 Hide
 Type "echo second-hidden"
 Enter
-Sleep 500ms
+Sleep 100ms
 Show
-Sleep 200ms
+Sleep 300ms
 "#;
 
     let rec = record(tape);
@@ -753,7 +753,7 @@ Set Height 300
 Set FontSize 20
 Set TypingSpeed 10ms
 Set Framerate 30
-Set Shell /bin/sh
+Set Shell env -i bash --noprofile --norc
 Hide
 Sleep 500ms
 Show
@@ -786,7 +786,7 @@ Set Width 800
 Set Height 300
 Set FontSize 20
 Set Framerate 30
-Set Shell /bin/sh
+Set Shell env -i bash --noprofile --norc
 Set WindowBar Rings
 Sleep 200ms
 Type "printf '\033]2;My Test Title\007'"

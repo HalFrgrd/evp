@@ -13,7 +13,7 @@ Set MarginFill "#6B50FF"
 Set Padding 0
 
 Env PS1 ">"
-Set Shell /bin/sh
+Set Shell env -i bash --noprofile --norc
 Sleep 1000ms
 Type `"`
 Sleep 100ms
