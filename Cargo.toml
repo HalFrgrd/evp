@@ -2,6 +2,7 @@
 members = [
     ".",
     "evp_helper_tool",
+    "xtask",
 ]
 
 [package]

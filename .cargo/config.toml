@@ -13,3 +13,6 @@ target = "x86_64-unknown-linux-musl"
 [target.x86_64-unknown-linux-musl]
 rustflags = ["-C", "target-feature=+crt-static", "-C", "link-self-contained=yes", "-C", "linker=rust-lld"]
 linker = "musl-gcc"
+
+[alias]
+xtask = "run --package xtask --"
