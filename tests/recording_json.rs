@@ -636,7 +636,7 @@ Set Height 300
 Set FontSize 20
 Set TypingSpeed 10ms
 Set Framerate 30
-Set Shell env -i bash --noprofile --norc
+Set Shell bash --norc
 Sleep 50ms
 Hide
 Type "sleep 0.1; printf X; sleep 0.15; printf Y; sleep 0.15; printf Z; echo"
