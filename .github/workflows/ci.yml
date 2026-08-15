@@ -121,9 +121,7 @@ jobs:
           merge-multiple: true
 
       - name: Generate performance stats summary
-        run: ./scripts/generate_stats_summary.py
-        env:
-          STATS_DIR: ${{ runner.temp }}/docker/examples
+        run: cargo xtask examples summary --dir "${{ runner.temp }}/docker/examples"
 
       - name: Upload examples performance stats
         uses: actions/upload-artifact@v7

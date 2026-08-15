@@ -18,6 +18,9 @@ enum Commands {
     #[command(alias = "stress-test")]
     Stress(commands::stress::StressArgs),
 
+    /// Run a tape file through both evp and VHS (Docker) and compare output metrics
+    Compare(commands::compare::CompareArgs),
+
     /// Run full local CI validation (fmt, clippy, tests, smoke test)
     Ci(commands::ci::CiArgs),
 
@@ -36,6 +39,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Stress(args) => commands::stress::run(args),
+        Commands::Compare(args) => commands::compare::run(args),
         Commands::Ci(args) => commands::ci::run(args),
         Commands::Bench(args) => commands::bench::run(args),
         Commands::Examples(args) => commands::examples::run(args),
