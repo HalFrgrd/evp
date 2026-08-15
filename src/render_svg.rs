@@ -45,7 +45,7 @@ use std::{
 use flate2::Compression;
 use flate2::write::GzEncoder;
 
-use crate::render_common::is_box_drawing;
+use crate::render_common::{is_box_drawing, is_braille};
 use anyhow::{Context, Result, anyhow};
 use crossbeam_channel::{Receiver, Sender, bounded};
 
@@ -69,6 +69,9 @@ fn generate_style_block(frames: &[RawFrame], opts: &SvgOptions) -> Result<String
         for frame in frames {
             for cell in &frame.cells {
                 for c in cell.text.chars() {
+                    if is_box_drawing(c) || is_braille(c) {
+                        continue;
+                    }
                     let (_, font) = loaded.font_set.select_for_char(cell.flags, c);
                     if font.glyph_id(c).0 == 0 {
                         return Err(anyhow::anyhow!(
@@ -95,6 +98,9 @@ fn generate_style_block(frames: &[RawFrame], opts: &SvgOptions) -> Result<String
     for frame in frames {
         for cell in &frame.cells {
             for c in cell.text.chars() {
+                if is_box_drawing(c) || is_braille(c) {
+                    continue;
+                }
                 let (idx, _) = loaded.font_set.select_for_char(cell.flags, c);
                 used_fonts.entry(idx).or_default().insert(c);
             }
@@ -1198,6 +1204,43 @@ fn get_box_drawing_path(
         '▓' => Some(format!(
             r#"<rect x="0" y="0" width="{cell_w}" height="{cell_h}" fill-opacity="0.75" stroke="none"/>"#
         )),
+
+        // Braille Patterns (U+2800..=U+28FF)
+        ch if is_braille(ch) => {
+            let mask = (ch as u32 - 0x2800) as u8;
+            if mask == 0 {
+                Some(String::new())
+            } else {
+                let cx0 = cell_w * 0.30;
+                let cx1 = cell_w * 0.70;
+                let cy0 = cell_h * 0.20;
+                let cy1 = cell_h * 0.40;
+                let cy2 = cell_h * 0.60;
+                let cy3 = cell_h * 0.80;
+                let dot_r = (cell_w * 0.12).min(cell_h * 0.07).max(1.2);
+
+                let dot_positions = [
+                    (0x01, cx0, cy0),
+                    (0x02, cx0, cy1),
+                    (0x04, cx0, cy2),
+                    (0x08, cx1, cy0),
+                    (0x10, cx1, cy1),
+                    (0x20, cx1, cy2),
+                    (0x40, cx0, cy3),
+                    (0x80, cx1, cy3),
+                ];
+
+                let mut svg = String::new();
+                for (bit, cx, cy) in dot_positions {
+                    if mask & bit != 0 {
+                        svg.push_str(&format!(
+                            r#"<circle cx="{cx:.2}" cy="{cy:.2}" r="{dot_r:.2}" stroke="none"/>"#
+                        ));
+                    }
+                }
+                Some(svg)
+            }
+        }
 
         _ => None,
     }
@@ -3019,7 +3062,11 @@ fn render_from_frames(
         let x = cfg.content_x + span.col as u32 * cell_w;
         let y = cfg.content_y + span.row as u32 * cell_h + baseline;
 
-        let is_box = span.visual.text.chars().any(is_box_drawing);
+        let is_box = span
+            .visual
+            .text
+            .chars()
+            .any(|c| is_box_drawing(c) || is_braille(c));
         let mut scale_y = 1.0;
         let mut cell_center_y_offset = 0.0;
         let mut char_center_y_offset = 0.0;

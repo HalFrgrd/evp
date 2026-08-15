@@ -54,6 +54,12 @@ pub fn is_box_drawing(c: char) -> bool {
         || (0x1CC00..=0x1CEBF).contains(&cp)
 }
 
+/// Returns `true` if the character is a Braille pattern (U+2800..=U+28FF).
+pub fn is_braille(c: char) -> bool {
+    let cp = c as u32;
+    (0x2800..=0x28FF).contains(&cp)
+}
+
 impl ViewportConfig {
     pub fn new(
         cols: u16,

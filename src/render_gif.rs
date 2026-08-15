@@ -14,7 +14,7 @@ use ab_glyph::{Font, FontArc, Glyph, GlyphId, PxScale, ScaleFont};
 use anyhow::{Context, Result, anyhow};
 
 use crate::font::{FontSet, load_font_family};
-use crate::render_common::is_box_drawing;
+use crate::render_common::{is_box_drawing, is_braille};
 use crossbeam_channel::{Receiver, Sender, bounded};
 use tracing::debug;
 
@@ -220,6 +220,9 @@ pub fn render_png_frame(frame: &RawFrame, opts: &RenderOptions, out: &Path) -> R
     if opts.no_system_fonts {
         for cell in &frame.cells {
             for ch in cell.text.chars() {
+                if is_box_drawing(ch) || is_braille(ch) {
+                    continue;
+                }
                 let (_, font) = font_set.select_for_char(cell.flags, ch);
                 if font.glyph_id(ch).0 == 0 {
                     return Err(anyhow!(
@@ -344,6 +347,9 @@ fn run_gif_stream_worker(
         if no_system_fonts {
             for cell in &frame.cells {
                 for ch in cell.text.chars() {
+                    if is_box_drawing(ch) || is_braille(ch) {
+                        continue;
+                    }
                     let (_, font) = font_set.select_for_char(cell.flags, ch);
                     if font.glyph_id(ch).0 == 0 {
                         return Err(anyhow!(
@@ -681,6 +687,25 @@ fn rasterize_raw_frame_idx(
                     let mut pen_x = x as f32;
                     let pen_y_baseline = y as i32 + baseline as i32;
                     for ch in cell.text.chars() {
+                        if is_braille(ch) {
+                            draw_braille_cell_idx(
+                                buf,
+                                prev_buf,
+                                palette,
+                                cfg.canvas_w,
+                                cfg.canvas_h,
+                                pen_x as u32,
+                                y,
+                                cell_w,
+                                cell_h,
+                                ch,
+                                fg,
+                                curr.default_bg,
+                            );
+                            pen_x += cell_w as f32;
+                            continue;
+                        }
+
                         let (font_idx, font) = font_set.select_for_char(cell.flags, ch);
                         let glyph_id: GlyphId = font.glyph_id(ch);
 
@@ -1150,6 +1175,90 @@ fn fill_circle_idx(buf: &mut [u8], w: u32, cx: u32, cy: u32, radius: u32, color_
                 let i = (y * w + x) as usize;
                 if i < buf.len() {
                     buf[i] = color_idx;
+                }
+            }
+        }
+    }
+}
+
+fn draw_braille_cell_idx(
+    buf: &mut [u8],
+    prev_buf: Option<&[u8]>,
+    palette: &[[u8; 3]; 256],
+    canvas_w: u32,
+    canvas_h: u32,
+    cell_x: u32,
+    cell_y: u32,
+    cell_w: u32,
+    cell_h: u32,
+    ch: char,
+    fg: [u8; 3],
+    default_bg: [u8; 3],
+) {
+    let mask = (ch as u32 - 0x2800) as u8;
+    if mask == 0 {
+        return;
+    }
+    let cell_w_f = cell_w as f32;
+    let cell_h_f = cell_h as f32;
+    let cx0 = cell_x as f32 + cell_w_f * 0.30;
+    let cx1 = cell_x as f32 + cell_w_f * 0.70;
+    let cy0 = cell_y as f32 + cell_h_f * 0.20;
+    let cy1 = cell_y as f32 + cell_h_f * 0.40;
+    let cy2 = cell_y as f32 + cell_h_f * 0.60;
+    let cy3 = cell_y as f32 + cell_h_f * 0.80;
+    let dot_r = (cell_w_f * 0.12).min(cell_h_f * 0.07).max(1.2);
+
+    let dot_positions = [
+        (0x01, cx0, cy0),
+        (0x02, cx0, cy1),
+        (0x04, cx0, cy2),
+        (0x08, cx1, cy0),
+        (0x10, cx1, cy1),
+        (0x20, cx1, cy2),
+        (0x40, cx0, cy3),
+        (0x80, cx1, cy3),
+    ];
+
+    for (bit, cx, cy) in dot_positions {
+        if mask & bit != 0 {
+            draw_aa_circle_idx(
+                buf, prev_buf, palette, canvas_w, canvas_h, cx, cy, dot_r, fg, default_bg,
+            );
+        }
+    }
+}
+
+fn draw_aa_circle_idx(
+    buf: &mut [u8],
+    prev_buf: Option<&[u8]>,
+    palette: &[[u8; 3]; 256],
+    w: u32,
+    h: u32,
+    cx: f32,
+    cy: f32,
+    r: f32,
+    color: [u8; 3],
+    default_bg: [u8; 3],
+) {
+    let min_x = (cx - r - 1.0).floor().max(0.0) as i32;
+    let max_x = (cx + r + 1.0).ceil().min((w - 1) as f32) as i32;
+    let min_y = (cy - r - 1.0).floor().max(0.0) as i32;
+    let max_y = (cy + r + 1.0).ceil().min((h - 1) as f32) as i32;
+
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            let dx = (x as f32 + 0.5) - cx;
+            let dy = (y as f32 + 0.5) - cy;
+            let dist_sq = dx * dx + dy * dy;
+            let outer_r = r + 0.5;
+            if dist_sq <= outer_r * outer_r {
+                let dist = dist_sq.sqrt();
+                let coverage = (outer_r - dist).clamp(0.0, 1.0);
+                if coverage > 0.0 {
+                    blend_pixel_idx(
+                        buf, prev_buf, palette, w, x as u32, y as u32, color, coverage, default_bg,
+                    );
                 }
             }
         }
