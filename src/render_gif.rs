@@ -692,13 +692,12 @@ fn rasterize_raw_frame_idx(
                         let mut glyph_scale = if is_primary {
                             scale
                         } else {
-                            let cell_ratio = cell_w as f32 / cell_h as f32;
                             let (_, font_ref) = font_set.select_for_char(0, 'M');
                             let scaled_ref = font_ref.as_scaled(scale);
                             let ref_h = scaled_ref.ascent() - scaled_ref.descent();
                             let font_scaled = font.as_scaled(scale);
                             let glyph_h = font_scaled.ascent() - font_scaled.descent();
-                            let scale_factor = (ref_h / glyph_h) * cell_ratio;
+                            let scale_factor = ref_h / glyph_h;
                             PxScale::from(scale.x * scale_factor)
                         };
 

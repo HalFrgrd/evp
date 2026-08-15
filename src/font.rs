@@ -277,6 +277,18 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn test_braille_font_selection() {
+        let loaded = super::load_font_family(None).expect("load font family");
+        for c in ['⣼', '⣽', '⣾', '⣿'] {
+            let (idx, _font) = loaded.font_set.select_for_char(0, c);
+            assert_eq!(
+                loaded.font_set.fonts[idx].family_name,
+                "Noto Sans Symbols 2"
+            );
+        }
+    }
 }
 
 /// A collection of font faces organised by style.
