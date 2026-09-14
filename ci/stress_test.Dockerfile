@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM ghcr.io/charmbracelet/vhs:v0.11.0
+FROM ghcr.io/charmbracelet/vhs:v0.12.0
 
 # Install dependencies (python3, procps for CPU affinity check if needed)
 RUN apt-get update && apt-get install -y --no-install-recommends \
